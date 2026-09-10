@@ -181,6 +181,7 @@ def build_app() -> FastAPI:
     import threading
 
     from stremiosrv.cache import run_evictor
+    from stremiosrv.external_config import apply_external_overrides
     from stremiosrv.torrent.engine import Engine
     from stremiosrv.torrent.tracker_source import TrackerSource
     from stremiosrv.torrent.trackers import parse_tracker_string
@@ -188,6 +189,7 @@ def build_app() -> FastAPI:
     from stremiosrv.transcode.profiler import detect_profile
 
     settings = Settings()
+    apply_external_overrides(settings)
     settings.transcode_profile = settings.transcode_profile or detect_profile()
     # Optional live tracker list: fetched in a daemon thread (best-effort, never blocks startup or
     # the request path). start() is a no-op when no URL is configured -> fully static/offline-safe.
