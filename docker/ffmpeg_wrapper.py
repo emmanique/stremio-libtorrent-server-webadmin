@@ -2,8 +2,8 @@
 """Fork-owned FFmpeg execution-profile wrapper.
 
 The Stremio core still decides whether a stream needs transcoding. This wrapper
-only replaces the *video encoder* when the operator selected one explicit
-execution profile. Copy remains copy; no hidden codec choice and no silent
+only replaces the *video execution pipeline* when the operator selected one
+explicit profile. Copy remains copy; no hidden codec choice and no silent
 software fallback are introduced by the wrapper.
 """
 from __future__ import annotations
@@ -20,13 +20,15 @@ CONFIG_FILE = os.getenv("STREMIOSRV_EXTERNAL_CONFIG", "/config/admin-settings.js
 VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
 
 PROFILES = {
-    "preserve": {"encoder": None, "engine": "core", "label": "Preserve Stremio decision"},
-    "vaapi-h264": {"encoder": "h264_vaapi", "engine": "vaapi", "label": "H.264 VAAPI"},
-    "vaapi-hevc": {"encoder": "hevc_vaapi", "engine": "vaapi", "label": "HEVC VAAPI"},
-    "nvenc-h264": {"encoder": "h264_nvenc", "engine": "nvenc", "label": "H.264 NVENC"},
-    "nvenc-hevc": {"encoder": "hevc_nvenc", "engine": "nvenc", "label": "HEVC NVENC"},
-    "cpu-h264": {"encoder": "libx264", "engine": "cpu", "label": "H.264 CPU"},
-    "cpu-hevc": {"encoder": "libx265", "engine": "cpu", "label": "HEVC CPU"},
+    "preserve": {"encoder": None, "engine": "core", "decode": "core", "label": "Preserve Stremio decision"},
+    "vaapi-h264": {"encoder": "h264_vaapi", "engine": "vaapi", "decode": "software", "label": "H.264 VAAPI encode only"},
+    "vaapi-hevc": {"encoder": "hevc_vaapi", "engine": "vaapi", "decode": "software", "label": "HEVC VAAPI encode only"},
+    "vaapi-full-h264": {"encoder": "h264_vaapi", "engine": "vaapi", "decode": "vaapi", "label": "H.264 VAAPI full GPU"},
+    "vaapi-full-hevc": {"encoder": "hevc_vaapi", "engine": "vaapi", "decode": "vaapi", "label": "HEVC VAAPI full GPU"},
+    "nvenc-h264": {"encoder": "h264_nvenc", "engine": "nvenc", "decode": "software", "label": "H.264 NVENC"},
+    "nvenc-hevc": {"encoder": "hevc_nvenc", "engine": "nvenc", "decode": "software", "label": "HEVC NVENC"},
+    "cpu-h264": {"encoder": "libx264", "engine": "cpu", "decode": "software", "label": "H.264 CPU"},
+    "cpu-hevc": {"encoder": "libx265", "engine": "cpu", "decode": "software", "label": "HEVC CPU"},
 }
 
 
@@ -120,17 +122,11 @@ def _existing_filter(args: list[str]) -> str | None:
     return None
 
 
-def _normalise_filter_for_software_frames(args: list[str]) -> tuple[list[str], str | None]:
-    """Remove old hardware filters and preserve only an explicit scale width.
-
-    Profiles intentionally assume nothing about decoder support. VAAPI/NVENC
-    profiles therefore use normal software-decoded frames and hardware encode.
-    """
+def _normalise_filter(args: list[str]) -> tuple[list[str], str | None]:
     old_filter = _existing_filter(args)
     width = _extract_scale(old_filter)
     result = _remove_option(args, {"-vf", "-filter:v"})
-    base = f"scale={width}:-2:flags=lanczos" if width else None
-    return result, base
+    return result, width
 
 
 def _strip_encoder_tuning(args: list[str]) -> list[str]:
@@ -148,6 +144,14 @@ def _strip_hw_decode(args: list[str]) -> list[str]:
         args,
         {"-hwaccel", "-hwaccel_device", "-hwaccel_output_format", "-vaapi_device"},
     )
+
+
+def _insert_before_output_codec_options(args: list[str], extra: list[str]) -> list[str]:
+    """Insert tuning/filter options immediately before -c:v."""
+    for index, token in enumerate(args):
+        if token in {"-c:v", "-codec:v"}:
+            return [*args[:index], *extra, *args[index:]]
+    return args
 
 
 def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]) -> tuple[list[str], str]:
@@ -175,34 +179,42 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
 
     quality = _quality(config)
     result = _strip_encoder_tuning(_strip_hw_decode(args))
-    result, software_filter = _normalise_filter_for_software_frames(result)
+    result, scale_width = _normalise_filter(result)
     result = _replace_option(result, {"-c:v", "-codec:v"}, str(target))
 
-    if profile["engine"] == "vaapi":
-        # Decode stays software by design. This avoids pretending every source
-        # codec has a working VAAPI decoder while still moving the expensive
-        # encode stage to the GPU.
+    if profile["engine"] == "vaapi" and profile["decode"] == "vaapi":
+        # Full VAAPI pipeline: decode directly to VAAPI surfaces and keep the
+        # frames on the GPU through scale/format conversion and encode.
+        result = _insert_before_input(
+            result,
+            [
+                "-hwaccel", "vaapi",
+                "-hwaccel_device", device,
+                "-hwaccel_output_format", "vaapi",
+            ],
+        )
+        vf = f"scale_vaapi=w={scale_width}:h=-2:format=nv12" if scale_width else "scale_vaapi=format=nv12"
+        result = _insert_before_output_codec_options(result, ["-vf", vf, "-qp", str(quality)])
+    elif profile["engine"] == "vaapi":
+        # Encode-only VAAPI: software decode, explicit upload to VAAPI for
+        # hardware encode. Useful when a source decoder is not supported.
         result = _insert_before_input(result, ["-vaapi_device", device])
+        software_filter = f"scale={scale_width}:-2:flags=lanczos" if scale_width else None
         vf = f"{software_filter},format=nv12,hwupload" if software_filter else "format=nv12,hwupload"
         result = _insert_before_output_codec_options(result, ["-vf", vf, "-qp", str(quality)])
     elif profile["engine"] == "nvenc":
-        if software_filter:
-            result = _insert_before_output_codec_options(result, ["-vf", software_filter])
+        if scale_width:
+            result = _insert_before_output_codec_options(result, ["-vf", f"scale={scale_width}:-2:flags=lanczos"])
         result = _insert_before_output_codec_options(result, ["-preset", "p4", "-cq", str(quality)])
     else:
-        if software_filter:
-            result = _insert_before_output_codec_options(result, ["-vf", software_filter])
+        if scale_width:
+            result = _insert_before_output_codec_options(result, ["-vf", f"scale={scale_width}:-2:flags=lanczos"])
         result = _insert_before_output_codec_options(result, ["-preset", "veryfast", "-crf", str(quality)])
 
-    return result, f"profile={profile_name}; video={current}->{target}; decode=software"
-
-
-def _insert_before_output_codec_options(args: list[str], extra: list[str]) -> list[str]:
-    """Insert tuning/filter options immediately before -c:v."""
-    for index, token in enumerate(args):
-        if token in {"-c:v", "-codec:v"}:
-            return [*args[:index], *extra, *args[index:]]
-    return args
+    return result, (
+        f"profile={profile_name}; video={current}->{target}; "
+        f"decode={profile['decode']}; engine={profile['engine']}"
+    )
 
 
 def _legacy_passthrough(args: list[str], config: dict[str, object]) -> tuple[list[str], str]:
