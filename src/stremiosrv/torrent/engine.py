@@ -6,7 +6,6 @@ playhead region arrives before the rest of the file.
 
 Targets libtorrent 2.0.x (python bindings).
 """
-
 from __future__ import annotations
 
 import logging
@@ -35,9 +34,7 @@ from stremiosrv.torrent.trackers import merge_trackers
 # (on add + on pause) — the server manages priorities/deadlines/pause explicitly. None when lt / the
 # binding lacks the flag (test envs), in which case the clear is a safe no-op.
 _TORRENT_FLAGS = getattr(lt, "torrent_flags", None) if lt is not None else None
-_AUTO_MANAGED = (
-    getattr(_TORRENT_FLAGS, "auto_managed", None) if _TORRENT_FLAGS is not None else None
-)
+_AUTO_MANAGED = getattr(_TORRENT_FLAGS, "auto_managed", None) if _TORRENT_FLAGS is not None else None
 # libtorrent's DEFAULT add flags are `auto_managed | paused` — the idiom is "add paused, let the
 # auto-manager start it". Once we drop auto_managed we must ALSO drop paused, or the torrent is
 # stranded paused forever (no auto-manager to start it → no metadata, no download).
@@ -46,7 +43,6 @@ _PAUSED = getattr(_TORRENT_FLAGS, "paused", None) if _TORRENT_FLAGS is not None 
 
 class PinSpaceError(Exception):
     """Raised when pinning a torrent would leave too little free disk for streaming."""
-
     def __init__(self, needed: int, free: int) -> None:
         super().__init__("insufficient space to pin")
         self.needed = needed
@@ -76,15 +72,8 @@ def idle_download_limit(*, this_active: bool, any_active: bool, idle_limit: int)
     return 0
 
 
-def should_stop_seeding(
-    *,
-    pinned: bool,
-    finished: bool,
-    completed_at: float | None,
-    now: float,
-    seed_on_complete: bool,
-    max_seed_minutes: int,
-) -> bool:
+def should_stop_seeding(*, pinned: bool, finished: bool, completed_at: float | None, now: float,
+                        seed_on_complete: bool, max_seed_minutes: int) -> bool:
     """Whether a torrent that has all its WANTED data should stop seeding now. `finished` = all
     priority>0 pieces present (libtorrent is_finished), NOT is_seeding (the WHOLE torrent complete):
     a TV-season pack where only some episodes were watched is finished + progress 1.0 but never a
@@ -211,16 +200,14 @@ class Handle:
                 addr = f"{p.ip[0]}:{p.ip[1]}"
             except Exception:  # noqa: BLE001
                 addr = str(getattr(p, "ip", ""))
-            wires.append(
-                {
-                    "requests": p.download_queue_length,
-                    "address": addr,
-                    "amInterested": bool(p.flags & lt.peer_info.interesting),
-                    "isSeeder": bool(p.flags & lt.peer_info.seed),
-                    "downSpeed": p.payload_down_speed,
-                    "upSpeed": p.payload_up_speed,
-                }
-            )
+            wires.append({
+                "requests": p.download_queue_length,
+                "address": addr,
+                "amInterested": bool(p.flags & lt.peer_info.interesting),
+                "isSeeder": bool(p.flags & lt.peer_info.seed),
+                "downSpeed": p.payload_down_speed,
+                "upSpeed": p.payload_up_speed,
+            })
         return wires, unchoked
 
     # --- file / piece geometry (metadata must be present) ---
@@ -378,16 +365,14 @@ class Handle:
             got = done[i] if i < len(done) else 0
             if not got and i not in self.wanted:
                 continue  # nothing of it here and nobody asked for it
-            out.append(
-                {
-                    "index": i,
-                    "name": fs.file_path(i).replace("\\", "/").rsplit("/", 1)[-1],
-                    "size": size,
-                    "downloaded": got,
-                    "progress": round(got / size, 4) if size else 0.0,
-                    "wanted": i in self.wanted,
-                }
-            )
+            out.append({
+                "index": i,
+                "name": fs.file_path(i).replace("\\", "/").rsplit("/", 1)[-1],
+                "size": size,
+                "downloaded": got,
+                "progress": round(got / size, 4) if size else 0.0,
+                "wanted": i in self.wanted,
+            })
         return out
 
     def wanted_count(self) -> int:
@@ -613,31 +598,23 @@ class Handle:
 
 
 class Engine:
-    def __init__(
-        self,
-        listen_port: int,
-        cache_root: str,
-        max_connections: int = 400,
-        download_rate_limit: int = 0,
-        upload_rate_limit: int = 0,
-        cache_size: int = 0,  # 0 = guard disabled; build_app passes settings.cache_size
-        resume_save_interval: int = 30,
-        idle_download_rate_limit: int = 0,  # cross-torrent active prioritization (0 = off)
-        seed_on_complete: bool = True,
-        max_seed_minutes: int = 0,
-        seed_policy_interval: int = 15,
-        extra_trackers: list[str] | None = None,  # operator env trackers, added to every add()
-        tracker_source=None,  # optional TrackerSource (live list); None = static only
-        adaptive_picking: bool = False,  # experimental parallel-fill when buffer is deep
-        adaptive_low_bytes: int = 0,
-        adaptive_high_bytes: int = 0,
-        adaptive_interval: float = 2.0,
-        prefetch_next: bool = False,  # next-episode prefetch (opt-in)
-        prefetch_next_fraction: float = 0.05,
-        prefetch_next_max_bytes: int = 134_217_728,
-        prefetch_trigger_fraction: float = 0.90,
-        dht_bootstrap_nodes: str = "",
-    ) -> None:
+    def __init__(self, listen_port: int, cache_root: str, max_connections: int = 400,
+                 download_rate_limit: int = 0, upload_rate_limit: int = 0,
+                 cache_size: int = 0,  # 0 = guard disabled; build_app passes settings.cache_size
+                 resume_save_interval: int = 30,
+                 idle_download_rate_limit: int = 0,  # cross-torrent active prioritization (0 = off)
+                 seed_on_complete: bool = True, max_seed_minutes: int = 0,
+                 seed_policy_interval: int = 15,
+                 extra_trackers: list[str] | None = None,  # operator env trackers, added to every add()
+                 tracker_source=None,  # optional TrackerSource (live list); None = static only
+                 adaptive_picking: bool = False,  # experimental parallel-fill when buffer is deep
+                 adaptive_low_bytes: int = 0, adaptive_high_bytes: int = 0,
+                 adaptive_interval: float = 2.0,
+                 prefetch_next: bool = False,  # next-episode prefetch (opt-in)
+                 prefetch_next_fraction: float = 0.05,
+                 prefetch_next_max_bytes: int = 134_217_728,
+                 prefetch_trigger_fraction: float = 0.90,
+                 dht_bootstrap_nodes: str = "") -> None:
         _settings = {
             # INBOUND listener (stock server lacks this) — dual-stack so IPv6 peers can reach us too;
             # a host without IPv6 just fails that bind and keeps IPv4 (libtorrent degrades gracefully).
@@ -647,7 +624,7 @@ class Engine:
             "enable_upnp": True,
             "enable_natpmp": True,
             "download_rate_limit": download_rate_limit,  # bytes/sec, 0 = unlimited
-            "upload_rate_limit": upload_rate_limit,  # bytes/sec, 0 = unlimited
+            "upload_rate_limit": upload_rate_limit,      # bytes/sec, 0 = unlimited
             # Streaming-tuned (mirrors the stock server's "ultra_fast" profile): ramp peers fast,
             # keep deep request queues, prefer TCP, suggest from read cache.
             "connections_limit": max_connections,
@@ -660,8 +637,8 @@ class Engine:
             "piece_timeout": 10,
             "aio_threads": 8,
             "send_buffer_watermark": 4194304,
-            "suggest_mode": 1,  # suggest_read_cache
-            "mixed_mode_algorithm": 0,  # prefer_tcp
+            "suggest_mode": 1,            # suggest_read_cache
+            "mixed_mode_algorithm": 0,    # prefer_tcp
             "active_downloads": -1,
             "active_limit": -1,
             "announce_to_all_trackers": True,
@@ -679,8 +656,7 @@ class Engine:
         # exist. Falls back to a plain cold start when there is no state or it is unreadable.
         self._dht_state_path = dht_state.state_path(cache_root)
         _params = dht_state.load_session_params(
-            self._dht_state_path, _settings, read_params=lt.read_session_params
-        )
+            self._dht_state_path, _settings, read_params=lt.read_session_params)
         self._ses = lt.session(_params) if _params is not None else lt.session(_settings)
         self._cache_root = cache_root
         # Extra trackers injected into every torrent: operator-supplied (env) + an optional live
@@ -758,13 +734,7 @@ class Engine:
             # recorded and then silently never applied, and the whole torrent downloaded. This
             # loop already runs twice a second, and the guard is two integer comparisons when
             # there is nothing pending.
-            # Minimal test doubles and old restored instances may not have these newer registries.
-            # Treat them as empty instead of killing the alert-pump thread during an upgrade.
-            if (
-                hasattr(self, "_wanted_applied")
-                and hasattr(self, "_wanted")
-                and len(self._wanted_applied) < len(self._wanted)
-            ):
+            if len(self._wanted_applied) < len(self._wanted):
                 try:
                     self._apply_pending_wanted()
                 except Exception:  # noqa: BLE001 — never let the alerts thread die
@@ -794,17 +764,11 @@ class Engine:
                         pass
                 elif isinstance(a, lt.portmap_alert):
                     # router auto-forwarded our BT port (UPnP / NAT-PMP)
-                    self._portmap = {
-                        "mapped": True,
-                        "transport": str(a.map_transport),
-                        "externalPort": int(a.external_port),
-                    }
+                    self._portmap = {"mapped": True, "transport": str(a.map_transport),
+                                     "externalPort": int(a.external_port)}
                 elif isinstance(a, lt.portmap_error_alert):
-                    self._portmap = {
-                        "mapped": False,
-                        "transport": str(a.map_transport),
-                        "externalPort": None,
-                    }
+                    self._portmap = {"mapped": False, "transport": str(a.map_transport),
+                                     "externalPort": None}
 
     def save_all_resume(self) -> None:
         """Ask libtorrent to persist resume data for every torrent (alerts loop writes the files)."""
@@ -825,8 +789,7 @@ class Engine:
         except Exception:  # noqa: BLE001 — an lt API change must not take the saver thread down
             return False
         return dht_state.save_session_params(
-            self._dht_state_path, params, write_buf=lt.write_session_params_buf
-        )
+            self._dht_state_path, params, write_buf=lt.write_session_params_buf)
 
     def _resume_saver_loop(self) -> None:
         """Background loop: periodically persist resume data so a crash/kill loses < interval of
@@ -897,10 +860,8 @@ class Engine:
                     wantedmod.add(self._cache_root, ih, e.get("want"))
             records = [e for e in records if not e.get("want")]
             pinsmod.save_pins(self._cache_root, records)
-            logger.info(
-                "moved %d download(s) out of the pin registry: downloading no longer pins",
-                len(migrated),
-            )
+            logger.info("moved %d download(s) out of the pin registry: downloading no longer pins",
+                        len(migrated))
         self._pinned = {(e.get("infoHash") or "").lower() for e in records if e.get("infoHash")}
         for e in records:
             ih = (e.get("infoHash") or "").lower()
@@ -959,9 +920,7 @@ class Engine:
             try:
                 self._apply_wanted(h, specs)
             except Exception as e:  # noqa: BLE001 — never let one bad pin stop the others
-                logger.warning(
-                    "could not apply file selection for %s: %s: %s", ih, type(e).__name__, e
-                )
+                logger.warning("could not apply file selection for %s: %s: %s", ih, type(e).__name__, e)
             self._wanted_applied.add(ih)
 
     def _remaining_bytes(self, h: Handle) -> int:
@@ -972,9 +931,8 @@ class Engine:
         return info_hash.lower() in self._pinned
 
     def pinned_names(self) -> set[str]:
-        return {
-            h.name() for ih, h in self._torrents.items() if ih in self._pinned and h.has_metadata()
-        }
+        return {h.name() for ih, h in self._torrents.items()
+                if ih in self._pinned and h.has_metadata()}
 
     def want(self, info_hash: str, spec: dict | None = None) -> None:
         """Fetch `spec` of this torrent. NOT a pin.
@@ -1012,11 +970,8 @@ class Engine:
         h = self.get(info_hash) or self.add(info_hash)
         # disk guard: existing incomplete pins + this candidate must still leave headroom
         free = shutil.disk_usage(self._cache_root).free
-        pinned_remaining = sum(
-            self._remaining_bytes(self._torrents[p])
-            for p in self._pinned
-            if p in self._torrents and p != ih
-        )
+        pinned_remaining = sum(self._remaining_bytes(self._torrents[p])
+                               for p in self._pinned if p in self._torrents and p != ih)
         candidate_remaining = self._remaining_bytes(h)
         if not pinsmod.pin_fits(free, pinned_remaining, candidate_remaining, self._cache_size):
             raise PinSpaceError(pinsmod.headroom(self._cache_size), free)
@@ -1032,17 +987,10 @@ class Engine:
                 self._full_priority(h)
             else:
                 h.reapply_priorities()
-        entry = {
-            "infoHash": ih,
-            "name": h.name() if h.has_metadata() else "",
-            "trackers": [],
-            "addedAt": int(time.time()),
-        }
-        existing = [
-            e
-            for e in pinsmod.load_pins(self._cache_root)
-            if (e.get("infoHash") or "").lower() != ih
-        ]
+        entry = {"infoHash": ih, "name": h.name() if h.has_metadata() else "",
+                 "trackers": [], "addedAt": int(time.time())}
+        existing = [e for e in pinsmod.load_pins(self._cache_root)
+                    if (e.get("infoHash") or "").lower() != ih]
         existing.append(entry)
         pinsmod.save_pins(self._cache_root, existing)
         self.save_all_resume()
@@ -1059,11 +1007,8 @@ class Engine:
             # A whole-title pin wanted every file through the pinned branch of _priorities; drop
             # back to whatever was actually selected, or it keeps fetching what nobody asked for.
             h.reapply_priorities()
-        remaining = [
-            e
-            for e in pinsmod.load_pins(self._cache_root)
-            if (e.get("infoHash") or "").lower() != ih
-        ]
+        remaining = [e for e in pinsmod.load_pins(self._cache_root)
+                     if (e.get("infoHash") or "").lower() != ih]
         pinsmod.save_pins(self._cache_root, remaining)
 
     def tracked_status(self) -> list[dict]:
@@ -1079,6 +1024,30 @@ class Engine:
         """Only the kept titles -- what /pins.json has always meant."""
         return self._status_for(set(self._pinned))
 
+    def live_files(self) -> dict[str, list[dict]]:
+        """Per-file facts (Handle.file_stats) for every UNTRACKED torrent the session holds, by
+        infohash.
+
+        tracked_status covers what someone asked this box to hold, with its own file facts. A
+        title playback is filling is in the session too, untracked -- and its files are the ones
+        being written right now, which makes them the files the disk cannot answer for: libtorrent
+        writes through a memory map, and on ZFS a hole lookup on such a file first flushes it and
+        waits for the pool -- up to about half a second a file while a download runs -- and can
+        still report no holes in a file that has them. The handle counts the same bytes from its
+        own piece state; with default flags that count includes blocks not yet hash-checked, so it
+        can run a moment ahead of verified pieces. A handle without metadata reports no files.
+        """
+        tracked = set(self._pinned) | set(self._wanted)
+        out: dict[str, list[dict]] = {}
+        for ih, h in list(self._torrents.items()):  # a copy: request threads add torrents
+            if ih in tracked:
+                continue  # build lists these from tracked_status
+            try:
+                out[ih] = h.file_stats()
+            except Exception:  # noqa: BLE001 — one broken handle must not hide the others
+                continue
+        return out
+
     def _status_for(self, hashes: set[str]) -> list[dict]:
         out = []
         for ih in hashes:
@@ -1088,43 +1057,41 @@ class Engine:
             st = h.status()
             down = st.all_time_download or st.total_done or 0
             up = st.all_time_upload or st.total_upload or 0
-            out.append(
-                {
-                    "infoHash": ih,
-                    "name": h.name(),
-                    # Kept, or merely being fetched. These are different facts now: a download is
-                    # ordinary cache the evictor may reclaim, a pin is not.
-                    "pinned": ih in self._pinned,
-                    # What is actually being fetched, when that is narrower than the torrent.
-                    "wantedFile": h.wanted_path(),
-                    # Every file this torrent holds something of. One card per torrent could not
-                    # account for a pack whose episodes arrived from different places.
-                    "files": h.file_stats(),
-                    # How many files it has in total. Without it, one entry in `files` is ambiguous:
-                    # a film, or a season pack with a single episode selected.
-                    "numFiles": h.num_files(),
-                    # Bytes still to arrive for what is wanted. Space that is spoken for but not yet
-                    # written, which is invisible in a `df` and in the cache total alike.
-                    "remaining": self._remaining_bytes(h),
-                    "progress": round(st.progress, 4),
-                    # is_finished, NOT is_seeding — the same distinction should_stop_seeding
-                    # documents. A pin narrowed to one file leaves the other files at priority 0, so
-                    # the torrent is NEVER a full seed: keyed off is_seeding, a download that had
-                    # completed its one wanted episode reported "downloading" for ever, sat in the
-                    # Downloading shelf, and could never read as complete.
-                    "state": "seeding" if h.is_finished() else "downloading",
-                    "downloaded": down,
-                    "uploaded": up,
-                    "ratio": round(up / down, 3) if down else 0.0,
-                    "uploadSpeed": st.upload_rate,
-                    # Progress alone does not say whether a download is actually moving. `seeds` is
-                    # the number of peers that have the whole thing -- the figure that predicts whether
-                    # it will finish -- while `peers` counts every connection including other leechers.
-                    "downloadSpeed": st.download_rate,
-                    "peers": st.num_peers,
-                    "seeds": st.num_seeds,
-                }
-            )
+            out.append({
+                "infoHash": ih,
+                "name": h.name(),
+                # Kept, or merely being fetched. These are different facts now: a download is
+                # ordinary cache the evictor may reclaim, a pin is not.
+                "pinned": ih in self._pinned,
+                # What is actually being fetched, when that is narrower than the torrent.
+                "wantedFile": h.wanted_path(),
+                # Every file this torrent holds something of. One card per torrent could not
+                # account for a pack whose episodes arrived from different places.
+                "files": h.file_stats(),
+                # How many files it has in total. Without it, one entry in `files` is ambiguous:
+                # a film, or a season pack with a single episode selected.
+                "numFiles": h.num_files(),
+                # Bytes still to arrive for what is wanted. Space that is spoken for but not yet
+                # written, which is invisible in a `df` and in the cache total alike.
+                "remaining": self._remaining_bytes(h),
+                "progress": round(st.progress, 4),
+                # is_finished, NOT is_seeding — the same distinction should_stop_seeding
+                # documents. A pin narrowed to one file leaves the other files at priority 0, so
+                # the torrent is NEVER a full seed: keyed off is_seeding, a download that had
+                # completed its one wanted episode reported "downloading" for ever, sat in the
+                # Downloading shelf, and could never read as complete.
+                "state": "seeding" if h.is_finished() else "downloading",
+                "downloaded": down,
+                "uploaded": up,
+                "ratio": round(up / down, 3) if down else 0.0,
+                "uploadSpeed": st.upload_rate,
+                # Progress alone does not say whether a download is actually moving. `seeds` is
+                # the number of peers that have the whole thing -- the figure that predicts whether
+                # it will finish -- while `peers` counts every connection including other leechers.
+                "downloadSpeed": st.download_rate,
+                "peers": st.num_peers,
+                "seeds": st.num_seeds,
+            })
         return out
 
     def add(self, magnet_or_hash: str, trackers: list[str] | None = None) -> Handle:
@@ -1184,13 +1151,10 @@ class Engine:
         handles = list(self._torrents.values())
         any_active = any(h.is_active() for h in handles)
         for h in handles:
-            h.set_download_limit(
-                idle_download_limit(
-                    this_active=h.is_active(),
-                    any_active=any_active,
-                    idle_limit=self._idle_download_rate_limit,
-                )
-            )
+            h.set_download_limit(idle_download_limit(
+                this_active=h.is_active(), any_active=any_active,
+                idle_limit=self._idle_download_rate_limit,
+            ))
 
     def note_stream_open(self, h: Handle) -> None:
         """A playback stream opened: promote its played file to active priority and re-apply the
@@ -1250,10 +1214,8 @@ class Engine:
             logger.propagate = False
         logger.info(
             "next-episode prefetch started: trigger=%.0f%%, head=%.0f%%, max_bytes=%d, interval=%ss",
-            self._prefetch_trigger * 100,
-            self._prefetch_fraction * 100,
-            self._prefetch_max_bytes,
-            PREFETCH_INTERVAL,
+            self._prefetch_trigger * 100, self._prefetch_fraction * 100,
+            self._prefetch_max_bytes, PREFETCH_INTERVAL,
         )
         warned = False  # log the first per-tick failure only, so a 5s loop can't spam on a
         # persistently-raising handle — the resilience guarantee stays, but so does a signal.
@@ -1267,9 +1229,7 @@ class Engine:
                 except Exception as exc:  # noqa: BLE001 — never let the prefetch thread die
                     if not warned:
                         warned = True
-                        logger.warning(
-                            "prefetch tick failed (further failures suppressed): %s", exc
-                        )
+                        logger.warning("prefetch tick failed (further failures suppressed): %s", exc)
 
     def _prefetch_tick(self, h: Handle) -> None:
         """One prefetch decision for one torrent.
@@ -1308,9 +1268,8 @@ class Engine:
             return
         plen = ti.piece_length()
         off, size = fs.file_offset(nxt), fs.file_size(nxt)
-        pieces = prefetch.head_pieces(
-            off, size, plen, self._prefetch_fraction, self._prefetch_max_bytes
-        )
+        pieces = prefetch.head_pieces(off, size, plen, self._prefetch_fraction,
+                                      self._prefetch_max_bytes)
         pieces += prefetch.tail_pieces(off, size, plen)
         pieces = list(dict.fromkeys(pieces))  # a small next file can make head and tail overlap
         if not pieces:
@@ -1335,13 +1294,8 @@ class Engine:
             h.resume()
         planned = len(pieces) * plen
         metrics.record_prefetch(planned)
-        logger.info(
-            "armed %s file %d: %d pieces (%.0f MiB)",
-            h.info_hash(),
-            nxt,
-            len(pieces),
-            planned / 1048576,
-        )
+        logger.info("armed %s file %d: %d pieces (%.0f MiB)",
+                    h.info_hash(), nxt, len(pieces), planned / 1048576)
 
     def _enforce_seed_policy(self) -> None:
         if self._seed_on_complete and self._max_seed_minutes <= 0:
@@ -1356,12 +1310,8 @@ class Engine:
             elif not finished:
                 h.completed_at = None
             if not h.is_paused() and should_stop_seeding(
-                pinned=h.pinned,
-                finished=finished,
-                completed_at=h.completed_at,
-                now=now,
-                seed_on_complete=self._seed_on_complete,
-                max_seed_minutes=self._max_seed_minutes,
+                pinned=h.pinned, finished=finished, completed_at=h.completed_at, now=now,
+                seed_on_complete=self._seed_on_complete, max_seed_minutes=self._max_seed_minutes,
             ):
                 h.pause()
 

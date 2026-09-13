@@ -4,15 +4,19 @@ from stremiosrv.library import state as statemod
 
 
 class FakeEngine:
-    def __init__(self, pinned=(), names=None):
+    def __init__(self, pinned=(), names=None, live=None):
         self._pinned = list(pinned)
         self._names = names or {}
+        self._live = live or {}
 
     def name_to_hash(self):
         return self._names
 
     def tracked_status(self):
         return self._pinned
+
+    def live_files(self):
+        return self._live
 
 
 def _seed_cache(tmp_path, *names):
@@ -33,6 +37,20 @@ def test_unlabelled_entry_is_still_reported(tmp_path):
     assert len(entries) == 1
     assert entries[0]["label"] is None
     assert entries[0]["size"] > 0
+
+
+def test_a_disk_file_counts_what_has_arrived_not_what_it_occupies(tmp_path, monkeypatch):
+    """A compressing filesystem stores a finished file in less space than its length: on a ZFS box
+    a complete episode read as 99.8%, and the addon would not offer it. Arrival is measured by the
+    file's holes (cache.data_bytes), never by its allocation."""
+    d = tmp_path / "Sample.Film.2020"
+    d.mkdir()
+    (d / "Sample.Film.2020.mkv").write_bytes(b"x" * 1000)
+    monkeypatch.setattr(cachemod, "_real_size", lambda st: 400)  # what compression reports
+    monkeypatch.setattr(cachemod, "data_bytes", lambda path, st: st.st_size, raising=False)
+    [f] = statemod._disk_files(str(tmp_path), "Sample.Film.2020")
+    assert f["downloaded"] == 1000
+    assert f["progress"] == 1.0
 
 
 def test_label_is_attached_by_infohash(tmp_path):
@@ -288,6 +306,9 @@ def test_a_pack_holding_several_episodes_lists_them(tmp_path):
                 ],
             }]
 
+        def live_files(self):
+            return {}
+
     d = tmp_path / "Some.Pack"
     d.mkdir()
     (d / "payload").write_bytes(b"x" * 32)
@@ -314,6 +335,9 @@ def test_a_single_file_torrent_is_not_split(tmp_path):
                      "name": "One.Film",
                      "files": [{"index": 0, "name": "One.Film.mkv", "size": 5, "downloaded": 5,
                                 "progress": 1.0, "wanted": True}]}]
+
+        def live_files(self):
+            return {}
 
     d = tmp_path / "One.Film"
     d.mkdir()
@@ -350,6 +374,9 @@ def test_boundary_spill_is_summarised_not_listed_as_episodes(tmp_path):
                          f(7, "Show.S01E08.mkv", 192_000),         # boundary spill
                      ]}]
 
+        def live_files(self):
+            return {}
+
     d = tmp_path / "Pack"
     d.mkdir()
     (d / "payload").write_bytes(b"x" * 8)
@@ -379,6 +406,9 @@ def test_a_download_just_started_is_never_called_a_scrap(tmp_path):
                           "downloaded": 900_000, "progress": 0.0002, "wanted": True},
                      ]}]
 
+        def live_files(self):
+            return {}
+
     d = tmp_path / "Pack"
     d.mkdir()
     (d / "payload").write_bytes(b"x" * 8)
@@ -403,6 +433,9 @@ def test_the_budget_reports_what_downloads_have_already_claimed(tmp_path):
                     {"infoHash": "b" * 40, "pinned": True, "progress": 1.0,
                      "state": "seeding", "name": "Two", "remaining": 0}]
 
+        def live_files(self):
+            return {}
+
     out = st.build(str(tmp_path), Eng(), budget=1)
     assert out["budget"]["committed"] == 2_500_000_000
 
@@ -416,3 +449,108 @@ def test_orphan_partfiles_are_marked_as_such(tmp_path):
     orphans = [e for e in out["entries"] if e.get("kind") == "orphan"]
     assert len(orphans) == 1
     assert orphans[0]["infoHash"] == ih
+
+
+def _film_dir(tmp_path, name="Sample.Film.2020", size=4096):
+    d = tmp_path / name
+    d.mkdir()
+    (d / f"{name}.mkv").write_bytes(b"x" * size)
+    return name
+
+
+def test_a_file_the_session_is_writing_is_counted_by_its_handle_not_the_disk(tmp_path,
+                                                                             monkeypatch):
+    """libtorrent writes a downloading file through a memory map, and on ZFS a hole lookup on
+    that file flushes it and waits for the pool -- about half a second a file, on every addon
+    request while the download runs -- and can still answer "no holes" before the file is whole.
+    The session already knows how much has arrived, so the disk must not be asked about it."""
+    name = _film_dir(tmp_path)
+    ih = "f" * 40
+
+    def walked(path, st):
+        raise AssertionError("walked the holes of a file the session is writing")
+
+    monkeypatch.setattr(cachemod, "data_bytes", walked)
+    eng = FakeEngine(names={name: ih}, live={ih: [
+        {"index": 0, "name": f"{name}.mkv", "size": 4096, "downloaded": 1024,
+         "progress": 0.25, "wanted": True}]})
+    e = state.build(str(tmp_path), eng)["entries"][0]
+    [f] = e["files"]
+    assert f["downloaded"] == 1024 and f["progress"] == 0.25
+    # only the number changed source: the listing is still the disk's
+    assert e["filesFrom"] == "disk" and f["index"] is None and f["wanted"] is False
+
+
+def test_a_file_the_session_does_not_report_is_still_measured_on_disk(tmp_path, monkeypatch):
+    """The handle lists what it holds or wants; nothing else in the directory is being written by
+    it, so the disk is cheap and right about those. A same-named file of another size is another
+    file, and must not borrow its count."""
+    name = _film_dir(tmp_path)
+    ih = "f" * 40
+    monkeypatch.setattr(cachemod, "data_bytes", lambda path, st: 777)
+    eng = FakeEngine(names={name: ih}, live={ih: [
+        {"index": 0, "name": f"{name}.mkv", "size": 9999, "downloaded": 1024,
+         "progress": 0.1, "wanted": True}]})
+    [f] = state.build(str(tmp_path), eng)["entries"][0]["files"]
+    assert f["downloaded"] == 777
+
+
+def test_a_session_file_of_the_same_size_but_another_name_lends_no_count(tmp_path, monkeypatch):
+    """The match is on name AND size: two episodes of one pack can be the same size to the byte,
+    and one must not borrow the other's count."""
+    name = _film_dir(tmp_path)
+    ih = "f" * 40
+    monkeypatch.setattr(cachemod, "data_bytes", lambda path, st: 777)
+    eng = FakeEngine(names={name: ih}, live={ih: [
+        {"index": 1, "name": "Other.Episode.mkv", "size": 4096, "downloaded": 1024,
+         "progress": 0.25, "wanted": True}]})
+    [f] = state.build(str(tmp_path), eng)["entries"][0]["files"]
+    assert f["downloaded"] == 777
+
+
+def test_a_failing_live_files_falls_back_to_the_disk(tmp_path, monkeypatch):
+    """The engine may be briefly broken; a listing measured on the disk is still worth serving,
+    and what the engine did answer -- the title's infohash and its keep flag -- still shows."""
+    class Broken(FakeEngine):
+        def live_files(self):
+            raise RuntimeError("libtorrent went away")
+
+    name = _film_dir(tmp_path)
+    ih = "f" * 40
+    monkeypatch.setattr(cachemod, "data_bytes", lambda path, st: 777)
+    eng = Broken(names={name: ih}, pinned=[{"infoHash": ih, "pinned": True, "progress": 0.5,
+                                            "state": "downloading", "name": name}])
+    e = state.build(str(tmp_path), eng)["entries"][0]
+    assert e["infoHash"] == ih and e["pinned"] is True
+    [f] = e["files"]
+    assert f["downloaded"] == 777
+
+
+def test_live_files_covers_untracked_handles_and_skips_a_broken_one():
+    """A title playback is filling is in the session, untracked, and it is the one being written.
+    Tracked torrents are left out -- build lists their files from tracked_status -- and one handle
+    failing must not hide the others. No has_metadata() call: it costs a full status(), and
+    file_stats() already answers [] for a handle without metadata."""
+    import types
+
+    from stremiosrv.torrent.engine import Engine
+
+    class H:
+        def __init__(self, files=None, broken=False):
+            self._files, self._broken = files or [], broken
+
+        def has_metadata(self):
+            raise AssertionError("has_metadata costs a full status(); file_stats needs none")
+
+        def file_stats(self):
+            if self._broken:
+                raise RuntimeError("handle went away")
+            return self._files
+
+    files = [{"index": 0, "name": "a.mkv", "size": 10, "downloaded": 4, "progress": 0.4,
+              "wanted": True}]
+    fake = types.SimpleNamespace(
+        _torrents={"a" * 40: H(files), "b" * 40: H(), "c" * 40: H(broken=True),
+                   "d" * 40: H(files), "e" * 40: H(files)},
+        _pinned={"d" * 40}, _wanted={"e" * 40})
+    assert Engine.live_files(fake) == {"a" * 40: files, "b" * 40: []}

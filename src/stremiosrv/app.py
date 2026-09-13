@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from stremiosrv import health
+from stremiosrv import health, unmatched
 from stremiosrv.api import cache as cache_api
-from stremiosrv.api import casting, handshake, hls, netcheck, pins, playback, subs
+from stremiosrv.api import casting, handshake, hls, netcheck, pins, playback, proxy, subs
 from stremiosrv.config import Settings
 from stremiosrv.library import addon as library_addon
 from stremiosrv.library import api as library_api
@@ -138,6 +138,12 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
     )
+    # Added after CORS so it wraps it: it has to see the final status of every response, including
+    # the 404 the router produces before any route runs.
+    app.add_middleware(unmatched.CountUnmatched)
+    # Outermost: a request carrying this server's own proxy marker is refused before any route
+    # runs, so /proxy can never reach this server's own routes (see api/proxy.py).
+    app.add_middleware(proxy.RefuseOwnRequests)
     app.state.settings = settings
     app.state.engine = engine
     app.state.converter = converter
@@ -145,11 +151,14 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
     app.include_router(handshake.router)
     app.include_router(pins.router)
     app.include_router(netcheck.router)
+    # Before playback: its /{info_hash}/... templates would otherwise also match /proxy/<n>.
+    app.include_router(proxy.router)
     app.include_router(playback.router)
     app.include_router(cache_api.router)
     app.include_router(hls.router)
     app.include_router(subs.router)
     app.include_router(casting.router)
+    app.include_router(unmatched.router)
     # Opt-in. Registering nothing when off means an unset flag cannot be probed for, and the
     # allowlist test's "flag off -> no route" assertion is about absence, not about a 403.
     if settings.library_ui:
@@ -181,7 +190,6 @@ def build_app() -> FastAPI:
     import threading
 
     from stremiosrv.cache import run_evictor
-    from stremiosrv.external_config import apply_external_overrides
     from stremiosrv.torrent.engine import Engine
     from stremiosrv.torrent.tracker_source import TrackerSource
     from stremiosrv.torrent.trackers import parse_tracker_string
@@ -189,7 +197,6 @@ def build_app() -> FastAPI:
     from stremiosrv.transcode.profiler import detect_profile
 
     settings = Settings()
-    apply_external_overrides(settings)
     settings.transcode_profile = settings.transcode_profile or detect_profile()
     # Optional live tracker list: fetched in a daemon thread (best-effort, never blocks startup or
     # the request path). start() is a no-op when no URL is configured -> fully static/offline-safe.

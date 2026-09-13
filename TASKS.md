@@ -6,7 +6,7 @@ yet, and why each item is still open.
 Convention: `- [ ]` open · `- [x]` done · `- [~]` in progress · `- [!]` blocked. Every entry states
 what "done" looks like, so it can be picked up without context.
 
-**Last updated:** 2026-09-04
+**Last updated:** 2026-09-11
 
 ---
 
@@ -27,6 +27,30 @@ what "done" looks like, so it can be picked up without context.
   *Done =* upstream defines the signature and the server computes the same value. Until then,
   `playback.subtitleSignatureAsks` in `/stats.json` counts how often real clients ask, which is the
   evidence for whether this is worth reverse-engineering.
+
+- [ ] **Three rarer ways of naming a torrent's file are still ignored.** 1.6.4 added
+  `/:infoHash/create` and the `-1` index, the stock client's two ways of saying "choose for me".
+  Not honoured yet: `f=` on the stream URL (an addon's `fileMustInclude`, which stremio-core appends
+  as regexes) is ignored, so the index or the guess is used instead; a file *name* in place of the
+  index (`/:infoHash/<name>`) 404s; and `POST /create` with a `.torrent` blob (a torrent file opened
+  in the app) 404s.
+  *Done =* each answers as `server.reference.js` does (18204-18245 and 18383), with the `f=`
+  regexes run under a time bound as the stock server's `safeStatelessRegex` does, since an addon
+  writes them.
+
+- [x] **`/proxy` is served (1.6.7).** stremio-video routes a stream through it whenever the addon
+  sets `behaviorHints.proxyHeaders`; without the route nginx answered with the web player's page
+  and those streams never played. A client on the home network may proxy anywhere, a client from
+  the internet only to public addresses.
+
+- [ ] **Other stock routes clients reach are still missing.** A client census (stremio-core,
+  stremio-video, stremio-web, the desktop shell) found, besides the file selectors above:
+  `POST /settings` (saving Settings → Streaming answers 405); the download link
+  `/:infoHash/:idx?external=1&download=1` (stock redirects to `/:infoHash/<file name>` and serves
+  it as an attachment); archive and usenet sources (`/{rar,zip,7zip,tar,tgz,nzb}/create`, `/ftp/`);
+  `/yt/:id` for trailers played through the server; and casting (`/casting` lists nothing).
+  *Done =* each answers as `server.reference.js` does, or is recorded here as deliberately out of
+  scope. `unmatchedRoutes` in `/stats.json` shows which of them real clients actually ask for.
 
 ## Library UI
 

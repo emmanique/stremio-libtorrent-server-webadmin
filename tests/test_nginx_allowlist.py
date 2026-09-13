@@ -1,15 +1,14 @@
 """Every API route must be reachable through nginx, or be deliberately listed as origin-only.
 
 The image serves the web player as a static SPA and proxies the streaming API to uvicorn by an
-explicit allowlist in docker/nginx-locations.inc. Anything not on that list falls through to
-`location /` -> index.html, which returns **200 with HTML** — so a route added to FastAPI and
-forgotten here does not 404. It answers, plausibly, with a web page, and the client's `resp.json()`
-throws instead.
+explicit allowlist in docker/nginx-locations.inc. Anything neither on that list nor a web-player
+file goes to /_unmatched: a 404, counted by shape in /stats.json. Until 1.6.7 it fell through to
+index.html instead and answered **200 with HTML**, so a route added to FastAPI and forgotten here
+did not fail -- it answered, plausibly, with a web page, and the client's `resp.json()` threw.
 
 That is not hypothetical: /subtitleSignature shipped through unit tests, real-uvicorn checks and a
 smoke test, and was still unreachable from the bundled player until the hermetic conformance gate
-caught `text/html` on :12470. This test turns that verdict into an assertion, so the next route
-cannot repeat it.
+caught `text/html` on :12470. The 404 makes such a miss loud; this test keeps it from shipping.
 """
 from __future__ import annotations
 
@@ -35,6 +34,12 @@ ORIGIN_ONLY = {
     "/netcheck.json": _CONFIG_WEB,
     "/active.json": _CONFIG_WEB,
     "/transcode.json": "diagnostics; no client requests it through the player origin",
+}
+
+
+# Routes nginx reaches by rewrite rather than by a location of their own.
+REWRITE_TARGETS = {
+    "/_unmatched": "the @unmatched fallback: every path that is neither proxied nor a player file",
 }
 
 
@@ -75,13 +80,13 @@ def test_every_api_route_is_proxied_or_declared_origin_only():
     matchers = _proxied_matchers()
     unreachable = [
         p for p in api
-        if p not in ORIGIN_ONLY
+        if p not in ORIGIN_ONLY and p not in REWRITE_TARGETS
         and not any(_matches(_concrete(p), mod, val) for mod, val in matchers)
     ]
     assert not unreachable, (
         "these routes are not proxied by docker/nginx-locations.inc, so on the player origin they "
-        f"return the SPA's index.html (200 text/html) instead: {unreachable}. Add a location, or "
-        "add them to ORIGIN_ONLY with a reason."
+        f"return the counted 404 instead: {unreachable}. Add a location, or add them to "
+        "ORIGIN_ONLY with a reason."
     )
 
 
@@ -96,10 +101,24 @@ def test_subtitle_signature_is_reachable_through_nginx():
     assert not _matches("/subtitleSignature", *prefix[0])
 
 
+def test_the_clients_create_call_and_guess_index_are_proxied():
+    """stremio-video POSTs /<ih>/create before streaming any addon stream that carries `sources` or
+    no fileIdx, and stremio-core builds /<ih>/-1 for the same streams. Both used to fall through to
+    the web player -- the POST as a 405, the GET as index.html -- and the stream never started."""
+    matchers = _proxied_matchers()
+    ih = "a" * 40
+    for path in (f"/{ih}/create", f"/{ih}/-1"):
+        assert any(_matches(path, mod, val) for mod, val in matchers), path
+    # ...without loosening the anchor: the web build's own 40-hex asset dir must stay static.
+    assert not any(_matches(f"/{ih}/scripts/main.js", mod, val) for mod, val in matchers)
+
+
 def test_origin_only_entries_are_real_routes():
     """A stale exclusion is worse than none: it silently blesses a path that no longer exists."""
     api = {r.path for r in create_app().routes if getattr(r, "path", "").startswith("/")}
     assert set(ORIGIN_ONLY) <= api, f"ORIGIN_ONLY names routes that do not exist: {set(ORIGIN_ONLY) - api}"
+    assert set(REWRITE_TARGETS) <= api, (
+        f"REWRITE_TARGETS names routes that do not exist: {set(REWRITE_TARGETS) - api}")
 
 
 def test_unauthenticated_routes_stay_origin_only():
@@ -150,3 +169,34 @@ def test_the_client_address_is_forwarded():
     """Without this header every proxied request arrives as nginx's own loopback address, and the
     addon's LAN check would inspect the proxy instead of the client."""
     assert "proxy_set_header X-Forwarded-For" in _INC.read_text(encoding="utf-8")
+
+
+def _location_block(name: str) -> str:
+    """The body of `location <name> { ... }` in the include (it has no nested braces)."""
+    text = _INC.read_text(encoding="utf-8")
+    m = re.search(r"^location " + re.escape(name) + r" \{(.*?)\}", text, re.M | re.S)
+    assert m, f"no `location {name}` block in the include"
+    return m.group(1)
+
+
+def test_unmatched_paths_get_a_counted_404_not_the_web_player():
+    """Every path that is neither proxied nor a web-player file must reach /_unmatched (404, counted
+    in /stats.json), never index.html -- the fallback that hid a missing route for months."""
+    fallback = _location_block("/")
+    assert "/index.html" not in fallback
+    assert "@unmatched" in fallback
+    named = _location_block("@unmatched")
+    assert "rewrite ^ /_unmatched? break;" in named
+    assert "proxy_pass http://127.0.0.1:11470;" in named
+    assert "X-Original-Method $request_method" in named
+    assert "X-Original-URI $request_uri" in named
+    assert 'proxy_set_header X-Forwarded-For "";' in named
+
+
+def test_the_proxy_route_reaches_the_app_with_its_raw_path():
+    """stremio-video's /proxy URLs carry the destination percent-encoded in the path. A prefix
+    location with a bare proxy_pass (no URI part) forwards the request URI as the client sent it."""
+    assert ("^~", "/proxy/") in _proxied_matchers()
+    line = next(ln for ln in _INC.read_text(encoding="utf-8").splitlines()
+                if ln.lstrip().startswith("location ^~ /proxy/"))
+    assert line.rstrip().endswith("{ proxy_pass http://127.0.0.1:11470; }")

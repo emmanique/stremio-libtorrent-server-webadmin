@@ -4,7 +4,9 @@ Authoritative route surface that an unmodified Stremio client (TV apps, web play
 "streaming server". **Extracted directly from the reference bundle** `server.js` **v4.21.1**
 (`docs/server-url.txt` → `https://dl.strem.io/server/v4.21.1/desktop/server.js`) via the route
 registrations (`.get/.post/.use("/…")`). Line numbers are offsets in that minified bundle for
-follow-up handler reading.
+follow-up handler reading. **The first pass missed every route registered with `.all`** — twelve,
+among them `/:infoHash/create` (issue #3), `/create`, `/proxy/:opts/:pathname` and each archive
+family's `/create` — so check `.all` too when re-reading the bundle.
 
 > Status legend per endpoint:
 > - **route ✓** = registration confirmed in server.js (this pass).
@@ -19,7 +21,8 @@ This document fixes **method + path** (done); **shape** is filled from captured 
 
 | Method | Path | server.js | Purpose | Notes |
 |---|---|---|---|---|
-| GET | `/:infoHash/:idx` and `/:infoHash/:idx/*` | 18420 | **Byte-range file stream** (direct play) | MUST honor HTTP Range (206, Content-Range, Accept-Ranges) + HEAD. Lazily creates the engine on first request. |
+| GET | `/:infoHash/:idx` and `/:infoHash/:idx/*` | 18420 | **Byte-range file stream** (direct play) | MUST honor HTTP Range (206, Content-Range, Accept-Ranges) + HEAD. Lazily creates the engine on first request. `idx` **-1** = choose the file (GuessFileIdx: the largest media file) — stremio-core writes it for a stream with no `fileIdx`. `tr=` values arrive in peer-search form (`tracker:<url>`, `dht:<ih>`). |
+| ALL | `/:infoHash/create` | 18356 | **Start a torrent, choose its file** | stremio-video calls it before streaming whenever a stream carries `sources` or no `fileIdx`; a non-2xx answer is fatal to playback. Body: `torrent.infoHash`, `peerSearch.sources`, `guessFileIdx` (`{}` / `{season, episode}` = choose, `false` = the client has an index). Answer: the stats object once metadata is in, plus `guessedFileIdx` when asked. stremio-core also calls it, with no guess, for a magnet opened in the app. |
 | GET | `/:infoHash/stats.json` | 18344 | per-torrent stats | downloaded/speed/peers/… (shape ⏳) |
 | GET | `/:infoHash/:idx/stats.json` | 18346 | per-file stats | (shape ⏳) |
 | GET | `/stats.json` | 18348 | global stats | `{}` when idle |
@@ -27,8 +30,10 @@ This document fixes **method + path** (done); **shape** is filled from captured 
 | GET | `/removeAll` | 18417 | drop all engines | |
 | GET | `/favicon.ico` | 18342 | — | trivial |
 
-> Note: torrent engines are created **lazily** by requesting `/:infoHash/:idx` (no mandatory POST
-> create for torrents). `POST /create/:createKey` (96033) + `/stream/:key/:fileName` (96043/96053)
+> Note: torrent engines are created **lazily** by requesting `/:infoHash/:idx` — but the player
+> calls `/:infoHash/create` first for any stream that carries `sources` or lacks a `fileIdx` (see
+> the table). This map used to say torrents had no create call, and every such stream failed to
+> start until 1.6.4. `POST /create/:createKey` (96033) + `/stream/:key/:fileName` (96043/96053)
 > are a **separate** local-file/url streaming flow, not the torrent path.
 
 ## 2. Transcode / HLS (hlsv2 sub-router — hardest parity surface)
@@ -67,8 +72,28 @@ Query params observed on hlsv2 requests (from live logs): `mediaURL`, `videoCode
 | GET | `/status` | 75852 | status |
 | GET | `/heartbeat` | 46790 | keepalive |
 | use | `/casting/` | 46691 | casting sub-router (SSDP/DLNA) |
-| use | `/proxy` | 46837 | **proxy external streams** (non-torrent / debrid HTTP) |
+| ALL | `/proxy/:opts/:pathname` | 71022 | **proxy an addon's HTTP stream with the headers it needs** — served since 1.6.7 (GET/HEAD); see the note below |
 | use | `/local-addon` | 46798 | local addon sub-router |
+
+> `/proxy` (served since 1.6.7): `<opts>` is a query string read from the raw path — `d` the
+> destination origin, `h` a request header `Name:value` (repeatable), `r` a response header
+> (repeatable). stremio-video builds it for any stream whose addon sets
+> `behaviorHints.proxyHeaders`; stremio-core builds it for external players. Redirects are
+> followed as stock does (Location against the origin, `h` re-applied, the fifth is an error) and
+> `.m3u`/`.m3u8` playlists are rewritten to come back through the proxy. Our additions, because
+> this server may face the internet and serves the web player on the same origin: a client on the
+> home network (`STREMIOSRV_LIBRARY_ADDON_ALLOW`, by default the private ranges) may proxy anywhere
+> but to link-local addresses and two cloud-metadata addresses outside them (`100.100.100.200`,
+> `fd00:ec2::254`), any other client -- or a web page on another site -- only to public addresses.
+> A page is this server's own, not another site, when it is the Stremio web app, or when its host,
+> at any port, is the host the request went to, the host `SERVER_URL` names, or an address on the
+> home network. Every answer carries `Content-Security-Policy: sandbox`, and `r` may not set
+> cookies, that policy, Clear-Site-Data, Refresh or Location; a request carrying this server's own
+> proxy marker is refused on every route, so the proxy cannot reach this server itself; at most 16
+> proxied requests run at once, of which internet clients may hold 12 (503 beyond, counted in
+> `/stats.json` `proxyRefused`); the upstream has 30 s to connect and answer, redirects included,
+> and to deliver a playlist (504 beyond); and a playlist is read, decompressed and rewritten
+> within fixed sizes.
 
 ## 4. Subtitles
 
@@ -166,9 +191,8 @@ The shapes this section once listed as outstanding (`/settings`, `/network-info`
 the Range response headers of `/:hash/:idx`) were captured and are recorded below. They became the
 conformance fixtures, which now live in the `stremio-loop` repo and gate every release.
 
-What is genuinely still unmapped is narrower: the `/proxy` route for non-torrent/debrid streams
-(§3), and the built-in addon / archive / cast families (§5–§7), which are listed above as
-confirm-need-then-likely-skip rather than as work in progress.
+What is genuinely still unmapped is narrower: the built-in addon / archive / cast families
+(§5–§7), which are listed above as confirm-need-then-likely-skip rather than as work in progress.
 
 ---
 
