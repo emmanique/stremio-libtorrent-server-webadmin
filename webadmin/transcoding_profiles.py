@@ -1,11 +1,12 @@
-"""Simple, verified transcoding profiles for WebAdmin.
+"""Simple, runtime-verified transcoding profiles for WebAdmin.
 
-Profiles are offered only after a one-frame encoder self-test in the running
-streaming-server container. This avoids presenting a compiled FFmpeg encoder as
-usable hardware when the device/driver cannot actually initialise it.
+Profiles are offered only after real FFmpeg tests in the running streaming
+server container. Compiled encoder names are never treated as proof that a GPU
+pipeline is usable.
 """
 from __future__ import annotations
 
+import shlex
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,50 +27,73 @@ PROFILE_META = {
         "label": "Preserve Stremio decision",
         "encoder": None,
         "engine": "core",
+        "decode": "core",
         "codec": "unchanged",
         "description": "No encoder override. Stremio keeps full control.",
     },
     "vaapi-h264": {
-        "label": "H.264 VAAPI",
+        "label": "H.264 VAAPI — GPU encode only",
         "encoder": "h264_vaapi",
         "engine": "vaapi",
+        "decode": "software",
         "codec": "H.264",
-        "description": "Keep Direct Stream; use Intel/VAAPI H.264 only when Stremio requests video transcoding.",
+        "description": "Software decode, Intel/DRM VAAPI H.264 encode. Direct Stream remains direct.",
     },
     "vaapi-hevc": {
-        "label": "HEVC VAAPI",
+        "label": "HEVC VAAPI — GPU encode only",
         "encoder": "hevc_vaapi",
         "engine": "vaapi",
+        "decode": "software",
         "codec": "HEVC",
-        "description": "Keep Direct Stream; use Intel/VAAPI HEVC only when Stremio requests video transcoding.",
+        "description": "Software decode, Intel/DRM VAAPI HEVC encode. Direct Stream remains direct.",
+    },
+    "vaapi-full-h264": {
+        "label": "H.264 VAAPI — Full GPU",
+        "encoder": "h264_vaapi",
+        "engine": "vaapi",
+        "decode": "vaapi",
+        "codec": "H.264",
+        "description": "VAAPI hardware decode and H.264 hardware encode; frames remain on the GPU.",
+    },
+    "vaapi-full-hevc": {
+        "label": "HEVC VAAPI — Full GPU",
+        "encoder": "hevc_vaapi",
+        "engine": "vaapi",
+        "decode": "vaapi",
+        "codec": "HEVC",
+        "description": "VAAPI hardware decode and HEVC hardware encode; frames remain on the GPU.",
     },
     "nvenc-h264": {
         "label": "H.264 NVIDIA NVENC",
         "encoder": "h264_nvenc",
         "engine": "nvenc",
+        "decode": "software",
         "codec": "H.264",
-        "description": "Keep Direct Stream; use NVIDIA NVENC H.264 only when Stremio requests video transcoding.",
+        "description": "Software decode, NVIDIA NVENC H.264 encode. Selectable only after the real encoder test passes.",
     },
     "nvenc-hevc": {
         "label": "HEVC NVIDIA NVENC",
         "encoder": "hevc_nvenc",
         "engine": "nvenc",
+        "decode": "software",
         "codec": "HEVC",
-        "description": "Keep Direct Stream; use NVIDIA NVENC HEVC only when Stremio requests video transcoding.",
+        "description": "Software decode, NVIDIA NVENC HEVC encode. Selectable only after the real encoder test passes.",
     },
     "cpu-h264": {
         "label": "H.264 CPU (libx264)",
         "encoder": "libx264",
         "engine": "cpu",
+        "decode": "software",
         "codec": "H.264",
-        "description": "Keep Direct Stream; use libx264 only when Stremio requests video transcoding.",
+        "description": "Software decode and libx264 encode.",
     },
     "cpu-hevc": {
         "label": "HEVC CPU (libx265)",
         "encoder": "libx265",
         "engine": "cpu",
+        "decode": "software",
         "codec": "HEVC",
-        "description": "Keep Direct Stream; use libx265 only when Stremio requests video transcoding.",
+        "description": "Software decode and libx265 encode.",
     },
 }
 
@@ -98,17 +122,59 @@ def _selected() -> tuple[str, int]:
     return profile, quality
 
 
+def _result(profile_id: str, available: bool, reason: str, verified: bool = True) -> dict[str, object]:
+    return {
+        **PROFILE_META[profile_id],
+        "id": profile_id,
+        "available": available,
+        "verified": verified,
+        "reason": reason,
+    }
+
+
+def _last_error(result) -> str:
+    if result is None or not result.output:
+        return "runtime self-test failed"
+    raw = result.output.decode("utf-8", errors="replace").strip()
+    return raw.splitlines()[-1][:220] if raw else "runtime self-test failed"
+
+
+def _test_full_vaapi(container, profile_id: str, device: str, binary: str) -> dict[str, object]:
+    """Verify both H.264 and HEVC VAAPI decode followed by the selected VAAPI encoder."""
+    encoder = str(PROFILE_META[profile_id]["encoder"])
+    b = shlex.quote(binary)
+    d = shlex.quote(device)
+    e = shlex.quote(encoder)
+    script = f"""
+set -eu
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+{b} -hide_banner -loglevel error -f lavfi -i testsrc2=size=128x72:rate=24 -frames:v 3 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "$work/h264.mp4"
+{b} -hide_banner -loglevel error -f lavfi -i testsrc2=size=128x72:rate=24 -frames:v 3 -c:v libx265 -preset ultrafast -pix_fmt yuv420p "$work/hevc.mp4"
+for input in "$work/h264.mp4" "$work/hevc.mp4"; do
+  {b} -hide_banner -loglevel error -hwaccel vaapi -hwaccel_device {d} -hwaccel_output_format vaapi -i "$input" -frames:v 1 -vf scale_vaapi=format=nv12 -c:v {e} -f null -
+done
+"""
+    result = _exec(container, ["sh", "-lc", script])
+    ok = bool(result is not None and result.exit_code == 0)
+    if ok:
+        return _result(profile_id, True, "Full GPU test passed: H.264 decode + HEVC decode + VAAPI encode.")
+    return _result(profile_id, False, _last_error(result))
+
+
 def _test_profile(container, profile_id: str, device: str, binary: str | None) -> dict[str, object]:
     meta = PROFILE_META[profile_id]
     if profile_id == "preserve":
-        return {**meta, "id": profile_id, "available": True, "verified": True, "reason": "No encoder required."}
+        return _result(profile_id, True, "No encoder required.")
     if not binary:
-        return {**meta, "id": profile_id, "available": False, "verified": False, "reason": "FFmpeg binary not available."}
+        return _result(profile_id, False, "FFmpeg binary not available.", verified=False)
 
     encoder = str(meta["encoder"])
     if meta["engine"] == "vaapi":
         if not base._exists(container, device):
-            return {**meta, "id": profile_id, "available": False, "verified": True, "reason": f"{device} is not mounted."}
+            return _result(profile_id, False, f"{device} is not mounted.")
+        if meta["decode"] == "vaapi":
+            return _test_full_vaapi(container, profile_id, device, binary)
         argv = [
             binary, "-hide_banner", "-loglevel", "error",
             "-vaapi_device", device,
@@ -126,11 +192,10 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
     result = _exec(container, argv)
     ok = bool(result is not None and result.exit_code == 0)
     if ok:
-        reason = "One-frame encoder self-test passed."
+        reason = "One-frame encoder runtime self-test passed."
     else:
-        raw = result.output.decode("utf-8", errors="replace").strip() if result is not None and result.output else "encoder self-test failed"
-        reason = raw.splitlines()[-1][:180] if raw else "encoder self-test failed"
-    return {**meta, "id": profile_id, "available": ok, "verified": True, "reason": reason}
+        reason = _last_error(result)
+    return _result(profile_id, ok, reason)
 
 
 def _profiles(force: bool = False) -> dict[str, object]:
@@ -151,7 +216,10 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "device": device,
         "ffmpeg": binary,
         "profiles": items,
-        "rule": "Direct Stream remains Direct Stream. The selected profile is used only when Stremio already requires video transcoding. No silent encoder fallback.",
+        "rule": (
+            "Direct Stream remains Direct Stream. Choose an explicit tested pipeline. "
+            "'GPU encode only' leaves decode on CPU; 'Full GPU' is offered only when both H.264 and HEVC hardware decode plus hardware encode pass the runtime test. No silent fallback."
+        ),
     }
     PROFILE_CACHE["at"] = now
     PROFILE_CACHE["value"] = dict(value)
@@ -195,10 +263,11 @@ def _profile_summary(profile: str, quality: int) -> str:
         return "Legacy transcoding fields are present. Choose one explicit verified profile in All Configuration."
     meta = PROFILE_META[profile]
     if profile == "preserve":
-        return "PRESERVE: Stremio controls copy and transcoding; this policy does not replace the video encoder."
+        return "PRESERVE: Stremio controls copy and transcoding; this policy does not replace the video pipeline."
+    decode = "VAAPI hardware" if meta["decode"] == "vaapi" else "software/CPU"
     return (
         f"{meta['label']}: Direct Stream stays direct. When Stremio requires video transcoding, "
-        f"the encoder is explicitly {meta['encoder']} at quality {quality}. Decoder remains software. "
+        f"decode is {decode} and encode is explicitly {meta['encoder']} at quality {quality}. "
         "No silent fallback to another encoder."
     )
 
@@ -210,12 +279,22 @@ def transcoding_status():
     selected, quality = _selected()
     data["executionProfile"] = {"id": selected, "quality": quality}
     data["policySummary"] = _profile_summary(selected, quality)
+
+    cached_profiles = PROFILE_CACHE.get("value")
+    if isinstance(cached_profiles, dict):
+        data["verifiedProfiles"] = cached_profiles.get("profiles", [])
+        data["profilesCheckedAt"] = cached_profiles.get("checkedAt")
+    else:
+        data["verifiedProfiles"] = []
+        data["profilesCheckedAt"] = None
+
     policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
     if selected in PROFILE_META:
         meta = PROFILE_META[selected]
         policy["transcoding_mode"] = meta["codec"] if selected != "preserve" else "preserve"
         policy["transcoding_hwaccel"] = meta["engine"]
         policy["transcoding_video_codec"] = meta["encoder"] or "core"
+        policy["transcoding_decode"] = meta["decode"]
         data["policy"] = policy
         if meta["engine"] in {"vaapi", "nvenc"}:
             active = data.get("active") if isinstance(data.get("active"), dict) else {}
