@@ -38,6 +38,7 @@ jobs:
           test -f webadmin/transcoding_config.py
           test -f webadmin/transcoding_runtime_fix.py
           test -f webadmin/transcoding_profiles.py
+          test -f webadmin/transcoding_verified_status.py
           test -f webadmin/static/component-versions.js
           test -f webadmin/static/transcoding-dashboard.js
           test -f webadmin/static/transcoding-runtime-fix.js
@@ -56,12 +57,14 @@ jobs:
           grep -q 'SERVER_VERSION' Dockerfile
           grep -q 'FORK_VERSION' Dockerfile
           grep -q 'ffmpeg_wrapper.py' Dockerfile
-          grep -q 'transcoding_profiles:app' webadmin/Dockerfile
+          grep -q 'transcoding_verified_status:app' webadmin/Dockerfile
           grep -q '/api/transcoding/status' webadmin/transcoding_config.py
           grep -q 'import transcoding_config as base' webadmin/transcoding_runtime_fix.py
           grep -q 'import transcoding_runtime_fix as base' webadmin/transcoding_profiles.py
+          grep -q 'import transcoding_profiles as base' webadmin/transcoding_verified_status.py
           grep -q '/api/transcoding/profiles' webadmin/transcoding_profiles.py
-          grep -q 'one-frame encoder self-test' webadmin/transcoding_profiles.py
+          grep -q 'Full GPU' webadmin/transcoding_profiles.py
+          grep -q 'runtime-profile-self-test' webadmin/transcoding_verified_status.py
           grep -q 'Only runtime-verified encoders' webadmin/static/transcoding-simple-config.js
           grep -q 'WEBADMIN_VERSION' webadmin/Dockerfile
 
@@ -114,6 +117,7 @@ jobs:
           grep -q 'WEBADMIN_VERSION_URL' webadmin/version_lifecycle.py
           grep -q '/api/component-versions' webadmin/version_lifecycle.py
           grep -q 'guarded_server_update_worker' webadmin/version_lifecycle.py
+          grep -q 'guarded_update' webadmin/version_lifecycle.py
           grep -q '_replace_route("/api/update")' webadmin/version_lifecycle.py
           grep -q 'docker compose up -d --build --no-deps webadmin' webadmin/version_lifecycle.py
 
@@ -147,16 +151,26 @@ jobs:
           spec = importlib.util.spec_from_file_location('ffmpeg_wrapper', 'docker/ffmpeg_wrapper.py')
           mod = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
-          mod._available_encoders = lambda: {'hevc_vaapi', 'libx265'}
+          mod._available_encoders = lambda: {'h264_vaapi', 'hevc_vaapi', 'libx264', 'libx265'}
           mod.os.path.exists = lambda path: True
+
           args = ['-i', 'input', '-c:v', 'libx265', '-preset', 'veryfast', '-f', 'hls', 'out.m3u8']
           out, decision = mod._apply_profile(args, 'vaapi-hevc', {'transcoding_video_quality': 22})
           assert 'hevc_vaapi' in out, (out, decision)
           assert 'libx265' not in out, (out, decision)
           assert '-vaapi_device' in out, (out, decision)
           assert any('hwupload' in value for value in out), (out, decision)
+
+          full_out, full_decision = mod._apply_profile(args, 'vaapi-full-h264', {'transcoding_video_quality': 21})
+          assert 'h264_vaapi' in full_out, (full_out, full_decision)
+          assert 'libx265' not in full_out, (full_out, full_decision)
+          assert '-hwaccel' in full_out and 'vaapi' in full_out, (full_out, full_decision)
+          assert '-hwaccel_output_format' in full_out, (full_out, full_decision)
+          assert any('scale_vaapi' in value for value in full_out), (full_out, full_decision)
+          assert 'decode=vaapi' in full_decision, full_decision
+
           copy_args = ['-i', 'input', '-c:v', 'copy', '-f', 'hls', 'out.m3u8']
-          copy_out, copy_decision = mod._apply_profile(copy_args, 'vaapi-hevc', {})
+          copy_out, copy_decision = mod._apply_profile(copy_args, 'vaapi-full-h264', {})
           assert copy_out == copy_args, (copy_out, copy_decision)
           PY
 
