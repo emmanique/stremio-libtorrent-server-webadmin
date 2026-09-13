@@ -1,7 +1,9 @@
 name: stremio-platform
 services:
   stremio-libtorrent-server:
-    build: .
+    build:
+      context: .
+    pull_policy: build
     image: stremio-libtorrent-server-webadmin:local
     container_name: stremio-libtorrent-server
     restart: unless-stopped
@@ -32,7 +34,9 @@ services:
       retries: 3
 
   webadmin:
-    build: ./webadmin
+    build:
+      context: ./webadmin
+    pull_policy: build
     image: stremio-webadmin:separated-v2
     container_name: stremio-webadmin
     restart: unless-stopped
@@ -43,6 +47,7 @@ services:
       STREMIO_CONTAINER: stremio-libtorrent-server
       STREMIO_IMAGE: stremio-libtorrent-server-webadmin:local
       STREMIO_SOURCE_REPO: https://github.com/emmanique/stremio-libtorrent-server-webadmin
+      STREMIO_SOURCE_BRANCH: main
       IPADDRESS: "${IPADDRESS:-localhost}"
       WEB_PLAYER_URL: "http://${IPADDRESS:-localhost}:8080"
       SERVER_URL: "http://${IPADDRESS:-localhost}:11470"
@@ -52,7 +57,6 @@ services:
       - webadmin-data:/data
       - stremio-config:/config
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./src/stremiosrv/external_config.py:/overlay/external_config.py:ro
     networks: [stremio-internal]
     depends_on:
       stremio-libtorrent-server:
