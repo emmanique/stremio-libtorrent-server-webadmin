@@ -1,9 +1,9 @@
-"""WebAdmin addon discovery and connection-link integration.
+"""WebAdmin addon discovery, management and update integration.
 
-This layer keeps addon discovery on the administration side. It reads the
-Library addon token from the running Stremio container, validates the manifest
-through the internal Docker network, and builds the install URL from the same
-trusted HTTPS origin used by How to Connect.
+The Library addon ships inside the Stremio server runtime rather than as an independent package.
+WebAdmin therefore exposes its install URL and management page, and maps "Update addon" to the
+existing guarded server updater. This keeps versioning truthful: updating the addon means updating
+the verified server release that contains it.
 """
 from __future__ import annotations
 
@@ -18,10 +18,38 @@ STATIC = Path(__file__).with_name("static")
 SCRIPT_TAG = '<script src="/addon-connect.js"></script>'
 
 
-def _library_addon() -> dict[str, object]:
+def _server_update_state() -> dict[str, object]:
+    """Version/update state of the runtime that owns the Library addon."""
+    try:
+        versions = lifecycle.component_versions()
+        server = versions.get("server") if isinstance(versions, dict) else {}
+        server = server if isinstance(server, dict) else {}
+        return {
+            "mode": "server-runtime",
+            "installed": server.get("installed"),
+            "available": server.get("available"),
+            "updateAvailable": server.get("updateAvailable"),
+            "running": bool(server.get("updateInProgress")),
+            "endpoint": "/api/addons/library/update",
+            "message": "The Library addon is bundled with the Stremio server runtime.",
+        }
+    except Exception:
+        return {
+            "mode": "server-runtime",
+            "installed": None,
+            "available": None,
+            "updateAvailable": None,
+            "running": False,
+            "endpoint": "/api/addons/library/update",
+            "message": "Could not verify the server release that contains this addon.",
+        }
+
+
+def _library_addon(update_state: dict[str, object] | None = None) -> dict[str, object]:
     urls = lifecycle._connection_urls()
     trusted = bool(urls.get("trustedHttps"))
     ip = str(urls.get("ip") or "localhost")
+    update_state = update_state or _server_update_state()
 
     try:
         container = lifecycle.legacy.client().containers.get(lifecycle.legacy.CONTAINER)
@@ -47,7 +75,10 @@ def _library_addon() -> dict[str, object]:
             "ready": False,
             "manifestUrl": "",
             "libraryUrl": "",
+            "managementUrl": "",
             "resources": [],
+            "deleteSupported": True,
+            "update": update_state,
             "status": f"Unavailable: {type(exc).__name__}",
         }
 
@@ -75,6 +106,7 @@ def _library_addon() -> dict[str, object]:
         if not enabled
         else "Addon found, but trusted HTTPS is not available"
     )
+    library_url = f"{origin}/library/" if enabled else ""
 
     return {
         "id": "library",
@@ -88,9 +120,12 @@ def _library_addon() -> dict[str, object]:
         "enabled": enabled,
         "ready": ready,
         "manifestUrl": f"{origin}/library/addon/{token}/manifest.json" if enabled else "",
-        "libraryUrl": f"{origin}/library/" if enabled else "",
+        "libraryUrl": library_url,
+        "managementUrl": library_url,
         "resources": resources,
         "trustedHttps": trusted,
+        "deleteSupported": True,
+        "update": update_state,
         "status": status,
     }
 
@@ -98,10 +133,20 @@ def _library_addon() -> dict[str, object]:
 def addons():
     """Addons currently provided by this server.
 
-    The response shape is intentionally a list so future server addons can be
-    added without changing the WebAdmin UI contract.
+    The response shape is intentionally a list so future server addons can be added without
+    changing the WebAdmin UI contract.
     """
-    return {"addons": [_library_addon()]}
+    update_state = _server_update_state()
+    return {"addons": [_library_addon(update_state)]}
+
+
+def update_library_addon():
+    """Update the verified server runtime that contains the Library addon."""
+    result = lifecycle.guarded_update()
+    if isinstance(result, dict):
+        result["addonId"] = "library"
+        result["updateMode"] = "server-runtime"
+    return result
 
 
 def addon_script():
@@ -120,7 +165,7 @@ def _current_home(app):
 
 
 def install(app) -> None:
-    """Install the addon API and inject the How to Connect UI into the final WebAdmin stack."""
+    """Install addon API and inject the How to Connect UI into the final WebAdmin stack."""
     original_home = _current_home(app)
 
     def home_with_addons():
@@ -138,8 +183,10 @@ def install(app) -> None:
     app.router.routes = [
         route
         for route in app.router.routes
-        if getattr(route, "path", None) not in {"/", "/api/addons", "/addon-connect.js"}
+        if getattr(route, "path", None)
+        not in {"/", "/api/addons", "/api/addons/library/update", "/addon-connect.js"}
     ]
     app.add_api_route("/", home_with_addons, methods=["GET"])
     app.add_api_route("/api/addons", addons, methods=["GET"])
+    app.add_api_route("/api/addons/library/update", update_library_addon, methods=["POST"], status_code=202)
     app.add_api_route("/addon-connect.js", addon_script, methods=["GET"])
