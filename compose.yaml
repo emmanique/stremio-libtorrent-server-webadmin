@@ -13,8 +13,18 @@ services:
       STREMIOSRV_CACHE_ROOT: /root/.stremio-server
       STREMIOSRV_EXTERNAL_CONFIG: /config/admin-settings.json
       CERT_FILE: "${CERT_FILE:-certificates.pem}"
+      STREMIOSRV_CERT_FILE: "${CERT_FILE:-certificates.pem}"
       IPADDRESS: "${IPADDRESS:-}"
       SERVER_URL: "${SERVER_URL:-}"
+
+      # Cache / Library addon. The routes only exist when this is enabled. The addon exposes
+      # content already present on the server as a Stremio catalog and local stream source.
+      # Access remains protected by the per-install token plus the private-network/CIDR guard.
+      STREMIOSRV_LIBRARY_UI: "${STREMIOSRV_LIBRARY_UI:-true}"
+      STREMIOSRV_LIBRARY_ALLOW_HTTP: "${STREMIOSRV_LIBRARY_ALLOW_HTTP:-false}"
+      STREMIOSRV_LIBRARY_OWNER: "${STREMIOSRV_LIBRARY_OWNER:-}"
+      STREMIOSRV_LIBRARY_ADDON_ALLOW: "${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}"
+
       # Fork-owned FFmpeg policy. Values saved in WebAdmin take precedence over
       # these environment defaults after they are persisted to admin-settings.json.
       TRANSCODING_MODE: "${TRANSCODING_MODE:-auto}"
