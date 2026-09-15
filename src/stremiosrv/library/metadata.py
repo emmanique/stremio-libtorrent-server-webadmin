@@ -54,8 +54,12 @@ def release_hint(name: str) -> dict | None:
     for match in (episode, season_only, _TECH_RE.search(raw)):
         if match:
             cut_positions.append(match.start())
-    if year_match and type_ == "movie":
-        cut_positions.append(year_match.start())
+    if year_match:
+        before_year = re.sub(r"[.\-_]+", " ", raw[: year_match.start()]).strip()
+        # A leading numeric title such as "1923.S02E01" must keep its title. Otherwise release
+        # years are excellent suffix boundaries for both films and series.
+        if len(_norm(before_year)) >= 2:
+            cut_positions.append(year_match.start())
 
     title_part = raw[: min(cut_positions)] if cut_positions else raw
     title = re.sub(r"[.\-]+", " ", title_part)
