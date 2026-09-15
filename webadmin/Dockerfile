@@ -9,6 +9,7 @@ COPY transcoding_config.py .
 COPY transcoding_runtime_fix.py .
 COPY transcoding_profiles.py .
 COPY transcoding_verified_status.py .
+COPY addon_links.py .
 COPY WEBADMIN_VERSION .
 COPY static ./static
 ENV PYTHONUNBUFFERED=1
