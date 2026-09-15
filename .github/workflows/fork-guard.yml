@@ -29,6 +29,7 @@ jobs:
           test -f compose.yaml
           test -f compose.dns.yaml
           test -f compose.vaapi.yaml
+          test -f start.sh
           test -f Dockerfile
           test -f docker/webadmin_entrypoint.py
           test -f docker/ffmpeg_wrapper.py
@@ -134,6 +135,13 @@ jobs:
       - name: Validate default Docker Compose
         run: docker compose config --quiet
 
+      - name: Validate automatic host IP launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n start.sh
+          IPADDRESS=192.0.2.10 sh start.sh config >/dev/null
+
       - name: Validate LAN DNS override
         run: docker compose -f compose.yaml -f compose.dns.yaml config --quiet
 
@@ -163,7 +171,7 @@ jobs:
 
           full_out, full_decision = mod._apply_profile(args, 'vaapi-full-h264', {'transcoding_video_quality': 21})
           assert 'h264_vaapi' in full_out, (full_out, full_decision)
-          assert 'libx265' not in full_out, (full_out, full_decision)
+          assert 'libx265' not in full_out, (full_out, decision)
           assert '-hwaccel' in full_out and 'vaapi' in full_out, (full_out, full_decision)
           assert '-hwaccel_output_format' in full_out, (full_out, full_decision)
           assert any('scale_vaapi' in value for value in full_out), (full_out, full_decision)
