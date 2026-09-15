@@ -7,6 +7,7 @@ encoder name exists.
 """
 from __future__ import annotations
 
+import addon_links
 import transcoding_profiles as base
 
 app = base.app
@@ -61,3 +62,4 @@ def _replace_route(path: str) -> None:
 
 _replace_route("/api/transcoding/status")
 app.add_api_route("/api/transcoding/status", transcoding_status, methods=["GET"])
+addon_links.install(app)
