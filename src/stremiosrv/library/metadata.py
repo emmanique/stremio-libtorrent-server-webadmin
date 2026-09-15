@@ -70,13 +70,11 @@ def release_hint(name: str) -> dict | None:
     hint: dict[str, object] = {"title": title, "type": type_}
 
     # For a series, a year AFTER Sxx/Exx normally describes that season/release, not the show's
-    # original year. Do not use it to reject an otherwise exact Cinemeta title match.
-    marker_start = None
-    if episode:
-        marker_start = episode.start()
-    elif season_only:
-        marker_start = season_only.start()
-    if year_match and (type_ == "movie" or marker_start is None or year_match.start() < marker_start):
+    # original year. A title that itself IS a year (e.g. "1923") is not a year constraint either.
+    marker_start = episode.start() if episode else (season_only.start() if season_only else None)
+    year_is_title = bool(year_match and _norm(title) == year_match.group(1))
+    if (year_match and not year_is_title
+            and (type_ == "movie" or marker_start is None or year_match.start() < marker_start)):
         hint["year"] = int(year_match.group(1))
 
     if episode:
