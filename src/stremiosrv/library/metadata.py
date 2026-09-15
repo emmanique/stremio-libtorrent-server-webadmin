@@ -1,13 +1,13 @@
 """Best-effort metadata recognition for unlabeled cached torrents.
 
 This module deliberately accepts only high-confidence matches. A wrong IMDb identity is worse than
-no artwork because it would make the Library addon offer the wrong local stream on a title page.
+no artwork because it would make the Library addon display misleading metadata.
 
 Recognition flow:
 1. parse a release/torrent name into a conservative title/year/episode hint;
 2. query the official Cinemeta search catalog for the inferred content type;
-3. accept only an exact normalised title match, with year agreement when a year is present;
-4. return a small label payload suitable for labels.json.
+3. accept only an exact normalised title match, with year agreement when a title year is present;
+4. return a small label payload suitable for display or later persistence.
 
 The resolver is network-optional. Failures and ambiguous searches simply return None.
 """
@@ -56,8 +56,8 @@ def release_hint(name: str) -> dict | None:
             cut_positions.append(match.start())
     if year_match:
         before_year = re.sub(r"[.\-_]+", " ", raw[: year_match.start()]).strip()
-        # A leading numeric title such as "1923.S02E01" must keep its title. Otherwise release
-        # years are excellent suffix boundaries for both films and series.
+        # A leading numeric title such as "1923.S02E01" must keep its title. Otherwise a year
+        # before the season/episode marker is a useful title boundary (e.g. Show.2024.S02E01).
         if len(_norm(before_year)) >= 2:
             cut_positions.append(year_match.start())
 
@@ -68,8 +68,17 @@ def release_hint(name: str) -> dict | None:
         return None
 
     hint: dict[str, object] = {"title": title, "type": type_}
-    if year_match:
+
+    # For a series, a year AFTER Sxx/Exx normally describes that season/release, not the show's
+    # original year. Do not use it to reject an otherwise exact Cinemeta title match.
+    marker_start = None
+    if episode:
+        marker_start = episode.start()
+    elif season_only:
+        marker_start = season_only.start()
+    if year_match and (type_ == "movie" or marker_start is None or year_match.start() < marker_start):
         hint["year"] = int(year_match.group(1))
+
     if episode:
         hint["season"] = int(episode.group(1))
         hint["episode"] = int(episode.group(2))
@@ -110,7 +119,7 @@ def _search(type_: str, title: str) -> tuple[dict, ...]:
 
 
 def resolve(name: str) -> dict | None:
-    """Return a labels.json-ready metadata record, or None when recognition is not certain."""
+    """Return a metadata label, or None when recognition is not certain."""
     hint = release_hint(name)
     if not hint:
         return None
