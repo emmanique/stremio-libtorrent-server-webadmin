@@ -19,21 +19,28 @@ _detect_ip() {
     # Prefer the source address selected by the kernel for the default IPv4 route. This works on
     # multi-interface hosts much better than simply taking the first address from `hostname -I`.
     if command -v ip >/dev/null 2>&1; then
-        ip route get "${IP_DETECT_TARGET:-1.1.1.1}" 2>/dev/null \
-            | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}'
-        return
+        detected=$(ip route get "${IP_DETECT_TARGET:-1.1.1.1}" 2>/dev/null \
+            | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+        if [ -n "$detected" ]; then
+            printf '%s\n' "$detected"
+            return
+        fi
     fi
 
-    # Minimal fallback for systems without iproute2.
+    # Minimal fallback for systems without a usable iproute2 result.
     hostname -I 2>/dev/null \
         | awk '{for (i = 1; i <= NF; i++) if ($i !~ /^127\./ && $i !~ /:/) {print $i; exit}}'
 }
 
 _is_ipv4() {
     printf '%s\n' "$1" | awk -F. '
-        NF != 4 {exit 1}
-        {for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1}
-        END {exit 0}'
+        NF != 4 {bad = 1}
+        {
+            for (i = 1; i <= 4; i++) {
+                if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) bad = 1
+            }
+        }
+        END {exit bad ? 1 : 0}'
 }
 
 # An explicitly exported IPADDRESS always wins. Otherwise discover the host address at each start,
