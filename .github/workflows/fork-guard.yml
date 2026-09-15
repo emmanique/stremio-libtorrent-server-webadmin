@@ -171,7 +171,7 @@ jobs:
 
           full_out, full_decision = mod._apply_profile(args, 'vaapi-full-h264', {'transcoding_video_quality': 21})
           assert 'h264_vaapi' in full_out, (full_out, full_decision)
-          assert 'libx265' not in full_out, (full_out, decision)
+          assert 'libx265' not in full_out, (full_out, full_decision)
           assert '-hwaccel' in full_out and 'vaapi' in full_out, (full_out, full_decision)
           assert '-hwaccel_output_format' in full_out, (full_out, full_decision)
           assert any('scale_vaapi' in value for value in full_out), (full_out, full_decision)
