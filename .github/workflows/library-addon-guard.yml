@@ -19,6 +19,32 @@ jobs:
       - name: Validate Python syntax
         run: python -m compileall -q src/stremiosrv/library webadmin/addon_links.py
 
+      - name: Exercise Library poster fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python - <<'PY'
+          from stremiosrv.library import addon_model as am
+
+          entry = {
+              "infoHash": "0123456789abcdef0123456789abcdef01234567",
+              "name": "release.folder.name",
+              "size": 1073741824,
+              "state": "idle",
+              "progress": 1.0,
+              "pinned": False,
+              "seeds": 0,
+              "label": {"metaId": "tt1234567", "type": "movie"},
+              "files": [],
+          }
+          preview = am.preview(entry)
+          detail = am.meta_for(entry)
+          expected = "https://images.metahub.space/poster/medium/tt1234567/img"
+          assert preview["poster"] == expected, preview
+          assert detail["poster"] == expected, detail
+          assert preview["posterShape"] == "poster", preview
+          PY
+
       - name: Validate WebAdmin addon JavaScript
         run: node --check webadmin/static/addon-connect.js
 
