@@ -13,6 +13,7 @@ COPY transcoding_verified_status.py .
 COPY addon_links.py .
 COPY vpn_admin.py .
 COPY vpn_profiles.py .
+COPY gluetun_admin.py .
 COPY WEBADMIN_VERSION .
 COPY static ./static
 ENV PYTHONUNBUFFERED=1
