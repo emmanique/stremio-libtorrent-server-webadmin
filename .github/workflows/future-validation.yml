@@ -91,8 +91,9 @@ jobs:
           set -euo pipefail
           forbidden='androshack/stremio-libtorrent-server'
           if grep -R --line-number --fixed-strings "$forbidden" \
-              compose.hub.yaml compose.vpn.yaml docker/launch.sh; then
-            echo "Runtime launch paths must not default to the upstream image."
+              compose.hub.yaml compose.vpn.yaml docker/launch.sh \
+              docker/publish.sh docker/push-readme.sh; then
+            echo "Runtime/distribution paths must not default to the upstream image/repository."
             exit 1
           fi
 
