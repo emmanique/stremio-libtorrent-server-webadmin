@@ -1,0 +1,42 @@
+name: One-time publish defaults fix
+
+on:
+  push:
+    branches:
+      - future
+    paths:
+      - .github/workflows/one-time-publish-defaults-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out future
+        uses: actions/checkout@v4
+        with:
+          ref: future
+          fetch-depth: 0
+
+      - name: Keep publication tooling on this fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/docker login -u androshack/docker login -u emmanique/' docker/publish.sh
+          sed -i 's#REPO="${REPO:-androshack/stremio-libtorrent-server}"#REPO="${REPO:-emmanique/stremio-libtorrent-server-webadmin}"#' docker/publish.sh
+          sed -i 's#DOCKERHUB_USER="${DOCKERHUB_USER:-androshack}"#DOCKERHUB_USER="${DOCKERHUB_USER:-emmanique}"#' docker/push-readme.sh
+          sed -i 's#REPO="${REPO:-androshack/stremio-libtorrent-server}"#REPO="${REPO:-emmanique/stremio-libtorrent-server-webadmin}"#' docker/push-readme.sh
+
+          if grep -n --fixed-strings 'REPO="${REPO:-androshack/stremio-libtorrent-server}"' docker/publish.sh docker/push-readme.sh; then
+            echo 'upstream publication default still present' >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docker/publish.sh docker/push-readme.sh
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: keep publication tooling on fork registry defaults"
+          git push origin HEAD:future
