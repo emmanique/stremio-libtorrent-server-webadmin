@@ -27,6 +27,7 @@ docker/push-readme.sh
 .github/workflows/future-validation.yml
 .github/workflows/release-package.yml
 .github/workflows/release-on-main.yml
+.github/workflows/package-public-check.yml
 .github/upstream-protected-paths.txt
 .github/UPSTREAM_BASE
 
