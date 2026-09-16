@@ -1,0 +1,124 @@
+name: Release package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged release
+        uses: actions/checkout@v4
+
+      - name: Validate release tag and component versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER_VERSION="$(tr -d '[:space:]' < SERVER_VERSION)"
+          FORK_VERSION="$(tr -d '[:space:]' < FORK_VERSION)"
+          WEBADMIN_VERSION="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          CORE_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+          EXPECTED_TAG="v${SERVER_VERSION}"
+
+          test "$SERVER_VERSION" = "$FORK_VERSION"
+          test "$GITHUB_REF_NAME" = "$EXPECTED_TAG" || {
+            echo "Tag $GITHUB_REF_NAME does not match SERVER_VERSION $SERVER_VERSION" >&2
+            exit 1
+          }
+
+          echo "SERVER_VERSION=$SERVER_VERSION" >> "$GITHUB_ENV"
+          echo "WEBADMIN_VERSION=$WEBADMIN_VERSION" >> "$GITHUB_ENV"
+          echo "CORE_VERSION=$CORE_VERSION" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
+          echo "Release: server=$SERVER_VERSION core=$CORE_VERSION webadmin=$WEBADMIN_VERSION"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build release runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${SERVER_VERSION}" \
+            --label "org.opencontainers.image.title=Stremio Server WebAdmin" \
+            -t "${IMAGE}:${SERVER_VERSION}" \
+            -t "${IMAGE}:latest" \
+            .
+
+      - name: Smoke-test release image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() { docker rm -f stremio-release-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          cleanup
+          docker run -d --name stremio-release-smoke -p 18099:11470 "${IMAGE}:${SERVER_VERSION}" >/dev/null
+
+          healthy=""
+          for i in $(seq 1 180); do
+            if body="$(curl -fsS http://127.0.0.1:18099/health 2>/dev/null)"; then
+              healthy="$body"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$healthy" ]; then
+            echo "Release smoke test failed: /health did not become ready." >&2
+            docker logs --tail 100 stremio-release-smoke >&2 || true
+            exit 1
+          fi
+
+          echo "$healthy"
+          printf '%s' "$healthy" | grep -q "\"version\":\"${CORE_VERSION}\"" || {
+            echo "Health response does not report core version ${CORE_VERSION}." >&2
+            exit 1
+          }
+
+      - name: Publish first GitHub Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:${SERVER_VERSION}"
+          docker push "${IMAGE}:latest"
+
+      - name: Create or refresh GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          test -f "$NOTES"
+          TITLE="Stremio Server WebAdmin ${SERVER_VERSION}"
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$TITLE" \
+              --notes-file "$NOTES" \
+              --latest
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$TITLE" \
+              --notes-file "$NOTES" \
+              --latest
+          fi
