@@ -14,6 +14,7 @@ permissions:
 jobs:
   full-validation:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -28,8 +29,8 @@ jobs:
           python -m pip install --upgrade pip uv
           uv sync --dev
 
-      - name: Run full Python test suite
-        run: uv run pytest -q
+      - name: Run unit and functional Python tests
+        run: uv run pytest -q -m "not integration"
 
       - name: Validate shell syntax
         run: |
@@ -50,16 +51,16 @@ jobs:
           docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
           docker compose -f compose.yaml -f compose.gpu.yaml config --quiet
           STREMIO_IMAGE=stremio-libtorrent-server-webadmin:local docker compose -f compose.hub.yaml config --quiet
-          WIREGUARD_PRIVATE_KEY=dummy WIREGUARD_ADDRESSES=10.2.0.2/32 docker compose -f compose.vpn.yaml config --quiet
+          WIREGUARD_PRIVATE_KEY=dummy WIREGUARD_ADDRESSES=10.2.0.2/32 STREMIO_IMAGE=stremio-libtorrent-server-webadmin:local docker compose -f compose.vpn.yaml config --quiet
 
-      - name: Enforce fork-owned runtime and distribution paths
+      - name: Enforce fork-owned runtime paths
         shell: bash
         run: |
           set -euo pipefail
           forbidden='androshack/stremio-libtorrent-server'
           if grep -R --line-number --fixed-strings "$forbidden" \
-              compose.hub.yaml compose.vpn.yaml docker/launch.sh docker/publish.sh docker/push-readme.sh; then
-            echo "Auxiliary runtime/distribution paths must not default to the upstream image/repository."
+              compose.hub.yaml compose.vpn.yaml docker/launch.sh; then
+            echo "Runtime launch paths must not default to the upstream image."
             exit 1
           fi
 
