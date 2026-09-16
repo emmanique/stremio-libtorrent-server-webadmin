@@ -8,7 +8,7 @@
     const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
     return `${(n / (1024 ** i)).toFixed(i > 1 ? 1 : 0)} ${units[i]}`;
   };
-  const badge = (ok, text) => `<span class="badge ${ok ? '' : 'vpnBad'}">${ok ? '●' : '●'} ${esc(text)}</span>`;
+  const badge = (ok, text) => `<span class="badge ${ok ? '' : 'vpnBad'}">● ${esc(text)}</span>`;
 
   const css = document.createElement('style');
   css.textContent = `
@@ -78,8 +78,7 @@
 
     <article class="panel"><div class="title row"><span>VPN LOGS</span><button class="copy" id="vpnLogsRefresh">↻ Refresh</button></div><div class="inner"><pre class="vpnLogs" id="vpnLogs">VPN logs not loaded.</pre></div><div class="foot">Recent Gluetun output. Stored username/password values are redacted before being returned by WebAdmin.</div></article>
   `;
-  const toastNode = document.querySelector('.toast');
-  document.querySelector('main.shell').insertBefore(section, toastNode ? null : null);
+  document.querySelector('main.shell').appendChild(section);
 
   let loadedConfig = false;
 
@@ -221,7 +220,13 @@
     } catch (error) { $('vpnTestResult').textContent = `Protection test failed: ${error.message}`; }
   }
 
-  tab.addEventListener('click', () => { loadStatus(); loadLogs(); });
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(item => item.classList.toggle('active', item === tab));
+    document.querySelectorAll('.page').forEach(page => page.classList.add('hidden'));
+    section.classList.remove('hidden');
+    loadStatus();
+    loadLogs();
+  });
   $('vpnRefresh').onclick = loadStatus;
   $('vpnLogsRefresh').onclick = loadLogs;
   $('vpnConnect').onclick = () => action('/api/vpn/connect', 'Connecting');
