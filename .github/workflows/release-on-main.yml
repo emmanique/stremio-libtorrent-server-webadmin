@@ -1,0 +1,93 @@
+name: Release validated main
+
+on:
+  workflow_run:
+    workflows:
+      - "Fork integration guard"
+    types:
+      - completed
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  dispatch-release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Wait for matching Library addon guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            row="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "Library addon guard" \
+              --commit "$TARGET_SHA" \
+              --limit 1 \
+              --json status,conclusion,headSha \
+              --jq '.[0] // empty')"
+
+            if [ -n "$row" ]; then
+              status="$(printf '%s' "$row" | jq -r '.status')"
+              conclusion="$(printf '%s' "$row" | jq -r '.conclusion // ""')"
+              if [ "$status" = "completed" ]; then
+                test "$conclusion" = "success" || {
+                  echo "Library addon guard concluded: $conclusion" >&2
+                  exit 1
+                }
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for Library addon guard for $TARGET_SHA" >&2
+          exit 1
+
+      - name: Check out validated main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Create version tag when missing
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER_VERSION="$(tr -d '[:space:]' < SERVER_VERSION)"
+          FORK_VERSION="$(tr -d '[:space:]' < FORK_VERSION)"
+          test "$SERVER_VERSION" = "$FORK_VERSION"
+          TAG="v${SERVER_VERSION}"
+
+          git fetch origin --tags
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$TARGET_SHA" -m "Stremio Server WebAdmin ${SERVER_VERSION}"
+          git push origin "refs/tags/$TAG"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch package publication
+        if: steps.release.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release-package.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "release_tag=${{ steps.release.outputs.tag }}"
