@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing stable tag to build and publish, e.g. v1.6.9-server.8"
+        description: "Existing stable tag to build and publish, e.g. v1.6.9-server.9"
         required: true
         type: string
 
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
@@ -50,7 +50,8 @@ jobs:
           echo "SERVER_VERSION=$SERVER_VERSION" >> "$GITHUB_ENV"
           echo "WEBADMIN_VERSION=$WEBADMIN_VERSION" >> "$GITHUB_ENV"
           echo "CORE_VERSION=$CORE_VERSION" >> "$GITHUB_ENV"
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
+          echo "SERVER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
+          echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
           echo "Release: tag=$RELEASE_TAG server=$SERVER_VERSION core=$CORE_VERSION webadmin=$WEBADMIN_VERSION"
 
       - name: Log in to GitHub Container Registry
@@ -60,7 +61,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build release runtime image
+      - name: Build server runtime image
         shell: bash
         run: |
           set -euo pipefail
@@ -68,19 +69,32 @@ jobs:
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
             --label "org.opencontainers.image.version=${SERVER_VERSION}" \
-            --label "org.opencontainers.image.title=Stremio Server WebAdmin" \
-            -t "${IMAGE}:${SERVER_VERSION}" \
-            -t "${IMAGE}:latest" \
+            --label "org.opencontainers.image.title=Stremio Server WebAdmin Runtime" \
+            -t "${SERVER_IMAGE}:${SERVER_VERSION}" \
+            -t "${SERVER_IMAGE}:latest" \
             .
 
-      - name: Smoke-test release image
+      - name: Build WebAdmin image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+            --label "org.opencontainers.image.version=${WEBADMIN_VERSION}" \
+            --label "org.opencontainers.image.title=Stremio Server WebAdmin UI" \
+            -t "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" \
+            -t "${WEBADMIN_IMAGE}:latest" \
+            ./webadmin
+
+      - name: Smoke-test server runtime image
         shell: bash
         run: |
           set -euo pipefail
           cleanup() { docker rm -f stremio-release-smoke >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           cleanup
-          docker run -d --name stremio-release-smoke -p 18099:11470 "${IMAGE}:${SERVER_VERSION}" >/dev/null
+          docker run -d --name stremio-release-smoke -p 18099:11470 "${SERVER_IMAGE}:${SERVER_VERSION}" >/dev/null
 
           healthy=""
           for i in $(seq 1 180); do
@@ -92,7 +106,7 @@ jobs:
           done
 
           if [ -z "$healthy" ]; then
-            echo "Release smoke test failed: /health did not become ready." >&2
+            echo "Server smoke test failed: /health did not become ready." >&2
             docker logs --tail 100 stremio-release-smoke >&2 || true
             exit 1
           fi
@@ -103,12 +117,43 @@ jobs:
             exit 1
           }
 
-      - name: Publish GitHub Package
+      - name: Smoke-test WebAdmin image
         shell: bash
         run: |
           set -euo pipefail
-          docker push "${IMAGE}:${SERVER_VERSION}"
-          docker push "${IMAGE}:latest"
+          cleanup() { docker rm -f webadmin-release-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          cleanup
+          docker run -d \
+            --name webadmin-release-smoke \
+            -p 18090:8090 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" >/dev/null
+
+          healthy=""
+          for i in $(seq 1 90); do
+            if body="$(curl -fsS http://127.0.0.1:18090/health 2>/dev/null)"; then
+              healthy="$body"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$healthy" ]; then
+            echo "WebAdmin smoke test failed: /health did not become ready." >&2
+            docker logs --tail 100 webadmin-release-smoke >&2 || true
+            exit 1
+          fi
+          echo "$healthy"
+
+      - name: Publish GitHub Packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${SERVER_IMAGE}:${SERVER_VERSION}"
+          docker push "${SERVER_IMAGE}:latest"
+          docker push "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}"
+          docker push "${WEBADMIN_IMAGE}:latest"
 
       - name: Create or refresh GitHub Release
         shell: bash

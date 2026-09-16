@@ -35,6 +35,7 @@ jobs:
           test -f docker/ffmpeg_wrapper.py
           test -f webadmin/app.py
           test -f webadmin/fork_update.py
+          test -f webadmin/package_update.py
           test -f webadmin/version_lifecycle.py
           test -f webadmin/transcoding_config.py
           test -f webadmin/transcoding_runtime_fix.py
@@ -53,11 +54,19 @@ jobs:
           grep -q '^  webadmin:' compose.yaml
           grep -q '^  pihole:' compose.yaml
           grep -q '172.30.0.53' compose.yaml
+          grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest' compose.yaml
+          grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest' compose.yaml
           grep -q 'https://github.com/emmanique/stremio-libtorrent-server-webadmin' compose.yaml
+          grep -q 'STREMIO_PACKAGE_REPO' compose.yaml
           grep -q 'STREMIO_UPDATE_HEALTH_TIMEOUT' compose.yaml
+          if grep -Eq '^[[:space:]]+build:' compose.yaml; then
+            echo 'Default compose.yaml must consume published images, not local build contexts.'
+            exit 1
+          fi
           grep -q 'SERVER_VERSION' Dockerfile
           grep -q 'FORK_VERSION' Dockerfile
           grep -q 'ffmpeg_wrapper.py' Dockerfile
+          grep -q 'package_update.py' webadmin/Dockerfile
           grep -q 'transcoding_verified_status:app' webadmin/Dockerfile
           grep -q '/api/transcoding/status' webadmin/transcoding_config.py
           grep -q 'import transcoding_config as base' webadmin/transcoding_runtime_fix.py
@@ -84,9 +93,9 @@ jobs:
         run: |
           set -euo pipefail
           changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
-          if printf '%s\n' "$changed" | grep -Eq '^(Dockerfile|docker/ffmpeg_wrapper\.py|docker/webadmin_entrypoint\.py)$'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(Dockerfile|compose\.yaml|docker/ffmpeg_wrapper\.py|docker/webadmin_entrypoint\.py)$'; then
             if git diff --quiet "$BASE_SHA"...HEAD -- SERVER_VERSION FORK_VERSION; then
-              echo 'Server runtime integration changed without a SERVER_VERSION/FORK_VERSION bump.'
+              echo 'Server runtime/distribution integration changed without a SERVER_VERSION/FORK_VERSION bump.'
               exit 1
             fi
           fi
@@ -109,18 +118,25 @@ jobs:
           grep -q 'previousImageId' webadmin/fork_update.py
           grep -q 'coreVersion' webadmin/fork_update.py
           grep -q 'forkVersion' webadmin/fork_update.py
+          grep -q 'PACKAGE_REPO' webadmin/package_update.py
+          grep -q 'images.pull' webadmin/package_update.py
+          grep -q '_activate_image' webadmin/package_update.py
+          grep -q 'package version mismatch' webadmin/package_update.py
 
       - name: Validate independent component lifecycle
         shell: bash
         run: |
           set -euo pipefail
+          grep -q 'import package_update as transactional' webadmin/version_lifecycle.py
           grep -q 'SERVER_VERSION_URL' webadmin/version_lifecycle.py
           grep -q 'WEBADMIN_VERSION_URL' webadmin/version_lifecycle.py
           grep -q '/api/component-versions' webadmin/version_lifecycle.py
           grep -q 'guarded_server_update_worker' webadmin/version_lifecycle.py
           grep -q 'guarded_update' webadmin/version_lifecycle.py
           grep -q '_replace_route("/api/update")' webadmin/version_lifecycle.py
-          grep -q 'docker compose up -d --build --no-deps webadmin' webadmin/version_lifecycle.py
+          grep -q 'docker compose pull webadmin' webadmin/version_lifecycle.py
+          grep -q 'host-compose-pull' webadmin/version_lifecycle.py
+          grep -q 'transactional-package' webadmin/version_lifecycle.py
 
       - name: Validate trusted connection URL integration
         shell: bash

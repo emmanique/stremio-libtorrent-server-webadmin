@@ -18,7 +18,7 @@ concurrency:
 jobs:
   full-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -64,8 +64,9 @@ jobs:
             tests/test_profiler.py \
             tests/test_hls_routes.py
 
-      - name: Validate shell syntax
+      - name: Validate Python and shell syntax
         run: |
+          python -m compileall -q webadmin docker/webadmin_entrypoint.py docker/ffmpeg_wrapper.py
           sh -n start.sh
           sh -n docker/launch.sh
           sh -n docker/publish.sh
@@ -82,8 +83,28 @@ jobs:
           docker compose -f compose.yaml -f compose.dns.yaml config --quiet
           docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
           docker compose -f compose.yaml -f compose.gpu.yaml config --quiet
-          STREMIO_IMAGE=stremio-libtorrent-server-webadmin:local docker compose -f compose.hub.yaml config --quiet
-          WIREGUARD_PRIVATE_KEY=dummy WIREGUARD_ADDRESSES=10.2.0.2/32 STREMIO_IMAGE=stremio-libtorrent-server-webadmin:local docker compose -f compose.vpn.yaml config --quiet
+          STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest docker compose -f compose.hub.yaml config --quiet
+          WIREGUARD_PRIVATE_KEY=dummy WIREGUARD_ADDRESSES=10.2.0.2/32 STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest docker compose -f compose.vpn.yaml config --quiet
+
+      - name: Validate package-only full stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest' compose.yaml
+          grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest' compose.yaml
+          grep -q 'STREMIO_PACKAGE_REPO' compose.yaml
+          grep -q 'pull_policy: always' compose.yaml
+          if grep -Eq '^[[:space:]]+build:' compose.yaml; then
+            echo 'compose.yaml unexpectedly requires a local build context'
+            exit 1
+          fi
+          grep -q 'docker compose pull' start.sh
+          grep -q 'images.pull' webadmin/package_update.py
+          grep -q 'import package_update as transactional' webadmin/version_lifecycle.py
+          grep -q 'docker compose pull webadmin' webadmin/version_lifecycle.py
+
+      - name: Validate WebAdmin package build
+        run: docker build -t webadmin-validation:local ./webadmin
 
       - name: Enforce fork-owned runtime paths
         shell: bash
