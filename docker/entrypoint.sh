@@ -6,6 +6,23 @@ set -e
 CACHE="${STREMIOSRV_CACHE_ROOT:-/root/.stremio-server}"
 CERT="$CACHE/${CERT_FILE:-certificates.pem}"
 
+# In VPN mode the container shares Gluetun's network namespace. Docker rejects
+# the Compose `dns:` option with network_mode: service:gluetun, so set the
+# resolver here before any Stremio/Node/Python process starts. This preserves
+# the intended path Stremio -> Pi-hole -> Gluetun DNS -> VPN without a WAN DNS
+# bypass. Outside VPN mode STREMIOSRV_DNS_SERVER is unset and Docker DNS remains
+# untouched.
+if [ -n "${STREMIOSRV_DNS_SERVER:-}" ]; then
+    case "$STREMIOSRV_DNS_SERVER" in
+        *[!0-9.]*|'')
+            echo "[entrypoint] invalid STREMIOSRV_DNS_SERVER=$STREMIOSRV_DNS_SERVER" >&2
+            exit 1
+            ;;
+    esac
+    printf 'nameserver %s\noptions ndots:0\n' "$STREMIOSRV_DNS_SERVER" > /etc/resolv.conf
+    echo "[entrypoint] DNS resolver -> $STREMIOSRV_DNS_SERVER"
+fi
+
 # 1) TLS cert for HTTPS :12470. TVs require a TRUSTED cert; priority:
 #    a. IPADDRESS set -> fetch/refresh a trusted Let's Encrypt *.stremio.rocks cert (TV-compatible,
 #       zero config; the dashed-IP subdomain resolves to your IP via Stremio's magic DNS).
