@@ -4,7 +4,12 @@ Dockerfile
 compose.yaml
 compose.dns.yaml
 compose.vaapi.yaml
+compose.gpu.yaml
+compose.hub.yaml
+compose.vpn.yaml
+.env
 .env.example
+start.sh
 SERVER_VERSION
 FORK_VERSION
 VERSIONING.md
@@ -13,7 +18,23 @@ INSTALL-SEPARATED-V2.md
 webadmin
 docker/webadmin_entrypoint.py
 docker/ffmpeg_wrapper.py
+docker/launch.sh
+docker/publish.sh
+docker/push-readme.sh
 .github/workflows/upstream-sync.yml
 .github/workflows/fork-guard.yml
+.github/workflows/library-addon-guard.yml
+.github/workflows/future-validation.yml
 .github/upstream-protected-paths.txt
 .github/UPSTREAM_BASE
+
+# Fork-specific Library Addon presentation/metadata integration. Keep these
+# stable during automated upstream imports; upstream changes are reported and
+# can be integrated deliberately on the permanent future branch.
+src/stremiosrv/library/__init__.py
+src/stremiosrv/library/addon.py
+src/stremiosrv/library/addon_model.py
+src/stremiosrv/library/api.py
+src/stremiosrv/library/metadata.py
+src/stremiosrv/library/static/index.html
+src/stremiosrv/metrics.py
