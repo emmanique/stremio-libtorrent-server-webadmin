@@ -121,13 +121,20 @@ jobs:
           grep -q 'OPENVPN_CUSTOM_CONFIG' vpn/entrypoint.sh
           grep -q 'startup_profile' vpn/entrypoint.sh
           grep -q 'next_profile' vpn/entrypoint.sh
+          grep -q 'openvpn.runtime.ovpn' vpn/entrypoint.sh
           grep -q '/api/vpn/status' webadmin/vpn_admin.py
           grep -q '/api/vpn/profiles' webadmin/vpn_profiles.py
+          grep -q 'openvpn.ovpn' webadmin/vpn_profiles.py
+          grep -q 'ca.crt' webadmin/vpn_profiles.py
+          grep -q 'client.crt' webadmin/vpn_profiles.py
+          grep -q 'client.key' webadmin/vpn_profiles.py
           grep -q 'vpn_profiles.install(app)' webadmin/transcoding_verified_status.py
           grep -q 'New connection' webadmin/static/vpn-admin.js
-          grep -q 'Enable at startup' webadmin/static/vpn-admin.js
+          grep -q 'Use this connection automatically when the VPN gateway starts' webadmin/static/vpn-admin.js
+          grep -q 'Pre-shared' webadmin/static/vpn-admin.js
+          grep -q 'Server group' webadmin/static/vpn-admin.js
           if grep -Eq '^\s+- .*6881:.*6881' compose.vpn.yaml; then
-            echo 'VPN mode must not expose the host BitTorrent port; CyberGhost has no VPN port forwarding.' >&2
+            echo 'VPN mode must not expose the host BitTorrent port.' >&2
             exit 1
           fi
 
