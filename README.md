@@ -14,12 +14,34 @@ The normal installation is **package-only**: Docker Compose pulls published imag
 
 ---
 
+## Current release components
+
+```text
+Core            1.6.9
+Server/Fork     1.6.9-server.16
+WebAdmin        1.4.0
+VPN Gateway     1.6.9-server.16
+```
+
+Authoritative version files:
+
+```text
+SERVER_VERSION
+FORK_VERSION
+webadmin/WEBADMIN_VERSION
+pyproject.toml
+```
+
+See `VERSIONING.md` for the release rules.
+
+---
+
 ## What this fork adds
 
 | Area | Added in this fork |
 | --- | --- |
 | Deployment | Full Server + WebAdmin + Pi-hole stack with published GHCR images. |
-| WebAdmin | Browser UI on `8090` for status, configuration, cache, logs, updates, addons, transcoding and VPN. |
+| WebAdmin | Browser UI on `8090` for status, configuration, cache, logs, updates, addons, transcoding, VPN and Gluetun gateway management. |
 | Library | Poster-based cache/library UI, add-by-magnet, pin/keep/delete, progress, series/episode navigation and disk awareness. |
 | Library Addon | Exposes cached titles to Stremio as `My Library` with local streams and metadata learning. |
 | Metadata | Conservative release recognition, Cinemeta lookup and artwork fallback. |
@@ -27,6 +49,7 @@ The normal installation is **package-only**: Docker Compose pulls published imag
 | Pi-hole | Internal DNS by default and optional LAN DNS publication. |
 | Transcoding | Copy-first/direct-play policy, VAAPI, NVIDIA/NVENC and CPU fallback. |
 | VPN | Multi-profile CyberGhost OpenVPN manager: ZIP import, create/edit/activate/disconnect/reconnect/delete, startup profile, kill switch, protection test and private credential storage. |
+| Gluetun management | Dedicated WebAdmin page for gateway status, Docker health, VPN/DNS state, routing, kill switch, Pi-hole path validation, resources, actions and filtered logs. |
 | Release safety | Permanent `future` branch, deterministic validation, fork/library/VPN guards and automated package/release publication. |
 
 ---
@@ -61,6 +84,20 @@ WebAdmin + Pi-hole remain directly reachable on the LAN.
 
 Only Stremio shares Gluetun's network namespace. If the VPN tunnel fails or is disconnected, Stremio remains blocked rather than falling back to the host WAN.
 
+The DNS path in VPN mode is designed as:
+
+```text
+Stremio
+   ↓
+Pi-hole
+   ↓
+private Gluetun DNS proxy
+   ↓
+Gluetun internal DNS
+   ↓
+VPN tunnel
+```
+
 ---
 
 ## Published images
@@ -72,16 +109,13 @@ ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest
 pihole/pihole:latest
 ```
 
-Authoritative component versions:
+Versioned images for this release:
 
 ```text
-SERVER_VERSION
-FORK_VERSION
-webadmin/WEBADMIN_VERSION
-pyproject.toml
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.16
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.0
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.16
 ```
-
-See `VERSIONING.md` for the release rules.
 
 ---
 
@@ -117,8 +151,6 @@ The VPN gateway stays fail-closed until a usable VPN profile is selected. WebAdm
 
 This mode is for installations created by downloading/running the published Compose definition instead of keeping a local Git checkout.
 
-Create a working directory and download the current direct-mode Compose file:
-
 ```bash
 mkdir -p ~/stremio-libtorrent-server-webadmin && \
 cd ~/stremio-libtorrent-server-webadmin && \
@@ -129,7 +161,7 @@ docker compose up -d --remove-orphans
 
 This starts the published Server + WebAdmin + Pi-hole packages without compiling the project locally.
 
-For the **full managed feature set**, especially VPN profile management, launch helpers, VPN gateway wrapper, hardware overlays and validation-controlled defaults, the Git-clone installation is preferred because those features use more files than `compose.yaml` alone.
+For the **full managed feature set**, especially VPN profile management, Gluetun gateway management, launch helpers, hardware overlays and validation-controlled defaults, the Git-clone installation is preferred because those features use more files than `compose.yaml` alone.
 
 > The complete platform is a multi-container stack. A single standalone `docker run` command is not considered a full installation because it would not provide the complete Server + WebAdmin + Pi-hole + optional VPN topology.
 
@@ -156,7 +188,7 @@ Persistent named volumes are retained by all normal update procedures below. **N
 
 ## A. Update an installation made with `git clone`
 
-From the repository directory:
+Direct mode:
 
 ```bash
 git status
@@ -166,9 +198,7 @@ git pull --ff-only origin main
 sh start.sh
 ```
 
-`git status` should be clean before updating. If you have deliberate local tracked-file changes, save or commit them first; do not discard them blindly.
-
-If the machine should remain in VPN mode after updating, use:
+VPN mode:
 
 ```bash
 git status
@@ -177,6 +207,8 @@ git checkout main
 git pull --ff-only origin main
 sh start-vpn.sh
 ```
+
+`git status` should be clean before updating. If you have deliberate local tracked-file changes, save or commit them first; do not discard them blindly.
 
 The launchers pull the current GHCR packages and recreate only what is required while keeping named volumes and saved WebAdmin/VPN state.
 
@@ -196,8 +228,6 @@ cd /path/to/stremio-libtorrent-server-webadmin && git fetch --prune origin && gi
 
 ## B. Update an installation made by RUN / package-only Compose
 
-If the installation was created without a Git clone and uses a downloaded `compose.yaml`, refresh the Compose definition first and then pull/recreate the published packages:
-
 ```bash
 cd /path/to/your/stremio-directory
 curl -fsSL https://raw.githubusercontent.com/emmanique/stremio-libtorrent-server-webadmin/main/compose.yaml -o compose.yaml
@@ -213,7 +243,7 @@ cd /path/to/your/stremio-directory && curl -fsSL https://raw.githubusercontent.c
 
 This method updates the package-only/direct stack while preserving named volumes.
 
-If a package-only installation needs the new VPN connection-profile manager, convert it to the managed Git-clone layout rather than trying to maintain only one Compose file:
+If a package-only installation needs the VPN connection manager or the dedicated Gluetun administration page, convert it to the managed Git-clone layout rather than trying to maintain only one Compose file:
 
 ```bash
 cd ~
@@ -225,8 +255,6 @@ sh start-vpn.sh
 Before converting an existing deployment, keep the same Docker named volumes/environment values so cached data and persisted state remain associated with the same services. Do not remove volumes during the migration.
 
 ## C. Refresh only the published images
-
-When the local Compose files are already current:
 
 ```bash
 docker compose pull
@@ -248,9 +276,9 @@ The Server updater pulls an immutable GHCR image, validates the expected version
 
 # 🌐 CyberGhost VPN connection manager
 
-The VPN page is designed around the same manual/router OpenVPN material generated by CyberGhost and now supports **multiple independent VPN connections**.
+The **WebAdmin → VPN** page is designed around the same manual/router OpenVPN material generated by CyberGhost and supports **multiple independent VPN connections**.
 
-For **each new connection**, download the CyberGhost configuration ZIP containing:
+For each new connection, download the CyberGhost configuration ZIP containing:
 
 ```text
 openvpn.ovpn
@@ -259,7 +287,7 @@ client.crt
 client.key
 ```
 
-CyberGhost normally presents the manual/router values separately from the ZIP. In **WebAdmin → VPN → New connection**, provide the connection name and, where applicable:
+In **WebAdmin → VPN → New connection**, provide the connection name and, where applicable:
 
 - protocol: OpenVPN;
 - country;
@@ -267,12 +295,10 @@ CyberGhost normally presents the manual/router values separately from the ZIP. I
 - generated OpenVPN username;
 - generated OpenVPN password;
 - pre-shared value;
-- extra-feature selections: malicious-site protection, ad blocking, tracking blocking and HTTPS redirect;
+- extra-feature selections;
 - the CyberGhost ZIP.
 
 ## VPN profile lifecycle
-
-Each saved connection is an independent profile. The WebAdmin supports:
 
 ```text
 Create
@@ -299,7 +325,7 @@ Spain
 
 Activating `Germany` switches the current tunnel to Germany. The configured startup profile can remain `Netherlands` for the next gateway restart.
 
-## What is stored per VPN connection
+## Private profile storage
 
 Each profile keeps its own private material inside persistent `vpn-data`, conceptually:
 
@@ -322,7 +348,7 @@ Passwords, certificates and private keys are not returned to the browser after t
 
 ## ZIP validation and runtime sanitation
 
-The importer validates the CyberGhost ZIP before activation. It:
+The importer:
 
 1. checks archive paths and rejects unsafe members;
 2. requires `openvpn.ovpn`, `ca.crt`, `client.crt` and `client.key`;
@@ -336,10 +362,6 @@ The CyberGhost bundle controls the actual remote endpoint/protocol. The VPN gate
 
 ## Startup profile behaviour
 
-When `Enable at startup` is selected for a profile, that profile is persisted as the automatic startup connection.
-
-The gateway selection order is:
-
 ```text
 explicitly requested profile
         ↓
@@ -351,17 +373,6 @@ no usable profile → Stremio Internet remains blocked
 ```
 
 This is intentionally fail-closed: there is no silent fallback from VPN mode to the normal host WAN.
-
-## CyberGhost extra features
-
-The CyberGhost extra-feature checkboxes are stored as profile metadata:
-
-- Protection against malicious websites;
-- Block ads;
-- Block online tracking;
-- Redirect to HTTPS.
-
-Their provider-side effect is determined by the configuration generated by CyberGhost. If those options are changed in the CyberGhost portal, regenerate/reimport the corresponding profile ZIP where necessary.
 
 ## Starting and leaving VPN mode
 
@@ -377,11 +388,118 @@ Return to direct mode:
 sh start.sh
 ```
 
-WebAdmin also provides VPN public IP, traffic counters, kill-switch/routing state, protection test and redacted logs.
+WebAdmin provides VPN public IP, traffic counters, kill-switch/routing state, protection test and redacted logs.
 
 CyberGhost does not provide VPN-side port forwarding. VPN mode therefore does not publish Stremio's BitTorrent listen port on the host.
 
 Full details: `VPN.md`.
+
+---
+
+# 🧭 Gluetun gateway management
+
+WebAdmin `1.4.0` adds a dedicated **WebAdmin → Gluetun** page. This page is separate from **VPN**: the VPN page manages CyberGhost connection profiles, while the Gluetun page manages and observes the gateway runtime itself.
+
+The menu becomes conceptually:
+
+```text
+Dashboard | Server | Transcoding | VPN | Gluetun | Logs
+```
+
+## Gateway status
+
+The Gluetun page displays:
+
+- container presence and runtime state;
+- Docker health status;
+- VPN tunnel status;
+- VPN public IP;
+- active VPN profile;
+- container uptime and restart count;
+- CPU and memory usage;
+- received/transmitted network bytes;
+- Gluetun DNS state;
+- Gluetun updater state;
+- Docker network addresses.
+
+## Gateway actions
+
+From the page you can:
+
+```text
+Start gateway
+Stop gateway
+Restart gateway
+Validate path
+Open VPN connections
+```
+
+Stopping or restarting the gateway preserves the fail-closed model. Stremio must not fall back to the host WAN while Gluetun is unavailable.
+
+## Configuration visibility
+
+The page shows the effective non-secret Gluetun configuration, including:
+
+- VPN provider mode;
+- VPN type;
+- firewall / kill switch state;
+- firewall input ports;
+- allowed LAN CIDRs outside the tunnel;
+- DNS service state;
+- DNS listen address;
+- DNS upstream transport and resolvers;
+- DNS cache state;
+- private Pi-hole DNS proxy port;
+- VPN auto-heal setting;
+- timezone;
+- TLS and ICMP healthcheck targets.
+
+Security-critical settings remain protected. The page does **not** expose or return:
+
+- OpenVPN username/password;
+- client private keys;
+- client certificates as editable secrets;
+- Gluetun control API key.
+
+The firewall/kill-switch and DNS loopback binding are intentionally not switchable off from this page.
+
+## Network and security validation
+
+The page correlates the Gluetun container, Stremio and Pi-hole and can validate:
+
+```text
+Gluetun container running
+Docker health healthy
+Gluetun control API reachable
+VPN tunnel running
+DNS service available
+Private DNS proxy reachable
+Pi-hole upstream points to Gluetun
+Stremio shares the Gluetun network namespace
+Kill switch remains active
+```
+
+This is intended to make VPN routing and DNS failures visible without requiring SSH access for every diagnostic step.
+
+## Gluetun logs
+
+The dedicated log viewer supports:
+
+- 100 / 200 / 500 / 1000 lines;
+- All / Error / Warn / Info / Debug filters;
+- free-text search;
+- manual refresh;
+- optional auto-refresh;
+- clearing only the browser viewer without deleting Docker logs.
+
+Sensitive VPN values are redacted server-side before log output is returned to the browser.
+
+Implementation components:
+
+```text
+webadmin/gluetun_admin.py
+webadmin/static/gluetun-admin.js
+```
 
 ---
 
@@ -424,6 +542,8 @@ docker compose -f compose.yaml -f compose.dns.yaml up -d
 ```
 
 Ensure TCP/UDP port `53` is free on the selected host address first.
+
+In VPN mode, Pi-hole remains reachable on the LAN while its configured private upstream path can be validated from the dedicated Gluetun page.
 
 ---
 
@@ -476,7 +596,7 @@ VPN_CONTROL_API_KEY="$(cat .vpn-control-key)" docker compose -f compose.vpn.yaml
 docker logs --tail=200 stremio-gluetun
 ```
 
-Application logs are also available in WebAdmin.
+For normal operational diagnostics, use **WebAdmin → Gluetun** before dropping to SSH. It provides status, routing checks, DNS/Pi-hole validation and filtered Gluetun logs in one place.
 
 ---
 
@@ -524,6 +644,8 @@ start-vpn.sh                     VPN launcher + image refresh
 vpn/                             Gluetun wrapper and active/startup profile selection
 webadmin/vpn_admin.py            VPN status/control/protection test
 webadmin/vpn_profiles.py         CyberGhost profile CRUD/import/startup management
+webadmin/gluetun_admin.py        Gluetun status/actions/config/validation/log API
+webadmin/static/gluetun-admin.js Dedicated Gluetun WebAdmin page
 src/stremiosrv/library/          Library UI, addon, labels and metadata
 .github/workflows/               Validation, release and package checks
 VPN.md                           VPN setup/security/profile documentation
@@ -538,6 +660,7 @@ docs/releases/                   Release notes
 - Keep WebAdmin `8090` on a trusted LAN/VPN because it can control Docker through the mounted socket.
 - Treat the Stremio Library Addon URL as a secret.
 - VPN credentials and private keys belong only in the private `vpn-data` volume.
+- The Gluetun management page intentionally exposes only non-secret configuration and runtime state.
 - Do not weaken the VPN LAN allowlist to public networks unless you understand the leak implications.
 - Do not expose Docker socket access or WebAdmin directly to the public Internet.
 
