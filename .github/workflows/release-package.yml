@@ -4,22 +4,32 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing stable tag to build and publish, e.g. v1.6.9-server.8"
+        required: true
+        type: string
 
 permissions:
   contents: write
   packages: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - name: Check out tagged release
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Validate release tag and component versions
         shell: bash
@@ -32,8 +42,8 @@ jobs:
           EXPECTED_TAG="v${SERVER_VERSION}"
 
           test "$SERVER_VERSION" = "$FORK_VERSION"
-          test "$GITHUB_REF_NAME" = "$EXPECTED_TAG" || {
-            echo "Tag $GITHUB_REF_NAME does not match SERVER_VERSION $SERVER_VERSION" >&2
+          test "$RELEASE_TAG" = "$EXPECTED_TAG" || {
+            echo "Tag $RELEASE_TAG does not match SERVER_VERSION $SERVER_VERSION" >&2
             exit 1
           }
 
@@ -41,7 +51,7 @@ jobs:
           echo "WEBADMIN_VERSION=$WEBADMIN_VERSION" >> "$GITHUB_ENV"
           echo "CORE_VERSION=$CORE_VERSION" >> "$GITHUB_ENV"
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
-          echo "Release: server=$SERVER_VERSION core=$CORE_VERSION webadmin=$WEBADMIN_VERSION"
+          echo "Release: tag=$RELEASE_TAG server=$SERVER_VERSION core=$CORE_VERSION webadmin=$WEBADMIN_VERSION"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -56,7 +66,7 @@ jobs:
           set -euo pipefail
           docker build \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
             --label "org.opencontainers.image.version=${SERVER_VERSION}" \
             --label "org.opencontainers.image.title=Stremio Server WebAdmin" \
             -t "${IMAGE}:${SERVER_VERSION}" \
@@ -93,7 +103,7 @@ jobs:
             exit 1
           }
 
-      - name: Publish first GitHub Package
+      - name: Publish GitHub Package
         shell: bash
         run: |
           set -euo pipefail
@@ -106,17 +116,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES="docs/releases/${RELEASE_TAG}.md"
           test -f "$NOTES"
           TITLE="Stremio Server WebAdmin ${SERVER_VERSION}"
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" \
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --latest
           else
-            gh release create "$GITHUB_REF_NAME" \
+            gh release create "$RELEASE_TAG" \
               --verify-tag \
               --title "$TITLE" \
               --notes-file "$NOTES" \
