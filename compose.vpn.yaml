@@ -5,11 +5,59 @@ name: stremio-platform
 # Connection profiles are created/imported in WebAdmin -> VPN and stored in the
 # private vpn-data volume. Start with: sh start-vpn.sh
 #
+# Trusted HTTPS certificate path:
+#   cert-bootstrap (direct WAN, one-shot) -> persistent Stremio cache -> :12470 on LAN
+# The bootstrap helper is the only VPN-mode component allowed to use direct WAN
+# egress, solely to obtain/refresh the trusted stremio.rocks certificate required
+# by LAN clients. Stremio application traffic remains fail-closed behind Gluetun.
+#
 # DNS path in VPN mode:
 #   Stremio -> Pi-hole (172.30.0.53) -> Gluetun DNS (172.30.0.10:53) -> VPN
 # This keeps Pi-hole query visibility/filtering while the upstream DNS lookup
-# still exits through the VPN. If Gluetun/VPN is stopped, DNS fails closed.
+# still exits through the VPN. If Gluetun/VPN is stopped, Stremio DNS fails closed.
 services:
+  cert-bootstrap:
+    profiles: ["bootstrap"]
+    image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
+    pull_policy: always
+    restart: "no"
+    environment:
+      IPADDRESS: "${IPADDRESS:?Set IPADDRESS or run sh start-vpn.sh}"
+      CERT_FILE: "${CERT_FILE:-certificates.pem}"
+      STREMIOSRV_CACHE_ROOT: /root/.stremio-server
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      CACHE=/root/.stremio-server
+      CERT="$${CACHE}/$${CERT_FILE:-certificates.pem}"
+      IPD=$$(printf '%s' "$${IPADDRESS}" | sed 's/[.]/-/g')
+      DOMAIN="$${IPD}.519b6502d940.stremio.rocks"
+      JSON="$${CACHE}/httpsCert.json"
+      mkdir -p "$${CACHE}"
+      if [ -s "$${CERT}" ] \
+         && openssl x509 -checkend 86400 -noout -in "$${CERT}" >/dev/null 2>&1 \
+         && [ -s "$${JSON}" ] \
+         && grep -q "$${DOMAIN}" "$${JSON}"; then
+        echo "[cert-bootstrap] trusted certificate already valid for $${DOMAIN}"
+        exit 0
+      fi
+      echo "[cert-bootstrap] obtaining trusted certificate for $${DOMAIN} using direct bootstrap egress"
+      cd /srv/stremio-server
+      rm -f certificates.pem
+      timeout 60 node certificate.js --action fetch
+      test -s certificates.pem
+      cp certificates.pem "$${CERT}"
+      node certificate.js --action load \
+        --pem-path "$${CERT}" \
+        --domain "$${DOMAIN}" \
+        --json-path "$${JSON}"
+      openssl x509 -checkend 86400 -noout -in "$${CERT}"
+      grep -q "$${DOMAIN}" "$${JSON}"
+      echo "[cert-bootstrap] trusted certificate ready for LAN HTTPS: https://$${DOMAIN}:12470/"
+    volumes:
+      - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
+    networks:
+      - stremio-internal
+
   gluetun:
     image: "${VPN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest}"
     pull_policy: always
