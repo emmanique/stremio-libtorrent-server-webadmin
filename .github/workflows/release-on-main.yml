@@ -133,22 +133,22 @@ jobs:
 
           if [ ! -f "$NOTES_FILE" ]; then
             NOTES_FILE="/tmp/release-notes.md"
-            cat > "$NOTES_FILE" <<EOF
-# Stremio Server WebAdmin ${SERVER_VERSION}
-
-## Components
-
-- Core: \`${CORE_VERSION}\`
-- Server/Fork: \`${SERVER_VERSION}\`
-- WebAdmin: \`${WEBADMIN_VERSION}\`
-- VPN gateway: \`${SERVER_VERSION}\`
-
-## Packages
-
-- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin:${SERVER_VERSION}\`
-- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin:${WEBADMIN_VERSION}\`
-- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn:${SERVER_VERSION}\`
-EOF
+            printf '%s\n' \
+              "# Stremio Server WebAdmin ${SERVER_VERSION}" \
+              "" \
+              "## Components" \
+              "" \
+              "- Core: ${CORE_VERSION}" \
+              "- Server/Fork: ${SERVER_VERSION}" \
+              "- WebAdmin: ${WEBADMIN_VERSION}" \
+              "- VPN gateway: ${SERVER_VERSION}" \
+              "" \
+              "## Packages" \
+              "" \
+              "- ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin:${SERVER_VERSION}" \
+              "- ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin:${WEBADMIN_VERSION}" \
+              "- ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn:${SERVER_VERSION}" \
+              > "$NOTES_FILE"
           fi
 
           gh release create "$TAG" \
