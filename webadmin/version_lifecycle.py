@@ -1,11 +1,11 @@
 """Independent Server/WebAdmin release lifecycle layer.
 
-This module sits on top of the transactional server updater. The streaming
+This module sits on top of the transactional package updater. The streaming
 server and WebAdmin deliberately have different release identifiers and update
 paths:
 
-* SERVER_VERSION -> transactional in-place Stremio server update.
-* WEBADMIN_VERSION -> host-side Compose rebuild of only the WebAdmin service.
+* SERVER_VERSION -> transactional pull/activate from the published GHCR runtime.
+* WEBADMIN_VERSION -> host-side Compose pull/recreate of only the WebAdmin service.
 * Core version -> informational version reported by the stremiosrv package.
 
 The upstream repository is never used as a runtime update authority.
@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-import fork_update as transactional
+import package_update as transactional
 
 app = transactional.app
 legacy = transactional.legacy
@@ -35,18 +35,16 @@ SERVER_VERSION_URL = f"{RAW_ROOT}/SERVER_VERSION"
 FORK_VERSION_URL = f"{RAW_ROOT}/FORK_VERSION"
 WEBADMIN_VERSION_URL = f"{RAW_ROOT}/webadmin/WEBADMIN_VERSION"
 WEBADMIN_VERSION_FILE = Path(os.getenv("WEBADMIN_VERSION_FILE", "/app/WEBADMIN_VERSION"))
-WEBADMIN_UPDATE_COMMAND = (
-    "git pull origin main && docker compose up -d --build --no-deps webadmin"
-)
+WEBADMIN_UPDATE_COMMAND = "docker compose pull webadmin && docker compose up -d --no-deps webadmin"
 STALE_UPDATE_NOTICE = (
     "Downloads the official source from <code>andrewhack/stremio-libtorrent-server</code>, "
     "validates the Web Admin overlay and activates it only after a successful build. Settings, "
     "pins, cache, certificates and logs are preserved."
 )
 SAFE_UPDATE_NOTICE = (
-    "Server updates are released only from "
+    "Server updates use the versioned package published from "
     "<code>emmanique/stremio-libtorrent-server-webadmin</code>. "
-    "Server and WebAdmin versions are managed independently."
+    "No local source build is required; server and WebAdmin versions are managed independently."
 )
 STREMIO_ROCKS_RE = re.compile(
     r"([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.stremio\.rocks)", re.IGNORECASE
@@ -193,16 +191,21 @@ def component_versions():
         "server": _component(
             server_installed,
             server_available,
-            updateMode="transactional",
+            updateMode="transactional-package",
             updateEndpoint="/api/update",
             updateInProgress=legacy.UPDATE_LOCK.locked(),
+            packageRepository=transactional.PACKAGE_REPO,
             rollback=True,
         ),
         "webadmin": _component(
             webadmin_installed,
             webadmin_available,
-            updateMode="host-compose",
+            updateMode="host-compose-pull",
             updateCommand=WEBADMIN_UPDATE_COMMAND,
+            packageImage=os.getenv(
+                "WEBADMIN_IMAGE",
+                "ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest",
+            ),
             selfUpdate=False,
         ),
     }
@@ -218,7 +221,8 @@ def github_version_compat():
         "updateAvailable": bool(available and installed and available != installed),
         "repositoryUrl": SOURCE_REPO,
         "branch": SOURCE_BRANCH,
-        "source": "fork-server",
+        "packageRepository": transactional.PACKAGE_REPO,
+        "source": "fork-server-package",
     }
 
 
@@ -247,6 +251,7 @@ def guarded_server_update_worker():
             version=available,
             repositoryUrl=SOURCE_REPO,
             branch=SOURCE_BRANCH,
+            packageRepository=transactional.PACKAGE_REPO,
             message="Server is already at the latest SERVER_VERSION; no container change was made.",
         )
         return
@@ -276,6 +281,7 @@ def guarded_update():
             version=available,
             repositoryUrl=SOURCE_REPO,
             branch=SOURCE_BRANCH,
+            packageRepository=transactional.PACKAGE_REPO,
             message=f"Server {installed} is already up to date; no update was started.",
         )
         return {
@@ -288,14 +294,14 @@ def guarded_update():
         }
 
     threading.Thread(target=guarded_server_update_worker, daemon=True).start()
-    legacy.audit("software.update", f"server {installed} -> {available}")
+    legacy.audit("software.update", f"server package {installed} -> {available}")
     return {
         "ok": True,
         "started": True,
         "updateAvailable": True,
         "installed": installed,
         "available": available,
-        "message": f"Server update started: {installed} -> {available}",
+        "message": f"Server package update started: {installed} -> {available}",
     }
 
 
