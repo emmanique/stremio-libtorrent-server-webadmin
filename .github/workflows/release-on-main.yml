@@ -77,8 +77,14 @@ jobs:
 
           git fetch origin --tags
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG already exists; nothing to publish."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists."
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG already exists; nothing to publish."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "Release $TAG is missing; package publication will be dispatched again to create it."
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+            fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             exit 0
           fi
