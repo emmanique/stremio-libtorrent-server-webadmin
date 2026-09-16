@@ -42,7 +42,7 @@ _container_exists() {
 
 # Direct mode gives stremio-libtorrent-server the internal 172.30.0.10 address and host ports.
 # Gluetun needs to take over those same resources in VPN mode, so remove the direct Stremio
-# container only after all images have been pulled. Named volumes are never removed.
+# container only after all images and the trusted certificate are ready. Named volumes are never removed.
 _enter_vpn_mode() {
     if ! _container_exists stremio-gluetun && _container_exists stremio-libtorrent-server; then
         echo "[vpn] switching direct -> VPN mode (persistent volumes are preserved)..."
@@ -63,6 +63,9 @@ export IPADDRESS
 PIHOLE_WEB_BIND_IP=${PIHOLE_WEB_BIND_IP:-$IPADDRESS}
 PIHOLE_DNS_BIND_IP=${PIHOLE_DNS_BIND_IP:-$IPADDRESS}
 export PIHOLE_WEB_BIND_IP PIHOLE_DNS_BIND_IP
+
+IPD=$(printf '%s' "$IPADDRESS" | sed 's/[.]/-/g')
+TRUSTED_DOMAIN="${IPD}.519b6502d940.stremio.rocks"
 
 KEY_FILE=${VPN_CONTROL_KEY_FILE:-$ROOT/.vpn-control-key}
 if [ -z "${VPN_CONTROL_API_KEY:-}" ]; then
@@ -92,14 +95,23 @@ echo "[vpn] host IPv4 : $IPADDRESS"
 echo "[vpn] Web Player : http://$IPADDRESS:8080"
 echo "[vpn] WebAdmin   : http://$IPADDRESS:8090"
 echo "[vpn] API        : http://$IPADDRESS:11470"
-echo "[vpn] Library    : https://$IPADDRESS:12470/library/"
+echo "[vpn] Library    : https://${TRUSTED_DOMAIN}:12470/library/"
 echo "[vpn] Pi-hole    : http://$PIHOLE_WEB_BIND_IP:8053/admin/"
 echo "[vpn] Stremio Internet egress is fail-closed behind Gluetun."
+echo "[vpn] Trusted LAN HTTPS certificate is bootstrapped before the VPN stack starts."
 echo "[vpn] CyberGhost credentials/certificates are configured from WebAdmin -> VPN."
 
 if [ "$#" -eq 0 ]; then
     echo "[vpn] pulling published images..."
     docker compose -f compose.vpn.yaml pull
+
+    echo "[vpn] validating/refreshing trusted LAN certificate outside the VPN tunnel..."
+    if ! docker compose -f compose.vpn.yaml --profile bootstrap run --rm cert-bootstrap; then
+        echo "[vpn] ERROR: trusted stremio.rocks certificate is not available." >&2
+        echo "[vpn] VPN mode was not started because LAN clients require trusted HTTPS on :12470." >&2
+        exit 1
+    fi
+
     _enter_vpn_mode
     exec docker compose -f compose.vpn.yaml up -d --remove-orphans
 fi
