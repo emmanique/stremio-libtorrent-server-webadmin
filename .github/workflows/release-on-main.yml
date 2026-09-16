@@ -17,39 +17,47 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Wait for matching Library addon guard
+      - name: Wait for matching validation guards
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 60); do
-            row="$(gh run list \
-              --repo "$GITHUB_REPOSITORY" \
-              --workflow "Library addon guard" \
-              --commit "$TARGET_SHA" \
-              --limit 1 \
-              --json status,conclusion,headSha \
-              --jq '.[0] // empty')"
 
-            if [ -n "$row" ]; then
-              status="$(printf '%s' "$row" | jq -r '.status')"
-              conclusion="$(printf '%s' "$row" | jq -r '.conclusion // ""')"
-              if [ "$status" = "completed" ]; then
-                test "$conclusion" = "success" || {
-                  echo "Library addon guard concluded: $conclusion" >&2
-                  exit 1
-                }
-                exit 0
+          wait_for_guard() {
+            workflow="$1"
+            for i in $(seq 1 72); do
+              row="$(gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow "$workflow" \
+                --commit "$TARGET_SHA" \
+                --limit 1 \
+                --json status,conclusion,headSha \
+                --jq '.[0] // empty')"
+
+              if [ -n "$row" ]; then
+                status="$(printf '%s' "$row" | jq -r '.status')"
+                conclusion="$(printf '%s' "$row" | jq -r '.conclusion // ""')"
+                if [ "$status" = "completed" ]; then
+                  test "$conclusion" = "success" || {
+                    echo "$workflow concluded: $conclusion" >&2
+                    exit 1
+                  }
+                  echo "$workflow passed for $TARGET_SHA"
+                  return 0
+                fi
               fi
-            fi
-            sleep 5
-          done
-          echo "Timed out waiting for Library addon guard for $TARGET_SHA" >&2
-          exit 1
+              sleep 5
+            done
+            echo "Timed out waiting for $workflow for $TARGET_SHA" >&2
+            exit 1
+          }
+
+          wait_for_guard "Library addon guard"
+          wait_for_guard "VPN integration guard"
 
       - name: Check out validated main commit
         uses: actions/checkout@v4
