@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing stable tag to build and publish, e.g. v1.6.9-server.9"
+        description: "Existing stable tag to build and publish, e.g. v1.6.9-server.10"
         required: true
         type: string
 
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
@@ -52,6 +52,7 @@ jobs:
           echo "CORE_VERSION=$CORE_VERSION" >> "$GITHUB_ENV"
           echo "SERVER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
           echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
+          echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
           echo "Release: tag=$RELEASE_TAG server=$SERVER_VERSION core=$CORE_VERSION webadmin=$WEBADMIN_VERSION"
 
       - name: Log in to GitHub Container Registry
@@ -87,6 +88,19 @@ jobs:
             -t "${WEBADMIN_IMAGE}:latest" \
             ./webadmin
 
+      - name: Build CyberGhost VPN gateway image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+            --label "org.opencontainers.image.version=${SERVER_VERSION}" \
+            --label "org.opencontainers.image.title=Stremio CyberGhost Gluetun Gateway" \
+            -t "${VPN_IMAGE}:${SERVER_VERSION}" \
+            -t "${VPN_IMAGE}:latest" \
+            ./vpn
+
       - name: Smoke-test server runtime image
         shell: bash
         run: |
@@ -95,7 +109,6 @@ jobs:
           trap cleanup EXIT
           cleanup
           docker run -d --name stremio-release-smoke -p 18099:11470 "${SERVER_IMAGE}:${SERVER_VERSION}" >/dev/null
-
           healthy=""
           for i in $(seq 1 180); do
             if body="$(curl -fsS http://127.0.0.1:18099/health 2>/dev/null)"; then
@@ -104,13 +117,11 @@ jobs:
             fi
             sleep 1
           done
-
           if [ -z "$healthy" ]; then
             echo "Server smoke test failed: /health did not become ready." >&2
             docker logs --tail 100 stremio-release-smoke >&2 || true
             exit 1
           fi
-
           echo "$healthy"
           printf '%s' "$healthy" | grep -q "\"version\":\"${CORE_VERSION}\"" || {
             echo "Health response does not report core version ${CORE_VERSION}." >&2
@@ -129,7 +140,6 @@ jobs:
             -p 18090:8090 \
             -v /var/run/docker.sock:/var/run/docker.sock \
             "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" >/dev/null
-
           healthy=""
           for i in $(seq 1 90); do
             if body="$(curl -fsS http://127.0.0.1:18090/health 2>/dev/null)"; then
@@ -138,13 +148,20 @@ jobs:
             fi
             sleep 1
           done
-
           if [ -z "$healthy" ]; then
             echo "WebAdmin smoke test failed: /health did not become ready." >&2
             docker logs --tail 100 webadmin-release-smoke >&2 || true
             exit 1
           fi
           echo "$healthy"
+          curl -fsS http://127.0.0.1:18090/ | grep -q 'vpn-admin.js'
+
+      - name: Smoke-test VPN gateway image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh "${VPN_IMAGE}:${SERVER_VERSION}" \
+            -c 'test -x /stremio-vpn-entrypoint && test -x /gluetun-entrypoint'
 
       - name: Publish GitHub Packages
         shell: bash
@@ -154,6 +171,8 @@ jobs:
           docker push "${SERVER_IMAGE}:latest"
           docker push "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}"
           docker push "${WEBADMIN_IMAGE}:latest"
+          docker push "${VPN_IMAGE}:${SERVER_VERSION}"
+          docker push "${VPN_IMAGE}:latest"
 
       - name: Create or refresh GitHub Release
         shell: bash
@@ -164,16 +183,8 @@ jobs:
           NOTES="docs/releases/${RELEASE_TAG}.md"
           test -f "$NOTES"
           TITLE="Stremio Server WebAdmin ${SERVER_VERSION}"
-
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" \
-              --title "$TITLE" \
-              --notes-file "$NOTES" \
-              --latest
+            gh release edit "$RELEASE_TAG" --title "$TITLE" --notes-file "$NOTES" --latest
           else
-            gh release create "$RELEASE_TAG" \
-              --verify-tag \
-              --title "$TITLE" \
-              --notes-file "$NOTES" \
-              --latest
+            gh release create "$RELEASE_TAG" --verify-tag --title "$TITLE" --notes-file "$NOTES" --latest
           fi

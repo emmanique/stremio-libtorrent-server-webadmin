@@ -77,6 +77,12 @@ services:
       STREMIO_SOURCE_REPO: "${STREMIO_SOURCE_REPO:-https://github.com/emmanique/stremio-libtorrent-server-webadmin}"
       STREMIO_SOURCE_BRANCH: "${STREMIO_SOURCE_BRANCH:-main}"
       STREMIO_UPDATE_HEALTH_TIMEOUT: "${STREMIO_UPDATE_HEALTH_TIMEOUT:-180}"
+      # VPN settings can be prepared in direct mode; start-vpn.sh later reuses
+      # the same private vpn-data volume and injects the control API key.
+      VPN_CONFIG_DIR: /vpn
+      VPN_CONTAINER: stremio-gluetun
+      VPN_CONTROL_URL: http://stremio-gluetun:8000
+      VPN_CONTROL_API_KEY: "${VPN_CONTROL_API_KEY:-}"
       IPADDRESS: "${IPADDRESS:-localhost}"
       WEB_PLAYER_URL: "http://${IPADDRESS:-localhost}:8080"
       SERVER_URL: "http://${IPADDRESS:-localhost}:11470"
@@ -85,6 +91,7 @@ services:
     volumes:
       - webadmin-data:/data
       - stremio-config:/config
+      - vpn-data:/vpn
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - stremio-internal
@@ -130,3 +137,4 @@ volumes:
   webadmin-data:
   pihole-etc:
   pihole-dnsmasq:
+  vpn-data:

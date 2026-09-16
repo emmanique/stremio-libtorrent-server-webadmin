@@ -9,11 +9,15 @@ compose.hub.yaml
 compose.vpn.yaml
 .env
 .env.example
+.gitignore
 start.sh
+start-vpn.sh
+vpn
 SERVER_VERSION
 FORK_VERSION
 VERSIONING.md
 QUICKSTART.md
+VPN.md
 INSTALL-SEPARATED-V2.md
 webadmin
 docker/webadmin_entrypoint.py

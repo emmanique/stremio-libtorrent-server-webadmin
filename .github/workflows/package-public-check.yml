@@ -1,14 +1,12 @@
 name: Public package pull check
 
 on:
-  push:
-    branches:
-      - main
   workflow_run:
     workflows:
       - "Release package"
     types:
       - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,7 +14,7 @@ permissions:
 jobs:
   anonymous-pull:
     if: >-
-      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -56,6 +54,15 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:${WEBADMIN_VERSION}"
+          docker image rm "$IMAGE" >/dev/null 2>&1 || true
+          docker pull "$IMAGE"
+          docker image inspect "$IMAGE" >/dev/null
+
+      - name: Pull VPN gateway package anonymously
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:${SERVER_VERSION}"
           docker image rm "$IMAGE" >/dev/null 2>&1 || true
           docker pull "$IMAGE"
           docker image inspect "$IMAGE" >/dev/null

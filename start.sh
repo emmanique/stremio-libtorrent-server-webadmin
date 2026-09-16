@@ -82,7 +82,7 @@ fi
 if [ "$#" -eq 0 ]; then
     echo "[start] pulling published images..."
     docker compose pull
-    exec docker compose up -d
+    exec docker compose up -d --remove-orphans
 fi
 
 exec docker compose "$@"

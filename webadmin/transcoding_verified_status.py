@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import addon_links
 import transcoding_profiles as base
+import vpn_admin
 
 app = base.app
 _original_status = base.transcoding_status
@@ -39,8 +40,6 @@ def transcoding_status():
         hardware["capabilitySource"] = "runtime-profile-self-test"
         data["hardware"] = hardware
     else:
-        # No runtime test has been run since WebAdmin start. Never promote a
-        # compiled encoder list to a verified-ready status.
         hardware = data.get("hardware") if isinstance(data.get("hardware"), dict) else {}
         for key in ("h264Vaapi", "hevcVaapi", "h264Nvenc", "hevcNvenc", "libx264", "libx265"):
             hardware[key] = False
@@ -63,3 +62,4 @@ def _replace_route(path: str) -> None:
 _replace_route("/api/transcoding/status")
 app.add_api_route("/api/transcoding/status", transcoding_status, methods=["GET"])
 addon_links.install(app)
+vpn_admin.install(app)
