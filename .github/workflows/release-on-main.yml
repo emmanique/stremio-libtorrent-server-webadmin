@@ -72,8 +72,14 @@ jobs:
           set -euo pipefail
           SERVER_VERSION="$(tr -d '[:space:]' < SERVER_VERSION)"
           FORK_VERSION="$(tr -d '[:space:]' < FORK_VERSION)"
+          WEBADMIN_VERSION="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          CORE_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
           test "$SERVER_VERSION" = "$FORK_VERSION"
           TAG="v${SERVER_VERSION}"
+
+          echo "server_version=$SERVER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "webadmin_version=$WEBADMIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "core_version=$CORE_VERSION" >> "$GITHUB_OUTPUT"
 
           git fetch origin --tags
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -81,9 +87,11 @@ jobs:
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               echo "Release $TAG already exists; nothing to publish."
               echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "release_missing=false" >> "$GITHUB_OUTPUT"
             else
-              echo "Release $TAG is missing; package publication will be dispatched again to create it."
+              echo "Release $TAG is missing; publication will be retried."
               echo "publish=true" >> "$GITHUB_OUTPUT"
+              echo "release_missing=true" >> "$GITHUB_OUTPUT"
             fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             exit 0
@@ -94,10 +102,13 @@ jobs:
           git tag -a "$TAG" "$TARGET_SHA" -m "Stremio Server WebAdmin ${SERVER_VERSION}"
           git push origin "refs/tags/$TAG"
           echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "release_missing=false" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch package publication
+        id: dispatch
         if: steps.release.outputs.publish == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -105,3 +116,44 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f "release_tag=${{ steps.release.outputs.tag }}"
+
+      - name: Create missing release directly when redispatch is unavailable
+        if: >-
+          steps.release.outputs.release_missing == 'true' &&
+          steps.dispatch.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release.outputs.tag }}"
+          SERVER_VERSION="${{ steps.release.outputs.server_version }}"
+          WEBADMIN_VERSION="${{ steps.release.outputs.webadmin_version }}"
+          CORE_VERSION="${{ steps.release.outputs.core_version }}"
+          NOTES="docs/releases/${TAG}.md"
+          NOTES_FILE="$NOTES"
+
+          if [ ! -f "$NOTES_FILE" ]; then
+            NOTES_FILE="/tmp/release-notes.md"
+            cat > "$NOTES_FILE" <<EOF
+# Stremio Server WebAdmin ${SERVER_VERSION}
+
+## Components
+
+- Core: \`${CORE_VERSION}\`
+- Server/Fork: \`${SERVER_VERSION}\`
+- WebAdmin: \`${WEBADMIN_VERSION}\`
+- VPN gateway: \`${SERVER_VERSION}\`
+
+## Packages
+
+- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin:${SERVER_VERSION}\`
+- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin:${WEBADMIN_VERSION}\`
+- \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn:${SERVER_VERSION}\`
+EOF
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Stremio Server WebAdmin ${SERVER_VERSION}" \
+            --notes-file "$NOTES_FILE" \
+            --latest
