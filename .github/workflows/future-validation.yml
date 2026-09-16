@@ -11,10 +11,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: future-full-validation
+  cancel-in-progress: true
+
 jobs:
   full-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -29,8 +33,36 @@ jobs:
           python -m pip install --upgrade pip uv
           uv sync --dev
 
-      - name: Run unit and functional Python tests
-        run: uv run pytest -q -m "not integration"
+      - name: Run deterministic functional test gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 300s uv run pytest -q \
+            tests/test_app.py \
+            tests/test_config.py \
+            tests/test_health.py \
+            tests/test_cache.py \
+            tests/test_metrics.py \
+            tests/test_addon_learning.py \
+            tests/test_addon_model.py \
+            tests/test_addon_routes.py \
+            tests/test_library_addon_api.py \
+            tests/test_library_download_api.py \
+            tests/test_library_labels.py \
+            tests/test_library_metadata.py \
+            tests/test_library_mount.py \
+            tests/test_library_page.py \
+            tests/test_library_poster_fallback.py \
+            tests/test_library_session.py \
+            tests/test_library_state.py \
+            tests/test_netguard.py \
+            tests/test_pins.py \
+            tests/test_pins_api.py \
+            tests/test_ffmpeg_cmd.py \
+            tests/test_converter_cmd.py \
+            tests/test_probe.py \
+            tests/test_profiler.py \
+            tests/test_hls_routes.py
 
       - name: Validate shell syntax
         run: |
