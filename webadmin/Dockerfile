@@ -4,6 +4,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY fork_update.py .
+COPY package_update.py .
 COPY version_lifecycle.py .
 COPY transcoding_config.py .
 COPY transcoding_runtime_fix.py .
