@@ -190,24 +190,24 @@ jobs:
               git show "origin/main:${NOTES}" > "$NOTES_FILE"
             else
               NOTES_FILE="/tmp/release-notes.md"
-              cat > "$NOTES_FILE" <<EOF
-# Stremio Server WebAdmin ${SERVER_VERSION}
-
-## Components
-
-- Core: \`${CORE_VERSION}\`
-- Server/Fork: \`${SERVER_VERSION}\`
-- WebAdmin: \`${WEBADMIN_VERSION}\`
-- VPN gateway: \`${SERVER_VERSION}\`
-
-## Packages
-
-- \`${SERVER_IMAGE}:${SERVER_VERSION}\`
-- \`${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}\`
-- \`${VPN_IMAGE}:${SERVER_VERSION}\`
-
-This release was built, smoke-tested and published automatically from the validated release tag.
-EOF
+              printf '%s\n' \
+                "# Stremio Server WebAdmin ${SERVER_VERSION}" \
+                "" \
+                "## Components" \
+                "" \
+                "- Core: ${CORE_VERSION}" \
+                "- Server/Fork: ${SERVER_VERSION}" \
+                "- WebAdmin: ${WEBADMIN_VERSION}" \
+                "- VPN gateway: ${SERVER_VERSION}" \
+                "" \
+                "## Packages" \
+                "" \
+                "- ${SERVER_IMAGE}:${SERVER_VERSION}" \
+                "- ${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" \
+                "- ${VPN_IMAGE}:${SERVER_VERSION}" \
+                "" \
+                "This release was built, smoke-tested and published automatically from the validated release tag." \
+                > "$NOTES_FILE"
             fi
           fi
 
