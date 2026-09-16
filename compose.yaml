@@ -2,10 +2,8 @@ name: stremio-platform
 
 services:
   stremio-libtorrent-server:
-    build:
-      context: .
-    pull_policy: build
-    image: stremio-libtorrent-server-webadmin:local
+    image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
+    pull_policy: always
     container_name: stremio-libtorrent-server
     restart: unless-stopped
     environment:
@@ -64,10 +62,8 @@ services:
       retries: 3
 
   webadmin:
-    build:
-      context: ./webadmin
-    pull_policy: build
-    image: stremio-webadmin:separated-v2
+    image: "${WEBADMIN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest}"
+    pull_policy: always
     container_name: stremio-webadmin
     restart: unless-stopped
     environment:
@@ -75,9 +71,11 @@ services:
       STREMIO_CONFIG_FILE: /config/admin-settings.json
       STREMIO_URL: http://stremio-libtorrent-server:11470
       STREMIO_CONTAINER: stremio-libtorrent-server
-      STREMIO_IMAGE: stremio-libtorrent-server-webadmin:local
-      STREMIO_SOURCE_REPO: https://github.com/emmanique/stremio-libtorrent-server-webadmin
-      STREMIO_SOURCE_BRANCH: main
+      STREMIO_IMAGE: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
+      STREMIO_PACKAGE_REPO: "${STREMIO_PACKAGE_REPO:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin}"
+      WEBADMIN_IMAGE: "${WEBADMIN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest}"
+      STREMIO_SOURCE_REPO: "${STREMIO_SOURCE_REPO:-https://github.com/emmanique/stremio-libtorrent-server-webadmin}"
+      STREMIO_SOURCE_BRANCH: "${STREMIO_SOURCE_BRANCH:-main}"
       STREMIO_UPDATE_HEALTH_TIMEOUT: "${STREMIO_UPDATE_HEALTH_TIMEOUT:-180}"
       IPADDRESS: "${IPADDRESS:-localhost}"
       WEB_PLAYER_URL: "http://${IPADDRESS:-localhost}:8080"
@@ -96,6 +94,7 @@ services:
 
   pihole:
     image: pihole/pihole:latest
+    pull_policy: always
     container_name: stremio-pihole
     restart: unless-stopped
     environment:
