@@ -1,26 +1,37 @@
-# Regular-user compose — uses the PUBLISHED image (no build, no source needed).
-#   IPADDRESS=<your-server-LAN-IP> docker compose -f compose.hub.yaml up -d
-# Then open http://<server-ip>:8080  (or the trusted HTTPS URL shown in `docker logs stremio`).
+# Published-image compose for the streaming runtime from THIS fork.
 #
-# CPU/VAAPI-safe (no GPU requirement). For Intel VAAPI add `--device /dev/dri` (or a devices: entry);
-# for NVIDIA NVENC use the launcher (docker/launch.sh) which probes the GPU.
+# This file is intentionally runtime-only. For the full WebAdmin + Pi-hole stack use compose.yaml.
+# Override STREMIO_IMAGE if the fork image is published under a different registry/name:
+#   STREMIO_IMAGE=registry.example/user/stremio-libtorrent-server-webadmin:tag \
+#     IPADDRESS=<server-LAN-IP> docker compose -f compose.hub.yaml up -d
 services:
-  stremio:
-    image: androshack/stremio-libtorrent-server:latest
-    container_name: stremio
+  stremio-libtorrent-server:
+    image: "${STREMIO_IMAGE:-emmanique/stremio-libtorrent-server-webadmin:latest}"
+    container_name: stremio-libtorrent-server
     restart: unless-stopped
     environment:
-      # Your server's LAN IP -> a TRUSTED, TV-compatible cert (Let's Encrypt via *.stremio.rocks).
-      # Leave empty to use a self-signed cert (browser works, TVs reject) or a bring-your-own cert.
-      IPADDRESS: ${IPADDRESS:-}
-      # BitTorrent peer port; the published port below follows it so listen and forward stay in sync.
+      IPADDRESS: "${IPADDRESS:-}"
+      SERVER_URL: "${SERVER_URL:-}"
       STREMIOSRV_BT_LISTEN_PORT: "${STREMIOSRV_BT_LISTEN_PORT:-6881}"
+      STREMIOSRV_CACHE_ROOT: /root/.stremio-server
+      CERT_FILE: "${CERT_FILE:-certificates.pem}"
+      STREMIOSRV_LIBRARY_UI: "${STREMIOSRV_LIBRARY_UI:-true}"
+      STREMIOSRV_LIBRARY_ALLOW_HTTP: "${STREMIOSRV_LIBRARY_ALLOW_HTTP:-false}"
+      STREMIOSRV_LIBRARY_OWNER: "${STREMIOSRV_LIBRARY_OWNER:-}"
+      STREMIOSRV_LIBRARY_ADDON_ALLOW: "${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}"
     ports:
-      - "8080:8080"          # web player + API (HTTP/LAN)
-      - "12470:12470"        # web player + API (HTTPS, trusted cert when IPADDRESS set)
-      - "${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/tcp"  # BT peer port (inbound)
-      - "${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp"
+      - "${IPADDRESS:-0.0.0.0}:8080:8080"
+      - "${IPADDRESS:-0.0.0.0}:11470:11470"
+      - "${IPADDRESS:-0.0.0.0}:12470:12470"
+      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/tcp"
+      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp"
     volumes:
-      - stremio-data:/root/.stremio-server
+      - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:11470/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
-  stremio-data:
+  stremio-cache:
