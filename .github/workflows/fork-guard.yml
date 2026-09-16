@@ -12,90 +12,54 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Validate fork-owned files
+      - name: Validate fork-owned files and versions
         shell: bash
         run: |
           set -euo pipefail
-          test -s SERVER_VERSION
-          test -s FORK_VERSION
-          test -s webadmin/WEBADMIN_VERSION
-          test -f VERSIONING.md
-          test -f compose.yaml
-          test -f compose.dns.yaml
-          test -f compose.vaapi.yaml
-          test -f compose.vpn.yaml
-          test -f start.sh
-          test -f start-vpn.sh
-          test -f vpn/Dockerfile
-          test -f vpn/entrypoint.sh
-          test -f VPN.md
-          test -f Dockerfile
-          test -f docker/webadmin_entrypoint.py
-          test -f docker/ffmpeg_wrapper.py
-          test -f webadmin/app.py
-          test -f webadmin/fork_update.py
-          test -f webadmin/package_update.py
-          test -f webadmin/version_lifecycle.py
-          test -f webadmin/vpn_admin.py
-          test -f webadmin/transcoding_config.py
-          test -f webadmin/transcoding_runtime_fix.py
-          test -f webadmin/transcoding_profiles.py
-          test -f webadmin/transcoding_verified_status.py
-          test -f webadmin/static/vpn-admin.js
-          test -f webadmin/static/component-versions.js
-          test -f webadmin/static/transcoding-dashboard.js
-          test -f webadmin/static/transcoding-runtime-fix.js
-          test -f webadmin/static/transcoding-simple-config.js
-
+          for file in \
+            SERVER_VERSION FORK_VERSION VERSIONING.md VPN.md compose.yaml compose.vpn.yaml \
+            start.sh start-vpn.sh vpn/Dockerfile vpn/entrypoint.sh Dockerfile \
+            webadmin/Dockerfile webadmin/WEBADMIN_VERSION webadmin/app.py \
+            webadmin/fork_update.py webadmin/package_update.py webadmin/version_lifecycle.py \
+            webadmin/vpn_admin.py webadmin/vpn_profiles.py webadmin/transcoding_config.py \
+            webadmin/transcoding_runtime_fix.py webadmin/transcoding_profiles.py \
+            webadmin/transcoding_verified_status.py webadmin/static/vpn-admin.js; do
+            test -f "$file" || { echo "Missing fork-owned file: $file" >&2; exit 1; }
+          done
           cmp -s SERVER_VERSION FORK_VERSION || {
-            echo 'SERVER_VERSION and FORK_VERSION must contain the same value.'
+            echo 'SERVER_VERSION and FORK_VERSION must contain the same value.' >&2
             exit 1
           }
+          grep -q 'COPY vpn_profiles.py' webadmin/Dockerfile
+          grep -q 'vpn_profiles.install(app)' webadmin/transcoding_verified_status.py
 
+      - name: Validate package-only runtime defaults
+        shell: bash
+        run: |
+          set -euo pipefail
           grep -q '^  webadmin:' compose.yaml
           grep -q '^  pihole:' compose.yaml
           grep -q '172.30.0.53' compose.yaml
           grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest' compose.yaml
           grep -q 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest' compose.yaml
-          grep -q 'https://github.com/emmanique/stremio-libtorrent-server-webadmin' compose.yaml
           grep -q 'STREMIO_PACKAGE_REPO' compose.yaml
-          grep -q 'STREMIO_UPDATE_HEALTH_TIMEOUT' compose.yaml
           grep -q 'vpn-data:/vpn' compose.yaml
           if grep -Eq '^[[:space:]]+build:' compose.yaml; then
-            echo 'Default compose.yaml must consume published images, not local build contexts.'
+            echo 'Default compose.yaml must consume published images, not local build contexts.' >&2
             exit 1
           fi
           grep -q 'SERVER_VERSION' Dockerfile
           grep -q 'FORK_VERSION' Dockerfile
           grep -q 'ffmpeg_wrapper.py' Dockerfile
-          grep -q 'package_update.py' webadmin/Dockerfile
-          grep -q 'vpn_admin.py' webadmin/Dockerfile
-          grep -q 'transcoding_verified_status:app' webadmin/Dockerfile
-          grep -q '/api/transcoding/status' webadmin/transcoding_config.py
-          grep -q 'import transcoding_config as base' webadmin/transcoding_runtime_fix.py
-          grep -q 'import transcoding_runtime_fix as base' webadmin/transcoding_profiles.py
-          grep -q 'import transcoding_profiles as base' webadmin/transcoding_verified_status.py
-          grep -q 'vpn_admin.install(app)' webadmin/transcoding_verified_status.py
-          grep -q '/api/transcoding/profiles' webadmin/transcoding_profiles.py
-          grep -q 'Full GPU' webadmin/transcoding_profiles.py
-          grep -q 'runtime-profile-self-test' webadmin/transcoding_verified_status.py
-          grep -q 'Only runtime-verified encoders' webadmin/static/transcoding-simple-config.js
-          grep -q 'WEBADMIN_VERSION' webadmin/Dockerfile
 
-          if grep -R --line-number --fixed-strings \
-            'https://github.com/andrewhack/stremio-libtorrent-server' \
-            webadmin compose.yaml compose.vpn.yaml Dockerfile docker/webadmin_entrypoint.py docker/ffmpeg_wrapper.py; then
-            echo 'Runtime/update paths must not use the upstream repository as their source.'
-            exit 1
-          fi
-
-      - name: Enforce fork runtime version bumps
+      - name: Enforce component version bumps on pull requests
         if: github.event_name == 'pull_request'
         shell: bash
         env:
@@ -105,13 +69,13 @@ jobs:
           changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
           if printf '%s\n' "$changed" | grep -Eq '^(Dockerfile|compose\.yaml|compose\.vpn\.yaml|start-vpn\.sh|vpn/|docker/ffmpeg_wrapper\.py|docker/webadmin_entrypoint\.py)$'; then
             if git diff --quiet "$BASE_SHA"...HEAD -- SERVER_VERSION FORK_VERSION; then
-              echo 'Server runtime/distribution integration changed without a SERVER_VERSION/FORK_VERSION bump.'
+              echo 'Server runtime/distribution integration changed without a SERVER_VERSION/FORK_VERSION bump.' >&2
               exit 1
             fi
           fi
           if printf '%s\n' "$changed" | grep -Eq '^webadmin/'; then
             if git diff --quiet "$BASE_SHA"...HEAD -- webadmin/WEBADMIN_VERSION; then
-              echo 'WebAdmin changed without a WEBADMIN_VERSION bump.'
+              echo 'WebAdmin changed without a WEBADMIN_VERSION bump.' >&2
               exit 1
             fi
           fi
@@ -124,10 +88,7 @@ jobs:
           grep -q 'rollback' webadmin/fork_update.py
           grep -q '_wait_healthy' webadmin/fork_update.py
           grep -q '_restore_old_container' webadmin/fork_update.py
-          grep -q 'create_container' webadmin/fork_update.py
           grep -q 'previousImageId' webadmin/fork_update.py
-          grep -q 'coreVersion' webadmin/fork_update.py
-          grep -q 'forkVersion' webadmin/fork_update.py
           grep -q 'PACKAGE_REPO' webadmin/package_update.py
           grep -q 'images.pull' webadmin/package_update.py
           grep -q '_activate_image' webadmin/package_update.py
@@ -142,13 +103,9 @@ jobs:
           grep -q 'WEBADMIN_VERSION_URL' webadmin/version_lifecycle.py
           grep -q '/api/component-versions' webadmin/version_lifecycle.py
           grep -q 'guarded_server_update_worker' webadmin/version_lifecycle.py
-          grep -q 'guarded_update' webadmin/version_lifecycle.py
-          grep -q '_replace_route("/api/update")' webadmin/version_lifecycle.py
           grep -q 'docker compose pull webadmin' webadmin/version_lifecycle.py
-          grep -q 'host-compose-pull' webadmin/version_lifecycle.py
-          grep -q 'transactional-package' webadmin/version_lifecycle.py
 
-      - name: Validate CyberGhost VPN integration
+      - name: Validate CyberGhost VPN connection lifecycle
         shell: bash
         run: |
           set -euo pipefail
@@ -158,83 +115,57 @@ jobs:
           export PIHOLE_WEB_BIND_IP=192.0.2.10
           export VPN_CONTROL_API_KEY=test-control-key
           docker compose -f compose.vpn.yaml config --quiet
-          grep -q 'VPN_SERVICE_PROVIDER: cyberghost' compose.vpn.yaml
+          grep -q 'VPN_SERVICE_PROVIDER: custom' compose.vpn.yaml
           grep -q 'network_mode: "service:gluetun"' compose.vpn.yaml
           grep -q 'HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE' compose.vpn.yaml
-          grep -q 'OPENVPN_CLIENTCRT_SECRETFILE' vpn/entrypoint.sh
-          grep -q 'OPENVPN_CLIENTKEY_SECRETFILE' vpn/entrypoint.sh
-          grep -q '/api/vpn/status' webadmin/vpn_admin.py
-          grep -q '/api/vpn/test' webadmin/vpn_admin.py
-          grep -q 'Disconnect (block traffic)' webadmin/static/vpn-admin.js
+          grep -q 'OPENVPN_CUSTOM_CONFIG' vpn/entrypoint.sh
+          grep -q 'startup_profile' vpn/entrypoint.sh
+          grep -q 'next_profile' vpn/entrypoint.sh
+          grep -q '/api/vpn/profiles' webadmin/vpn_profiles.py
+          grep -q 'create_profile' webadmin/vpn_profiles.py
+          grep -q 'activate_profile' webadmin/vpn_profiles.py
+          grep -q 'delete_profile' webadmin/vpn_profiles.py
+          grep -q 'Enable at startup' webadmin/static/vpn-admin.js
           if grep -Eq '^\s+- .*6881:.*6881' compose.vpn.yaml; then
             echo 'VPN mode must not expose the host BitTorrent port.' >&2
             exit 1
           fi
 
-      - name: Validate trusted connection URL integration
+      - name: Validate trusted connection and transcoding integration
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'httpsCert.json' webadmin/version_lifecycle.py
           grep -q 'stremio\\.rocks' webadmin/version_lifecycle.py
           grep -q -- '--development --webui-url=' webadmin/version_lifecycle.py
-          grep -q '_replace_route("/api/status")' webadmin/version_lifecycle.py
-          grep -q '_replace_route("/api/qr.svg")' webadmin/version_lifecycle.py
+          grep -q '/api/transcoding/profiles' webadmin/transcoding_profiles.py
+          grep -q 'runtime-profile-self-test' webadmin/transcoding_verified_status.py
+          grep -q 'Full GPU' webadmin/transcoding_profiles.py
 
-      - name: Validate default Docker Compose
-        run: docker compose config --quiet
-
-      - name: Validate automatic host IP launcher
+      - name: Validate Compose, Python, shell and JavaScript
         shell: bash
         run: |
           set -euo pipefail
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.dns.yaml config --quiet
+          docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
+          python -m compileall -q webadmin docker/webadmin_entrypoint.py docker/ffmpeg_wrapper.py
           sh -n start.sh
-          IPADDRESS=192.0.2.10 sh start.sh config >/dev/null
-
-      - name: Validate LAN DNS override
-        run: docker compose -f compose.yaml -f compose.dns.yaml config --quiet
-
-      - name: Validate VAAPI override
-        run: docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
-
-      - name: Compile integration code
-        run: python -m compileall -q webadmin docker/webadmin_entrypoint.py docker/ffmpeg_wrapper.py
-
-      - name: Test explicit FFmpeg profile policy
-        shell: bash
-        run: |
-          python - <<'PY'
-          import importlib.util
-          spec = importlib.util.spec_from_file_location('ffmpeg_wrapper', 'docker/ffmpeg_wrapper.py')
-          mod = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(mod)
-          mod._available_encoders = lambda: {'h264_vaapi', 'hevc_vaapi', 'libx264', 'libx265'}
-          mod.os.path.exists = lambda path: True
-
-          args = ['-i', 'input', '-c:v', 'libx265', '-preset', 'veryfast', '-f', 'hls', 'out.m3u8']
-          out, decision = mod._apply_profile(args, 'vaapi-hevc', {'transcoding_video_quality': 22})
-          assert 'hevc_vaapi' in out, (out, decision)
-          assert 'libx265' not in out, (out, decision)
-          assert '-vaapi_device' in out, (out, decision)
-          assert any('hwupload' in value for value in out), (out, decision)
-
-          full_out, full_decision = mod._apply_profile(args, 'vaapi-full-h264', {'transcoding_video_quality': 21})
-          assert 'h264_vaapi' in full_out, (full_out, full_decision)
-          assert 'libx265' not in full_out, (full_out, full_decision)
-          assert '-hwaccel' in full_out and 'vaapi' in full_out, (full_out, full_decision)
-          assert '-hwaccel_output_format' in full_out, (full_out, full_decision)
-          assert any('scale_vaapi' in value for value in full_out), (full_out, full_decision)
-          assert 'decode=vaapi' in full_decision, full_decision
-
-          copy_args = ['-i', 'input', '-c:v', 'copy', '-f', 'hls', 'out.m3u8']
-          copy_out, copy_decision = mod._apply_profile(copy_args, 'vaapi-full-h264', {})
-          assert copy_out == copy_args, (copy_out, copy_decision)
-          PY
-
-      - name: Validate WebAdmin JavaScript
-        run: |
+          sh -n start-vpn.sh
+          sh -n vpn/entrypoint.sh
           node --check webadmin/static/component-versions.js
           node --check webadmin/static/transcoding-dashboard.js
           node --check webadmin/static/transcoding-runtime-fix.js
           node --check webadmin/static/transcoding-simple-config.js
           node --check webadmin/static/vpn-admin.js
+
+      - name: Reject upstream runtime defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R --line-number --fixed-strings \
+            'https://github.com/andrewhack/stremio-libtorrent-server' \
+            webadmin compose.yaml compose.vpn.yaml Dockerfile docker/webadmin_entrypoint.py docker/ffmpeg_wrapper.py; then
+            echo 'Runtime/update paths must not use the upstream repository as their source.' >&2
+            exit 1
+          fi

@@ -73,6 +73,7 @@ jobs:
           sh -n docker/launch.sh
           sh -n docker/publish.sh
           sh -n docker/push-readme.sh
+          node --check webadmin/static/vpn-admin.js
 
       - name: Validate all Compose variants
         shell: bash
@@ -108,22 +109,23 @@ jobs:
           grep -q 'import package_update as transactional' webadmin/version_lifecycle.py
           grep -q 'docker compose pull webadmin' webadmin/version_lifecycle.py
 
-      - name: Validate CyberGhost VPN integration
+      - name: Validate CyberGhost VPN profile integration
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'VPN_SERVICE_PROVIDER: cyberghost' compose.vpn.yaml
+          grep -q 'VPN_SERVICE_PROVIDER: custom' compose.vpn.yaml
           grep -q 'network_mode: "service:gluetun"' compose.vpn.yaml
           grep -q 'HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE' compose.vpn.yaml
           grep -q 'vpn-data:/vpn' compose.vpn.yaml
           grep -q 'VPN_CONTROL_API_KEY' start-vpn.sh
-          grep -q 'OPENVPN_CLIENTCRT_SECRETFILE' vpn/entrypoint.sh
-          grep -q 'OPENVPN_CLIENTKEY_SECRETFILE' vpn/entrypoint.sh
+          grep -q 'OPENVPN_CUSTOM_CONFIG' vpn/entrypoint.sh
+          grep -q 'startup_profile' vpn/entrypoint.sh
+          grep -q 'next_profile' vpn/entrypoint.sh
           grep -q '/api/vpn/status' webadmin/vpn_admin.py
-          grep -q '/api/vpn/test' webadmin/vpn_admin.py
-          grep -q 'vpn_admin.install(app)' webadmin/transcoding_verified_status.py
-          grep -q 'vpn-admin.js' webadmin/vpn_admin.py
-          grep -q 'Disconnect (block traffic)' webadmin/static/vpn-admin.js
+          grep -q '/api/vpn/profiles' webadmin/vpn_profiles.py
+          grep -q 'vpn_profiles.install(app)' webadmin/transcoding_verified_status.py
+          grep -q 'New connection' webadmin/static/vpn-admin.js
+          grep -q 'Enable at startup' webadmin/static/vpn-admin.js
           if grep -Eq '^\s+- .*6881:.*6881' compose.vpn.yaml; then
             echo 'VPN mode must not expose the host BitTorrent port; CyberGhost has no VPN port forwarding.' >&2
             exit 1
@@ -145,7 +147,7 @@ jobs:
           if grep -R --line-number --fixed-strings "$forbidden" \
               compose.hub.yaml compose.vpn.yaml docker/launch.sh \
               docker/publish.sh docker/push-readme.sh; then
-            echo "Runtime/distribution paths must not default to the upstream image/repository."
+            echo 'Runtime/distribution paths must not default to the upstream image/repository.'
             exit 1
           fi
 
