@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vpn-integration-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   vpn-integration:
     runs-on: ubuntu-latest
@@ -31,8 +35,11 @@ jobs:
           sh -n vpn/entrypoint.sh
           docker compose -f compose.vpn.yaml config --quiet
           grep -q 'network_mode: "service:gluetun"' compose.vpn.yaml
-          grep -q 'VPN_SERVICE_PROVIDER: cyberghost' compose.vpn.yaml
+          grep -q 'VPN_SERVICE_PROVIDER: custom' compose.vpn.yaml
           grep -q 'HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE' compose.vpn.yaml
+          grep -q 'OPENVPN_CUSTOM_CONFIG' vpn/entrypoint.sh
+          grep -q 'startup_profile' vpn/entrypoint.sh
+          grep -q 'next_profile' vpn/entrypoint.sh
           if grep -Eq '^\s+- .*6881:.*6881' compose.vpn.yaml; then
             echo 'VPN mode must not publish BitTorrent port 6881 on the host.' >&2
             exit 1
@@ -41,7 +48,7 @@ jobs:
       - name: Build WebAdmin with VPN module
         run: docker build -t webadmin-vpn-validation:local ./webadmin
 
-      - name: Smoke-test WebAdmin VPN UI and API
+      - name: Smoke-test VPN connection profile CRUD
         shell: bash
         run: |
           set -euo pipefail
@@ -68,19 +75,85 @@ jobs:
           }
 
           curl -fsS http://127.0.0.1:18090/ | grep -q '/vpn-admin.js'
-          curl -fsS http://127.0.0.1:18090/vpn-admin.js | grep -q 'Disconnect (block traffic)'
-          curl -fsS http://127.0.0.1:18090/api/vpn/status > /tmp/vpn-status.json
+          curl -fsS http://127.0.0.1:18090/vpn-admin.js | grep -q 'New connection'
+
           python - <<'PY'
-          import json
-          data = json.load(open('/tmp/vpn-status.json', encoding='utf-8'))
-          assert data['deploymentMode'] == 'direct', data
-          assert data['routing']['stremioThroughVpn'] is False, data
-          credentials = data['config']['credentials']
-          assert set(credentials) == {'username', 'password', 'clientCert', 'clientKey'}, credentials
-          assert all(value is False for value in credentials.values()), credentials
-          serialized = json.dumps(data)
-          assert 'openvpn_password' not in serialized
-          assert 'PRIVATE KEY' not in serialized
+          import base64, io, json, zipfile, urllib.error, urllib.request
+
+          def bundle():
+              buf = io.BytesIO()
+              with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+                  z.writestr('openvpn.ovpn', '''client\nremote 127.0.0.1 443\ndev tun\nproto udp\nauth-user-pass\nscript-security 2\nca ca.crt\ncert client.crt\nkey client.key\nremote-cert-tls server\n''')
+                  z.writestr('ca.crt', '-----BEGIN CERTIFICATE-----\nTEST-CA\n-----END CERTIFICATE-----\n')
+                  z.writestr('client.crt', '-----BEGIN CERTIFICATE-----\nTEST-CLIENT\n-----END CERTIFICATE-----\n')
+                  z.writestr('client.key', '-----BEGIN PRIVATE KEY-----\nTEST-KEY\n-----END PRIVATE KEY-----\n')
+              return base64.b64encode(buf.getvalue()).decode()
+
+          def call(path, method='GET', payload=None, expected=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request('http://127.0.0.1:18090' + path, data=data, method=method)
+              if data is not None:
+                  req.add_header('Content-Type', 'application/json')
+              try:
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      body = json.load(r)
+                      if expected is not None:
+                          assert r.status == expected, (r.status, body)
+                      return r.status, body
+              except urllib.error.HTTPError as exc:
+                  body = json.loads(exc.read().decode() or '{}')
+                  if expected is not None:
+                      assert exc.code == expected, (exc.code, body)
+                      return exc.code, body
+                  raise
+
+          common = {
+              'country': 'Testland',
+              'transport': 'auto',
+              'username': 'vpn-test-user',
+              'password': 'vpn-test-password',
+              'pre_shared': 'CyberGhost',
+              'bundle_base64': bundle(),
+              'bundle_filename': 'cyberghost-test.zip',
+              'firewall_outbound_subnets': '192.168.0.0/16,172.30.0.0/24',
+              'features': {
+                  'malicious_websites': True,
+                  'block_ads': True,
+                  'block_tracking': False,
+                  'redirect_https': False,
+              },
+          }
+          _, first = call('/api/vpn/profiles', 'POST', {**common, 'name':'Test Portugal', 'server_group':'127.0.0.1', 'startup_enabled':True}, 201)
+          first_id = first['profile']['id']
+          assert first['profile']['startupEnabled'] is True
+          assert set(first['profile']['bundleFiles']) == {'openvpn.ovpn','ca.crt','client.crt','client.key'}
+          serialized = json.dumps(first)
+          assert 'vpn-test-user' not in serialized and 'vpn-test-password' not in serialized and 'TEST-KEY' not in serialized
+
+          _, listing = call('/api/vpn/profiles')
+          assert listing['startupProfileId'] == first_id
+          assert len(listing['profiles']) == 1
+
+          _, activated = call(f'/api/vpn/profiles/{first_id}/activate', 'POST', None, 202)
+          assert activated['started'] is False
+          _, status = call('/api/vpn/status')
+          assert status['deploymentMode'] == 'direct'
+          assert status['activeProfileId'] == first_id
+          assert status['activeProfile']['credentials']['password'] is True
+
+          profile_dir = '/vpn/profiles/' + first_id
+          check = f"grep -q 'remote 127.0.0.1 443' {profile_dir}/openvpn.runtime.ovpn && grep -q 'ca {profile_dir}/ca.crt' {profile_dir}/openvpn.runtime.ovpn && ! grep -q '^script-security' {profile_dir}/openvpn.runtime.ovpn"
+          import subprocess
+          subprocess.run(['docker','exec','webadmin-vpn-smoke','sh','-c',check], check=True)
+
+          call(f'/api/vpn/profiles/{first_id}', 'DELETE', None, 409)
+          _, second = call('/api/vpn/profiles', 'POST', {**common, 'name':'Second connection', 'server_group':'127.0.0.1', 'startup_enabled':False}, 201)
+          second_id = second['profile']['id']
+          call(f'/api/vpn/profiles/{second_id}/activate', 'POST', None, 202)
+          call(f'/api/vpn/profiles/{first_id}/startup', 'PUT', {'enabled':False}, 200)
+          call(f'/api/vpn/profiles/{first_id}', 'DELETE', None, 200)
+          _, final = call('/api/vpn/profiles')
+          assert len(final['profiles']) == 1 and final['profiles'][0]['id'] == second_id
           PY
 
       - name: Validate VPN JavaScript syntax
