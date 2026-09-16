@@ -9,7 +9,7 @@
 # is required. Arbitrary Docker Compose commands can still be passed through this launcher.
 #
 # Usage:
-#   sh start.sh                         # docker compose pull && docker compose up -d
+#   sh start.sh                         # direct mode: pull + up -d
 #   sh start.sh config                  # inspect the resolved compose configuration
 #   sh start.sh ps                      # show stack status
 #   sh start.sh up -d --force-recreate  # pass arbitrary compose arguments
@@ -20,8 +20,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 _detect_ip() {
-    # Prefer the source address selected by the kernel for the default IPv4 route. This works on
-    # multi-interface hosts much better than simply taking the first address from `hostname -I`.
     if command -v ip >/dev/null 2>&1; then
         detected=$(ip route get "${IP_DETECT_TARGET:-1.1.1.1}" 2>/dev/null \
             | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
@@ -30,8 +28,6 @@ _detect_ip() {
             return
         fi
     fi
-
-    # Minimal fallback for systems without a usable iproute2 result.
     hostname -I 2>/dev/null \
         | awk '{for (i = 1; i <= NF; i++) if ($i !~ /^127\./ && $i !~ /:/) {print $i; exit}}'
 }
@@ -47,8 +43,21 @@ _is_ipv4() {
         END {exit bad ? 1 : 0}'
 }
 
-# An explicitly exported IPADDRESS always wins. Otherwise discover the host address at each start,
-# so DHCP/static-IP changes do not leave stale bindings in Compose.
+_container_exists() {
+    docker container inspect "$1" >/dev/null 2>&1
+}
+
+# VPN mode gives Gluetun the internal address and published Stremio ports. Before returning to
+# direct mode, remove only the two transient containers that own/share that network namespace.
+# Named cache/config/VPN volumes are deliberately untouched.
+_leave_vpn_mode() {
+    if _container_exists stremio-gluetun; then
+        echo "[start] switching VPN -> direct mode (persistent volumes are preserved)..."
+        docker rm -f stremio-libtorrent-server >/dev/null 2>&1 || true
+        docker rm -f stremio-gluetun >/dev/null 2>&1 || true
+    fi
+}
+
 if [ -z "${IPADDRESS:-}" ]; then
     IPADDRESS=$(_detect_ip || true)
 fi
@@ -60,9 +69,6 @@ if [ -z "${IPADDRESS:-}" ] || ! _is_ipv4 "$IPADDRESS"; then
 fi
 
 export IPADDRESS
-
-# Keep Pi-hole web/DNS bindings on the same host address unless the operator explicitly exports a
-# different one. The tracked .env leaves these blank on purpose; exported values override .env.
 PIHOLE_WEB_BIND_IP=${PIHOLE_WEB_BIND_IP:-$IPADDRESS}
 PIHOLE_DNS_BIND_IP=${PIHOLE_DNS_BIND_IP:-$IPADDRESS}
 export PIHOLE_WEB_BIND_IP PIHOLE_DNS_BIND_IP
@@ -82,6 +88,7 @@ fi
 if [ "$#" -eq 0 ]; then
     echo "[start] pulling published images..."
     docker compose pull
+    _leave_vpn_mode
     exec docker compose up -d --remove-orphans
 fi
 

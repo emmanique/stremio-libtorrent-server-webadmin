@@ -36,6 +36,20 @@ _generate_key() {
     fi
 }
 
+_container_exists() {
+    docker container inspect "$1" >/dev/null 2>&1
+}
+
+# Direct mode gives stremio-libtorrent-server the internal 172.30.0.10 address and host ports.
+# Gluetun needs to take over those same resources in VPN mode, so remove the direct Stremio
+# container only after all images have been pulled. Named volumes are never removed.
+_enter_vpn_mode() {
+    if ! _container_exists stremio-gluetun && _container_exists stremio-libtorrent-server; then
+        echo "[vpn] switching direct -> VPN mode (persistent volumes are preserved)..."
+        docker rm -f stremio-libtorrent-server >/dev/null 2>&1 || true
+    fi
+}
+
 if [ -z "${IPADDRESS:-}" ]; then
     IPADDRESS=$(_detect_ip || true)
 fi
@@ -86,6 +100,7 @@ echo "[vpn] CyberGhost credentials/certificates are configured from WebAdmin -> 
 if [ "$#" -eq 0 ]; then
     echo "[vpn] pulling published images..."
     docker compose -f compose.vpn.yaml pull
+    _enter_vpn_mode
     exec docker compose -f compose.vpn.yaml up -d --remove-orphans
 fi
 
