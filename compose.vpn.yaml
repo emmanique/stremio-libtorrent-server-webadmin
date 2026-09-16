@@ -10,6 +10,7 @@
 services:
   gluetun:
     image: qmcgaw/gluetun:latest
+    pull_policy: always
     container_name: stremio-gluetun
     restart: unless-stopped
     cap_add: [NET_ADMIN]
@@ -28,7 +29,8 @@ services:
       - "127.0.0.1:8000:8000"
 
   stremio-libtorrent-server:
-    image: "${STREMIO_IMAGE:-emmanique/stremio-libtorrent-server-webadmin:latest}"
+    image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
+    pull_policy: always
     container_name: stremio-libtorrent-server
     restart: unless-stopped
     network_mode: "service:gluetun"
