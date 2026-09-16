@@ -10,6 +10,7 @@ from __future__ import annotations
 import addon_links
 import transcoding_profiles as base
 import vpn_admin
+import vpn_profiles
 
 app = base.app
 _original_status = base.transcoding_status
@@ -63,3 +64,4 @@ _replace_route("/api/transcoding/status")
 app.add_api_route("/api/transcoding/status", transcoding_status, methods=["GET"])
 addon_links.install(app)
 vpn_admin.install(app)
+vpn_profiles.install(app)
