@@ -61,16 +61,16 @@
 
     localUpdateStarting = true;
     applyUpdateButtonState();
-    if (status) status.textContent = 'Starting verified server update…';
+    if (status) status.textContent = 'Pulling and activating verified server package…';
 
     try {
       const response = await fetch('/api/update', {method: 'POST'});
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || 'Update failed');
 
-      if (status) status.textContent = body.message || 'Server update requested';
+      if (status) status.textContent = body.message || 'Server package update requested';
       if (typeof window.toast === 'function') {
-        window.toast(body.started === false ? 'Server is already up to date' : 'Server update started');
+        window.toast(body.started === false ? 'Server is already up to date' : 'Server package update started');
       }
       if (body.started === false) localUpdateStarting = false;
     } catch (error) {
@@ -130,11 +130,11 @@
       cards.innerHTML = `
         <div class="statuscard">
           <div class="row"><strong>Streaming Server</strong><span class="badge" id="serverLifecycleBadge">● Checking</span></div>
-          <div class="hint" style="margin:12px 0 0">Transactional activation, health validation and automatic rollback. WebAdmin and Pi-hole stay online.</div>
+          <div class="hint" style="margin:12px 0 0">Published GHCR package, transactional activation, health validation and automatic rollback. WebAdmin and Pi-hole stay online.</div>
         </div>
         <div class="statuscard">
           <div class="row"><strong>WebAdmin</strong><span class="badge" id="webadminLifecycleBadge">● Checking</span></div>
-          <div class="hint" style="margin:12px 0 0">Independent release. Activation is a host-side rebuild of only the WebAdmin service.</div>
+          <div class="hint" style="margin:12px 0 0">Independent published image. Activation pulls and recreates only the WebAdmin service.</div>
         </div>`;
       updateBox.insertAdjacentElement('afterend', cards);
     }
@@ -142,10 +142,10 @@
     const notice = panel.querySelector('.notice');
     if (notice) {
       notice.innerHTML = `
-        <strong>Independent release lifecycles.</strong><br>
-        Server updates come only from <code>emmanique/stremio-libtorrent-server-webadmin</code> and start only when a different <code>SERVER_VERSION</code> is verified.
-        A WebAdmin update never triggers a server rebuild automatically. To activate a WebAdmin release on the host, run:<br><br>
-        <code id="webadminUpdateCommand">git pull origin main &amp;&amp; docker compose up -d --build --no-deps webadmin</code>
+        <strong>Independent package release lifecycles.</strong><br>
+        Server updates come only from published packages of <code>emmanique/stremio-libtorrent-server-webadmin</code> and start only when a different <code>SERVER_VERSION</code> is verified.
+        A WebAdmin update never triggers a server rebuild. To activate a WebAdmin package on the host, run:<br><br>
+        <code id="webadminUpdateCommand">docker compose pull webadmin &amp;&amp; docker compose up -d --no-deps webadmin</code>
         <button class="mini" id="copyWebadminUpdate" type="button" style="margin-left:8px">Copy command</button>`;
     }
 
@@ -192,12 +192,12 @@
       const status = byId('updateStatus');
       if (status && !data.server?.updateInProgress && !localUpdateStarting) {
         const serverText = data.server?.updateAvailable === true
-          ? `Server update available: ${data.server.installed || 'unknown'} → ${data.server.available}`
+          ? `Server package update available: ${data.server.installed || 'unknown'} → ${data.server.available}`
           : data.server?.updateAvailable === false
             ? `Server is up to date (${data.server.installed}) · Update disabled`
             : 'Server version check unavailable · Update disabled';
         const webText = data.webadmin?.updateAvailable === true
-          ? `WebAdmin update available: ${data.webadmin.installed || 'unknown'} → ${data.webadmin.available}`
+          ? `WebAdmin package update available: ${data.webadmin.installed || 'unknown'} → ${data.webadmin.available}`
           : data.webadmin?.updateAvailable === false
             ? `WebAdmin is up to date (${data.webadmin.installed})`
             : 'WebAdmin version check unavailable';
