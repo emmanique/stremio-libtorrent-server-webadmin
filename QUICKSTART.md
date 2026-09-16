@@ -2,13 +2,57 @@
 
 This fork runs three coordinated services with Docker Compose:
 
-- `stremio-libtorrent-server` — Stremio streaming engine and HTTPS endpoint;
-- `webadmin` — administration UI on port `8090`;
-- `pihole` — internal DNS service, with its web UI on port `8053` by default.
+- `stremio-libtorrent-server` — published Stremio streaming runtime from GHCR;
+- `webadmin` — published administration UI from GHCR on port `8090`;
+- `pihole` — Pi-hole image, with its web UI on port `8053` by default.
 
-The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION` and the core package version by `pyproject.toml`.
+The default deployment is **package-only**. `compose.yaml` does not build the application from local source. It pulls the published Server and WebAdmin images plus Pi-hole.
 
-## 1. Host IP detection
+The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebAdmin by `webadmin/WEBADMIN_VERSION`, and the core package version by `pyproject.toml`.
+
+## 1. Obtain the deployment files
+
+For a normal managed installation, clone the repository so that you also have `start.sh`, overrides and documentation:
+
+```bash
+git clone https://github.com/emmanique/stremio-libtorrent-server-webadmin.git
+cd stremio-libtorrent-server-webadmin
+```
+
+The application itself is **not built from this checkout**. The checkout only supplies Compose/launcher configuration; application images are pulled from GHCR.
+
+For a minimal one-file deployment you may download only `compose.yaml`:
+
+```bash
+mkdir -p stremio-platform
+cd stremio-platform
+curl -fsSLO https://raw.githubusercontent.com/emmanique/stremio-libtorrent-server-webadmin/main/compose.yaml
+docker compose pull
+docker compose up -d
+```
+
+In that minimal mode, set `IPADDRESS` explicitly when you want ports/certificate generation tied to a specific LAN address.
+
+## 2. Published images
+
+The default images are:
+
+```text
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest
+pihole/pihole:latest
+```
+
+You can pin versions in `.env`:
+
+```env
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.9
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.2.7
+```
+
+Do not store passwords, API tokens, private keys or certificates in the versioned `.env`.
+
+## 3. Host IP detection
 
 The tracked `.env` deliberately leaves `IPADDRESS`, `PIHOLE_WEB_BIND_IP` and `PIHOLE_DNS_BIND_IP` empty.
 
@@ -32,9 +76,7 @@ To force a specific address for a particular run:
 IPADDRESS=192.168.1.244 sh start.sh
 ```
 
-Do not store passwords, API tokens, private keys or certificates in the versioned `.env`.
-
-## 2. Start the stack
+## 4. Start or update the full stack
 
 Recommended:
 
@@ -42,19 +84,40 @@ Recommended:
 sh start.sh
 ```
 
-This is equivalent to running `docker compose up -d --build`, but with the host IPv4 detected and exported first.
+With no arguments, the launcher performs:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+No `docker compose build` is required.
 
 You can also pass any Docker Compose command through the launcher:
 
 ```bash
 sh start.sh config
 sh start.sh ps
-sh start.sh up -d --build --force-recreate
+sh start.sh up -d --force-recreate
 ```
 
-Do not use `docker compose down -v` during upgrades unless you intentionally want to delete persistent volumes.
+To update all published services manually:
 
-## 3. Access the services
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The persistent volumes remain untouched during image updates. Do not use `docker compose down -v` during upgrades unless you intentionally want to delete cache/configuration data.
+
+The WebAdmin reports independent Server and WebAdmin versions. Server updates use a transactional GHCR package pull with health validation and rollback. WebAdmin updates are host-side:
+
+```bash
+docker compose pull webadmin
+docker compose up -d --no-deps webadmin
+```
+
+## 5. Access the services
 
 Use the IP printed by `start.sh`. If the detected address is `192.168.1.244`:
 
@@ -71,7 +134,7 @@ The Compose file binds published ports to the detected `IPADDRESS`. Therefore `1
 
 `IPADDRESS` is also passed to the Stremio container so the entrypoint can obtain the matching trusted `*.stremio.rocks` certificate.
 
-## 4. Cache / Library Addon
+## 6. Cache / Library Addon
 
 The Library addon is enabled by default in `.env` and `compose.yaml`.
 
@@ -89,9 +152,9 @@ The addon exposes:
 - local streams for recognised cached movies/episodes;
 - automatic learning of `IMDb/Stremio ID ↔ cached torrent` from playback reports, without exposing file names in logs.
 
-`STREMIOSRV_LIBRARY_ADDON_ALLOW` is empty by default, which activates the server's built-in private-network allowlist. That already includes RFC1918 LAN ranges such as `192.168.0.0/16`, so changing from `192.168.1.254` to `192.168.1.244` requires no addon CIDR edit.
+`STREMIOSRV_LIBRARY_ADDON_ALLOW` is empty by default, which activates the server's built-in private-network allowlist. That already includes RFC1918 LAN ranges such as `192.168.0.0/16`.
 
-## 5. Validate the server
+## 7. Validate the server
 
 First ask the launcher which address Compose will use:
 
@@ -128,7 +191,7 @@ librarySubtitlesReports
 libraryLabelsLearned
 ```
 
-## 6. Pi-hole LAN DNS (optional)
+## 8. Pi-hole LAN DNS (optional)
 
 The base `compose.yaml` does not publish DNS port 53 on the host. When LAN DNS exposure is required, preserve the automatically detected address while adding the DNS override:
 
@@ -140,6 +203,6 @@ docker compose -f compose.yaml -f compose.dns.yaml up -d
 
 Ensure host port 53 is available first.
 
-## 7. VAAPI (optional)
+## 9. VAAPI / NVIDIA (optional)
 
-Use the provided VAAPI compose override when the host exposes `/dev/dri` and hardware acceleration is required. The default `.env` keeps the fork's VAAPI-oriented transcoding policy while retaining software fallback.
+Use the provided VAAPI or NVIDIA Compose override when the host exposes the corresponding GPU runtime. The default environment keeps the fork's VAAPI-oriented transcoding policy while retaining software fallback.
