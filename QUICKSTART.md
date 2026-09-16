@@ -1,91 +1,145 @@
-# Quick Start — Stremio WebAdmin Fork
+# Quick Start
 
-This fork runs the Stremio libtorrent server together with the independent WebAdmin and Pi-hole services.
-The fork repository is the authoritative runtime and update source.
+This fork runs three coordinated services with Docker Compose:
 
-> Requires Docker Engine with the Docker Compose plugin (`docker compose`).
+- `stremio-libtorrent-server` — Stremio streaming engine and HTTPS endpoint;
+- `webadmin` — administration UI on port `8090`;
+- `pihole` — internal DNS service, with its web UI on port `8053` by default.
 
-## 1. Clone the fork
+The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION` and the core package version by `pyproject.toml`.
 
-```sh
-git clone https://github.com/emmanique/stremio-libtorrent-server-webadmin.git
-cd stremio-libtorrent-server-webadmin
+## 1. Host IP detection
+
+The tracked `.env` deliberately leaves `IPADDRESS`, `PIHOLE_WEB_BIND_IP` and `PIHOLE_DNS_BIND_IP` empty.
+
+Start the stack through `start.sh`. Before Docker Compose is evaluated, the script asks the Linux routing table which IPv4 address the host would use for its default route. That address is exported as `IPADDRESS` and is also used for the Pi-hole bindings.
+
+For example, on a host currently using `192.168.1.244`, the launcher prints:
+
+```text
+[start] detected host IPv4: 192.168.1.244
+[start] Web Player : http://192.168.1.244:8080
+[start] WebAdmin   : http://192.168.1.244:8090
+[start] API        : http://192.168.1.244:11470
+[start] Library    : https://192.168.1.244:12470/library/
 ```
 
-## 2. Start everything
+If the machine later receives another address through DHCP, running `start.sh` again detects the new address automatically. The tracked `.env` does not need to be edited.
 
-No `.env` file is required for the default installation:
+To force a specific address for a particular run:
 
-```sh
-docker compose up -d
+```bash
+IPADDRESS=192.168.1.244 sh start.sh
 ```
 
-Docker Compose automatically uses the root `compose.yaml` and builds the Stremio Server and WebAdmin images from this fork.
-The default stack contains:
+Do not store passwords, API tokens, private keys or certificates in the versioned `.env`.
 
-- `stremio-libtorrent-server` — streaming server and web player
-- `stremio-webadmin` — independent WebAdmin on port `8090`
-- `stremio-pihole` — Pi-hole used internally by the Stremio container
+## 2. Start the stack
 
-Default ports:
+Recommended:
 
-| Service | Port |
-|---|---:|
-| Stremio Web Player | `8080` |
-| Stremio API | `11470` |
-| Stremio HTTPS | `12470` |
-| WebAdmin | `8090` |
-| Pi-hole Web UI | `8053` |
-| BitTorrent TCP/UDP | `6881` |
-
-Pi-hole DNS stays on the internal Docker network by default, so host port `53` is not required and the stack can start even when `systemd-resolved` or another DNS service already owns port 53.
-
-## 3. Optional configuration
-
-The stack works without `.env`. To customise the server IP, ports or Pi-hole settings:
-
-```sh
-cp .env.example .env
+```bash
+sh start.sh
 ```
 
-Edit `.env`, then apply the changes with:
+This is equivalent to running `docker compose up -d --build`, but with the host IPv4 detected and exported first.
 
-```sh
-docker compose up -d
+You can also pass any Docker Compose command through the launcher:
+
+```bash
+sh start.sh config
+sh start.sh ps
+sh start.sh up -d --build --force-recreate
 ```
 
-Set `IPADDRESS` to the server's LAN address if you want the automatic trusted `*.stremio.rocks` certificate used by TV clients.
+Do not use `docker compose down -v` during upgrades unless you intentionally want to delete persistent volumes.
 
-## 4. Optional — expose Pi-hole as LAN DNS
+## 3. Access the services
 
-Only use this when the host should provide DNS to other LAN clients and TCP/UDP port 53 is available:
+Use the IP printed by `start.sh`. If the detected address is `192.168.1.244`:
 
-```sh
+| Service | Address |
+| --- | --- |
+| Web Player | `http://192.168.1.244:8080` |
+| WebAdmin | `http://192.168.1.244:8090` |
+| Streaming API | `http://192.168.1.244:11470` |
+| HTTPS / Stremio endpoint | `https://192.168.1.244:12470` |
+| Library | `https://192.168.1.244:12470/library/` |
+| Pi-hole Web | `http://192.168.1.244:8053/admin/` |
+
+The Compose file binds published ports to the detected `IPADDRESS`. Therefore `127.0.0.1:<port>` on the Docker host is not expected to answer those published ports when a specific LAN address is in use.
+
+`IPADDRESS` is also passed to the Stremio container so the entrypoint can obtain the matching trusted `*.stremio.rocks` certificate.
+
+## 4. Cache / Library Addon
+
+The Library addon is enabled by default in `.env` and `compose.yaml`.
+
+Open the Library URL printed by `start.sh`, for example:
+
+```text
+https://192.168.1.244:12470/library/
+```
+
+After signing in with the owning Stremio account, use the **Watch this library in Stremio** panel to copy the generated addon manifest URL and install it in Stremio.
+
+The addon exposes:
+
+- a `My Library` catalog containing content already present on the server;
+- local streams for recognised cached movies/episodes;
+- automatic learning of `IMDb/Stremio ID ↔ cached torrent` from playback reports, without exposing file names in logs.
+
+`STREMIOSRV_LIBRARY_ADDON_ALLOW` is empty by default, which activates the server's built-in private-network allowlist. That already includes RFC1918 LAN ranges such as `192.168.0.0/16`, so changing from `192.168.1.254` to `192.168.1.244` requires no addon CIDR edit.
+
+## 5. Validate the server
+
+First ask the launcher which address Compose will use:
+
+```bash
+sh start.sh config | grep -E 'published|IPADDRESS|11470' || true
+```
+
+Then test the address printed by `start.sh`. Example:
+
+```bash
+curl -fsS http://192.168.1.244:11470/health
+curl -fsS http://192.168.1.244:11470/stats.json | python3 -m json.tool
+```
+
+To test the process directly inside the container, independent of host port binding:
+
+```bash
+docker exec stremio-libtorrent-server curl -fsS http://127.0.0.1:11470/health
+```
+
+If the host-address request fails, inspect:
+
+```bash
+sh start.sh ps
+ss -lntp | grep 11470 || true
+docker compose logs --tail=200 stremio-libtorrent-server
+```
+
+For Library learning diagnostics, look under `playback` for:
+
+```text
+librarySubtitlesAsks
+librarySubtitlesReports
+libraryLabelsLearned
+```
+
+## 6. Pi-hole LAN DNS (optional)
+
+The base `compose.yaml` does not publish DNS port 53 on the host. When LAN DNS exposure is required, preserve the automatically detected address while adding the DNS override:
+
+```bash
+IPADDRESS="$(ip route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+export IPADDRESS PIHOLE_DNS_BIND_IP="$IPADDRESS"
 docker compose -f compose.yaml -f compose.dns.yaml up -d
 ```
 
-If port 53 is already occupied, either free it or set `PIHOLE_DNS_BIND_IP` to a dedicated host address before enabling the override.
+Ensure host port 53 is available first.
 
-## 5. Open the services
+## 7. VAAPI (optional)
 
-With default settings:
-
-- Web Player: `http://<server-ip>:8080`
-- WebAdmin: `http://<server-ip>:8090`
-- Pi-hole Web UI: `http://<server-ip>:8053/admin/`
-- Stremio API: `http://<server-ip>:11470`
-
-## Updating the fork
-
-For a normal host installation:
-
-```sh
-git pull origin main
-docker compose up -d --build
-```
-
-The WebAdmin software-update function also checks and builds from:
-
-`https://github.com/emmanique/stremio-libtorrent-server-webadmin`
-
-It does not use `andrewhack/stremio-libtorrent-server` as a runtime update source. Upstream changes are imported into this fork only through the controlled GitHub review workflow.
+Use the provided VAAPI compose override when the host exposes `/dev/dri` and hardware acceleration is required. The default `.env` keeps the fork's VAAPI-oriented transcoding policy while retaining software fallback.
