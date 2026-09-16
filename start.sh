@@ -5,10 +5,14 @@
 # on the host before Compose evaluates compose.yaml. Shell environment variables take precedence
 # over .env, so the detected address is injected without rewriting the tracked configuration file.
 #
+# The default path is package-only: pull the published images and start them. No local source build
+# is required. Arbitrary Docker Compose commands can still be passed through this launcher.
+#
 # Usage:
-#   sh start.sh                         # docker compose up -d --build
-#   sh start.sh up -d --build           # pass arbitrary compose arguments
-#   sh start.sh config                   # inspect the resolved compose configuration
+#   sh start.sh                         # docker compose pull && docker compose up -d
+#   sh start.sh config                  # inspect the resolved compose configuration
+#   sh start.sh ps                      # show stack status
+#   sh start.sh up -d --force-recreate  # pass arbitrary compose arguments
 #   IPADDRESS=192.168.1.10 sh start.sh   # explicit override
 set -eu
 
@@ -76,7 +80,9 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 if [ "$#" -eq 0 ]; then
-    set -- up -d --build
+    echo "[start] pulling published images..."
+    docker compose pull
+    exec docker compose up -d
 fi
 
 exec docker compose "$@"
