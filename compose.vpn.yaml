@@ -189,6 +189,25 @@ services:
       FTLCONF_webserver_api_password: "${PIHOLE_PASSWORD:-}"
       FTLCONF_dns_listeningMode: all
       FTLCONF_dns_upstreams: "${PIHOLE_VPN_UPSTREAM_DNS:-172.30.0.10#1053}"
+
+      # Same optimized Pi-hole baseline as direct mode. In VPN mode only the
+      # upstream changes: all external resolution is forwarded through the
+      # private Gluetun DNS bridge and secure resolver inside the VPN path.
+      FTL_CMD: "no-daemon -- --dns-forward-max ${PIHOLE_DNS_FORWARD_MAX:-300}"
+      FTLCONF_dns_cache_size: "${PIHOLE_CACHE_SIZE:-10000}"
+      FTLCONF_dns_cache_optimizer: "${PIHOLE_CACHE_OPTIMIZER:-3600}"
+      FTLCONF_dns_cache_upstreamBlockedTTL: "${PIHOLE_CACHE_BLOCKED_TTL:-86400}"
+      FTLCONF_dns_domainNeeded: "${PIHOLE_DOMAIN_NEEDED:-true}"
+      FTLCONF_dns_bogusPriv: "${PIHOLE_BOGUS_PRIV:-true}"
+      FTLCONF_dns_dnssec: "${PIHOLE_DNSSEC:-false}"
+      FTLCONF_dns_queryLogging: "${PIHOLE_QUERY_LOGGING:-true}"
+      FTLCONF_dns_rateLimit_count: "${PIHOLE_RATE_LIMIT_COUNT:-1000}"
+      FTLCONF_dns_rateLimit_interval: "${PIHOLE_RATE_LIMIT_INTERVAL:-60}"
+      FTLCONF_dns_blocking_active: "${PIHOLE_BLOCKING_ACTIVE:-true}"
+      FTLCONF_dns_blocking_mode: "${PIHOLE_BLOCKING_MODE:-NULL}"
+      FTLCONF_database_maxDBdays: "${PIHOLE_DB_DAYS:-30}"
+      FTLCONF_database_DBinterval: "${PIHOLE_DB_INTERVAL:-60}"
+      FTLCONF_database_useWAL: "${PIHOLE_DB_WAL:-true}"
     expose:
       - "53/tcp"
       - "53/udp"
