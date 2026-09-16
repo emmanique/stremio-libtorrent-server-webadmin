@@ -25,6 +25,8 @@ docker/push-readme.sh
 .github/workflows/fork-guard.yml
 .github/workflows/library-addon-guard.yml
 .github/workflows/future-validation.yml
+.github/workflows/release-package.yml
+.github/workflows/release-on-main.yml
 .github/upstream-protected-paths.txt
 .github/UPSTREAM_BASE
 
