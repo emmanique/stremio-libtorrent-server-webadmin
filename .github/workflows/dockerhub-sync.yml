@@ -87,6 +87,7 @@ jobs:
           docker push "${DOCKERHUB_IMAGE}:vpn-latest"
 
       - name: Sync Docker Hub overview from README
+        continue-on-error: true
         shell: bash
         env:
           DOCKERHUB_USER: ${{ env.DOCKERHUB_USERNAME }}
@@ -100,4 +101,4 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/" | jq -e '.name == "stremio-libtorrent-server-webadmin"' >/dev/null
-          echo "Docker Hub repository synchronized successfully."
+          echo "Docker Hub repository and image tags were synchronized successfully."
