@@ -59,13 +59,13 @@ The screenshots below come from a real running WebAdmin installation. Network ad
 
 ## Connection, health and service status
 
-![WebAdmin connection and health status](docs/screenshots/webadmin-connect-status.svg)
+![WebAdmin connection and health status](docs/screenshots/webadmin-connect-status.jpg)
 
 The dashboard exposes the LAN address, Web Player and TV/application endpoints, QR connection data, Stremio/streaming-server health, uptime, CPU and memory usage, HTTPS certificate status, and seeding/stream controls without requiring terminal access.
 
 ## Active streams and live transfer state
 
-![WebAdmin active streams](docs/screenshots/webadmin-active-streams.svg)
+![WebAdmin active streams](docs/screenshots/webadmin-active-streams.jpg)
 
 Active jobs expose playback/seeding state, progress, download/upload throughput and peer information. Current WebAdmin releases also provide dedicated **Dashboard**, **Server**, **Transcoding**, **VPN**, **Gluetun**, **Logs** and **All Configuration** views.
 
