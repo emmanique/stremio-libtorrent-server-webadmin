@@ -7,7 +7,7 @@ docs/server.reference.js
 .superpowers/
 # Local agent/editor tooling config (launch profiles etc). Internal only, like the two above.
 .claude/
-
+.env
 # Superpowers process docs (specs/plans) — internal only, never on the public repo
 docs/superpowers/
 
