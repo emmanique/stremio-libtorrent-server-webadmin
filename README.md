@@ -53,6 +53,24 @@ See `VERSIONING.md` for release rules.
 
 ---
 
+# 🖥️ WebAdmin screenshots
+
+The screenshots below come from a real running WebAdmin installation. Network addresses and runtime values are examples; the exact layout may vary slightly between releases and enabled profiles.
+
+## Connection, health and service status
+
+![WebAdmin connection and health status](docs/screenshots/webadmin-connect-status.svg)
+
+The dashboard exposes the LAN address, Web Player and TV/application endpoints, QR connection data, Stremio/streaming-server health, uptime, CPU and memory usage, HTTPS certificate status, and seeding/stream controls without requiring terminal access.
+
+## Active streams and live transfer state
+
+![WebAdmin active streams](docs/screenshots/webadmin-active-streams.svg)
+
+Active jobs expose playback/seeding state, progress, download/upload throughput and peer information. Current WebAdmin releases also provide dedicated **Dashboard**, **Server**, **Transcoding**, **VPN**, **Gluetun**, **Logs** and **All Configuration** views.
+
+---
+
 # Architecture
 
 ## Direct mode
@@ -485,6 +503,7 @@ webadmin/static/gluetun-admin.js Dedicated Gluetun WebAdmin page
 src/stremiosrv/transcode/        Native FFmpeg/HLS command construction and job lifecycle
 src/stremiosrv/library/          Library UI/addon/metadata
 tools/platform_performance_test.py Host-side end-to-end performance/readiness validation
+docs/screenshots/                WebAdmin screenshots used in this README
 .github/workflows/               Validation/release/package workflows
 VPN.md                           VPN setup/security documentation
 VERSIONING.md                    Component version policy
