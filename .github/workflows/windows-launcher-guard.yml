@@ -11,6 +11,7 @@ on:
       - "start.ps1"
       - "start-vpn.ps1"
       - ".gitattributes"
+      - "WINDOWS.md"
       - "docs/WINDOWS.md"
       - ".github/workflows/windows-launcher-guard.yml"
   pull_request:
@@ -20,6 +21,7 @@ on:
       - "start.ps1"
       - "start-vpn.ps1"
       - ".gitattributes"
+      - "WINDOWS.md"
       - "docs/WINDOWS.md"
       - ".github/workflows/windows-launcher-guard.yml"
   workflow_dispatch:
@@ -73,8 +75,10 @@ jobs:
       - name: Validate Windows documentation references
         shell: powershell
         run: |
-          $text = Get-Content -Raw docs/WINDOWS.md
+          $fullGuide = Get-Content -Raw docs/WINDOWS.md
+          $rootGuide = Get-Content -Raw WINDOWS.md
           foreach ($name in @('start.bat', 'start-vpn.bat', 'start.ps1', 'start-vpn.ps1')) {
-            if ($text -notmatch [regex]::Escape($name)) { throw "docs/WINDOWS.md does not reference $name" }
+            if ($fullGuide -notmatch [regex]::Escape($name)) { throw "docs/WINDOWS.md does not reference $name" }
+            if ($rootGuide -notmatch [regex]::Escape($name)) { throw "WINDOWS.md does not reference $name" }
           }
           Write-Host 'Windows launcher documentation references: OK'
