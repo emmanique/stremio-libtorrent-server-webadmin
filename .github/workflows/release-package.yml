@@ -25,6 +25,9 @@ jobs:
     timeout-minutes: 40
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: edmanique/stremio-libtorrent-server-webadmin
     steps:
       - name: Check out tagged release
         uses: actions/checkout@v4
@@ -61,6 +64,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Docker Hub publishing disabled
+        if: ${{ env.DOCKERHUB_USERNAME == '' || env.DOCKERHUB_TOKEN == '' }}
+        shell: bash
+        run: |
+          echo "Docker Hub publishing is skipped because DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN are not configured."
 
       - name: Build server runtime image
         shell: bash
@@ -174,6 +191,40 @@ jobs:
           docker push "${VPN_IMAGE}:${SERVER_VERSION}"
           docker push "${VPN_IMAGE}:latest"
 
+      - name: Tag images for Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag "${SERVER_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:${SERVER_VERSION}"
+          docker tag "${SERVER_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:latest"
+          docker tag "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" "${DOCKERHUB_IMAGE}:webadmin-${WEBADMIN_VERSION}"
+          docker tag "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" "${DOCKERHUB_IMAGE}:webadmin-latest"
+          docker tag "${VPN_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:vpn-${SERVER_VERSION}"
+          docker tag "${VPN_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:vpn-latest"
+
+      - name: Publish Docker Hub packages
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${DOCKERHUB_IMAGE}:${SERVER_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:latest"
+          docker push "${DOCKERHUB_IMAGE}:webadmin-${WEBADMIN_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:webadmin-latest"
+          docker push "${DOCKERHUB_IMAGE}:vpn-${SERVER_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:vpn-latest"
+
+      - name: Sync Docker Hub overview from README
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        shell: bash
+        env:
+          DOCKERHUB_USER: ${{ env.DOCKERHUB_USERNAME }}
+          REPO: edmanique/stremio-libtorrent-server-webadmin
+        run: |
+          set -euo pipefail
+          sh docker/push-readme.sh
+
       - name: Create or refresh GitHub Release
         shell: bash
         env:
@@ -200,11 +251,17 @@ jobs:
                 "- WebAdmin: ${WEBADMIN_VERSION}" \
                 "- VPN gateway: ${SERVER_VERSION}" \
                 "" \
-                "## Packages" \
+                "## GitHub Container Registry" \
                 "" \
                 "- ${SERVER_IMAGE}:${SERVER_VERSION}" \
                 "- ${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" \
                 "- ${VPN_IMAGE}:${SERVER_VERSION}" \
+                "" \
+                "## Docker Hub" \
+                "" \
+                "- ${DOCKERHUB_IMAGE}:${SERVER_VERSION}" \
+                "- ${DOCKERHUB_IMAGE}:webadmin-${WEBADMIN_VERSION}" \
+                "- ${DOCKERHUB_IMAGE}:vpn-${SERVER_VERSION}" \
                 "" \
                 "This release was built, smoke-tested and published automatically from the validated release tag." \
                 > "$NOTES_FILE"
