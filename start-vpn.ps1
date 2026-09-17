@@ -52,7 +52,7 @@ function Protect-KeyFile([string]$Path) {
         $acl.SetAccessRule($rule)
         Set-Acl -Path $Path -AclObject $acl
     } catch {
-        Write-Warning "[vpn] could not tighten ACLs on $Path: $($_.Exception.Message)"
+        Write-Warning "[vpn] could not tighten ACLs on ${Path}: $($_.Exception.Message)"
     }
 }
 
