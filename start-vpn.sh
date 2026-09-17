@@ -91,6 +91,16 @@ if [ ! -c /dev/net/tun ]; then
     exit 1
 fi
 
+# Preserve hardware transcoding in VPN mode. The VAAPI overlay is applied
+# automatically when the configured render node exists on the host.
+COMPOSE_FILES="-f compose.vpn.yaml"
+if [ -c "${VAAPI_DEVICE:-/dev/dri/renderD128}" ] && [ -f compose.vaapi.yaml ]; then
+    COMPOSE_FILES="$COMPOSE_FILES -f compose.vaapi.yaml"
+    echo "[vpn] VAAPI      : enabled (${VAAPI_DEVICE:-/dev/dri/renderD128})"
+else
+    echo "[vpn] VAAPI      : unavailable; starting without /dev/dri overlay"
+fi
+
 echo "[vpn] host IPv4 : $IPADDRESS"
 echo "[vpn] Web Player : http://$IPADDRESS:8080"
 echo "[vpn] WebAdmin   : http://$IPADDRESS:8090"
@@ -103,17 +113,21 @@ echo "[vpn] CyberGhost credentials/certificates are configured from WebAdmin -> 
 
 if [ "$#" -eq 0 ]; then
     echo "[vpn] pulling published images..."
-    docker compose -f compose.vpn.yaml pull
+    # shellcheck disable=SC2086
+    docker compose $COMPOSE_FILES pull
 
     echo "[vpn] validating/refreshing trusted LAN certificate outside the VPN tunnel..."
-    if ! docker compose -f compose.vpn.yaml --profile bootstrap run --rm cert-bootstrap; then
+    # shellcheck disable=SC2086
+    if ! docker compose $COMPOSE_FILES --profile bootstrap run --rm cert-bootstrap; then
         echo "[vpn] ERROR: trusted stremio.rocks certificate is not available." >&2
         echo "[vpn] VPN mode was not started because LAN clients require trusted HTTPS on :12470." >&2
         exit 1
     fi
 
     _enter_vpn_mode
-    exec docker compose -f compose.vpn.yaml up -d --remove-orphans
+    # shellcheck disable=SC2086
+    exec docker compose $COMPOSE_FILES up -d --remove-orphans
 fi
 
-exec docker compose -f compose.vpn.yaml "$@"
+# shellcheck disable=SC2086
+exec docker compose $COMPOSE_FILES "$@"
