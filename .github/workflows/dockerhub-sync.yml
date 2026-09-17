@@ -1,0 +1,103 @@
+name: Docker Hub sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dockerhub-sync.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: edmanique/stremio-libtorrent-server-webadmin
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Read component versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER_VERSION="$(tr -d '[:space:]' < SERVER_VERSION)"
+          WEBADMIN_VERSION="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          echo "SERVER_VERSION=$SERVER_VERSION" >> "$GITHUB_ENV"
+          echo "WEBADMIN_VERSION=$WEBADMIN_VERSION" >> "$GITHUB_ENV"
+          echo "SERVER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
+          echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
+          echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
+
+      - name: Require Docker Hub credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DOCKERHUB_USERNAME" || { echo "DOCKERHUB_USERNAME secret is missing" >&2; exit 1; }
+          test -n "$DOCKERHUB_TOKEN" || { echo "DOCKERHUB_TOKEN secret is missing" >&2; exit 1; }
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Pull validated GHCR images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "${SERVER_IMAGE}:${SERVER_VERSION}"
+          docker pull "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}"
+          docker pull "${VPN_IMAGE}:${SERVER_VERSION}"
+
+      - name: Tag Docker Hub images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag "${SERVER_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:${SERVER_VERSION}"
+          docker tag "${SERVER_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:latest"
+          docker tag "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" "${DOCKERHUB_IMAGE}:webadmin-${WEBADMIN_VERSION}"
+          docker tag "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" "${DOCKERHUB_IMAGE}:webadmin-latest"
+          docker tag "${VPN_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:vpn-${SERVER_VERSION}"
+          docker tag "${VPN_IMAGE}:${SERVER_VERSION}" "${DOCKERHUB_IMAGE}:vpn-latest"
+
+      - name: Publish Docker Hub tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${DOCKERHUB_IMAGE}:${SERVER_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:latest"
+          docker push "${DOCKERHUB_IMAGE}:webadmin-${WEBADMIN_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:webadmin-latest"
+          docker push "${DOCKERHUB_IMAGE}:vpn-${SERVER_VERSION}"
+          docker push "${DOCKERHUB_IMAGE}:vpn-latest"
+
+      - name: Sync Docker Hub overview from README
+        shell: bash
+        env:
+          DOCKERHUB_USER: ${{ env.DOCKERHUB_USERNAME }}
+          REPO: edmanique/stremio-libtorrent-server-webadmin
+        run: |
+          set -euo pipefail
+          sh docker/push-readme.sh
+
+      - name: Verify public Docker Hub repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/" | jq -e '.name == "stremio-libtorrent-server-webadmin"' >/dev/null
+          echo "Docker Hub repository synchronized successfully."
