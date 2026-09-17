@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build, gate, and publish the all-in-one image, then sync the Hub overview.
 #
-#   docker login -u emmanique
+#   docker login -u edmanique
 #   ./docker/publish.sh                 # build -> smoke -> push image -> sync README -> tag + release
 #   DRY_RUN=1 ./docker/publish.sh       # build + smoke only; publishes and releases nothing
 #   SKIP_BUILD=1 ./docker/publish.sh    # publish an image that is already built
@@ -15,7 +15,7 @@
 #                RELEASE_NAME, GH_TOKEN, ALLOW_DIRTY, ALLOW_VERSION_MISMATCH.
 set -e
 
-REPO="${REPO:-emmanique/stremio-libtorrent-server-webadmin}"
+REPO="${REPO:-edmanique/stremio-libtorrent-server-webadmin}"
 LOCAL="${LOCAL:-$REPO:latest}"
 SMOKE_PORT="${SMOKE_PORT:-18099}"
 SMOKE_NAME="${SMOKE_NAME:-stremio-publish-smoke}"
