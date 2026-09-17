@@ -6,7 +6,7 @@
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg)](LICENSE)
 
-Self-hosted **Stremio streaming platform** built around an open `libtorrent` server and extended with WebAdmin, Library/Cache UI, Stremio Library Addon, Pi-hole, hardware-aware transcoding, safe package updates and optional **CyberGhost OpenVPN** routing through Gluetun.
+Self-hosted **Stremio streaming platform** built around an open `libtorrent` server and extended with WebAdmin, Library/Cache UI, Stremio Library Addon, Pi-hole, runtime-verified hardware transcoding, safe package updates and optional **CyberGhost OpenVPN** routing through Gluetun.
 
 The normal installation uses published GHCR packages. Local application builds are not required for normal installation or updates.
 
@@ -18,9 +18,9 @@ The normal installation uses published GHCR packages. Local application builds a
 
 ```text
 Core            1.6.9
-Server/Fork     1.6.9-server.17
-WebAdmin        1.4.0
-VPN Gateway     1.6.9-server.17
+Server/Fork     1.6.9-server.18
+WebAdmin        1.4.1
+VPN Gateway     1.6.9-server.18
 ```
 
 Authoritative version files:
@@ -46,7 +46,7 @@ See `VERSIONING.md` for release rules.
 | Library Addon | Exposes cached titles to Stremio as `My Library` with local streams and metadata learning. |
 | Updates | Transactional Server update with health validation/rollback and independent WebAdmin lifecycle. |
 | Pi-hole | Internal DNS, optional LAN DNS publication and a locked optimized Pi-hole v6 baseline. |
-| Transcoding | Copy-first/direct-play policy, VAAPI, NVIDIA/NVENC and CPU fallback. |
+| Transcoding | Copy-first policy plus explicit runtime-verified VAAPI, NVIDIA/NVENC and CPU execution profiles. |
 | VPN | Multi-profile CyberGhost OpenVPN manager with import, lifecycle, startup profile, kill switch and protection test. |
 | Gluetun | Dedicated WebAdmin page for gateway status, VPN/DNS state, resources, routing, security checks, actions and logs. |
 | Release safety | Permanent `future` branch, deterministic validation, guards and automated package/release publication. |
@@ -101,9 +101,9 @@ pihole/pihole:latest
 Versioned images for this release:
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.17
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.0
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.17
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.1
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.18
 ```
 
 ---
@@ -192,6 +192,8 @@ docker compose pull
 docker compose up -d --remove-orphans
 ```
 
+The Server updater in WebAdmin pulls the immutable GHCR tag advertised by `FORK_VERSION`, validates its OCI version label, activates only the Stremio runtime container, runs health validation and retains the previous image for rollback. WebAdmin and Pi-hole are not recreated by a Server-only update.
+
 ---
 
 # 🌐 CyberGhost VPN manager
@@ -229,7 +231,7 @@ See `VPN.md` for full details.
 
 # 🧭 Gluetun gateway management
 
-WebAdmin `1.4.0` includes a dedicated **WebAdmin → Gluetun** page, separate from the CyberGhost profile manager.
+WebAdmin `1.4.1` includes a dedicated **WebAdmin → Gluetun** page, separate from the CyberGhost profile manager.
 
 ```text
 Dashboard | Server | Transcoding | VPN | Gluetun | Logs
@@ -255,7 +257,7 @@ The validation view checks the Gluetun control API, VPN tunnel, DNS service, pri
 
 Pi-hole is part of the default stack. Its Web UI is normally on port `8053`; DNS is available internally without occupying host port `53` unless `compose.dns.yaml` is used.
 
-The project now defines an **authoritative locked Pi-hole v6 baseline** through Docker `FTLCONF_*` environment variables. Pi-hole treats those settings as read-only while the container is running, preventing accidental changes from the Pi-hole Web UI or local `pihole.toml` from bypassing the platform policy.
+The project defines an **authoritative locked Pi-hole v6 baseline** through Docker `FTLCONF_*` environment variables. Pi-hole treats those settings as read-only while the container is running, preventing accidental changes from the Pi-hole Web UI or local `pihole.toml` from bypassing the platform policy.
 
 Locked defaults:
 
@@ -331,21 +333,47 @@ The built-in Stremio Library Addon exposes cached titles as `My Library` and pro
 
 # 🎞️ Streaming and transcoding
 
-The fork uses a copy-first/direct-play FFmpeg policy with hardware acceleration options.
+The transcoding design is deliberately **copy first**. The Stremio core remains authoritative for the Direct Stream versus transcode decision. Selecting a hardware profile does **not** force re-encoding of a compatible stream: if the core requests `-c:v copy`, the wrapper preserves that decision. This avoids needless quality loss, latency and GPU/CPU load.
 
-VAAPI:
+When the core actually requests video transcoding, WebAdmin can replace the execution pipeline with one explicit runtime-verified profile:
+
+```text
+Preserve Stremio decision
+H.264 VAAPI — GPU encode only
+HEVC VAAPI — GPU encode only
+H.264 VAAPI — Full GPU
+HEVC VAAPI — Full GPU
+H.264 NVIDIA NVENC
+HEVC NVIDIA NVENC
+H.264 CPU (libx264)
+HEVC CPU (libx265)
+```
+
+Profiles are exposed as available only after a real FFmpeg runtime self-test. A compiled encoder name by itself is not treated as proof that the GPU/device path is usable. WebAdmin also reports the effective profile decision from `[ffmpeg-policy]` telemetry.
+
+For VAAPI Full GPU, decoded frames remain as VAAPI hardware surfaces through scaling/pixel-format normalization and encoding. The pipeline uses `scale_vaapi(...,format=nv12)` rather than downloading frames to software and uploading them again.
+
+VAAPI device overlay:
 
 ```bash
 docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 ```
 
-NVIDIA/NVENC:
+NVIDIA/NVENC runtime overlay:
 
 ```bash
 docker compose -f compose.yaml -f compose.gpu.yaml up -d
 ```
 
 The VPN Compose file can use the same hardware overlays.
+
+To validate the complete platform and the selected transcoding profile from the host:
+
+```bash
+python3 tools/platform_performance_test.py
+```
+
+See `docs/PERFORMANCE.md` for the measured indicators, optional synthetic encoding test and JSON output used for before/after comparisons.
 
 ---
 
@@ -363,7 +391,8 @@ The VPN Compose file can use the same hardware overlays.
 | `VPN_LAN_CIDRS` | LAN ranges allowed outside the VPN tunnel. |
 | `PIHOLE_WEB_PORT` | Pi-hole Web UI port. |
 | `PIHOLE_DNS_PORT` | Optional LAN DNS publication port. |
-| `TRANSCODING_*` | Direct-play/FFmpeg/hardware policy. |
+| `VAAPI_DEVICE` | VAAPI render device used by the FFmpeg execution profile; default `/dev/dri/renderD128`. |
+| `TRANSCODING_*` | WebAdmin/FFmpeg execution policy and transcoding settings. |
 
 The locked Pi-hole tuning values are intentionally defined in Compose instead of exposed as routine `.env` tuning options. Change them only as a controlled repository change followed by validation.
 
@@ -399,6 +428,8 @@ docker logs --tail=200 stremio-gluetun
 ```
 
 For normal VPN diagnostics use **WebAdmin → Gluetun** first; it correlates gateway status, routing, DNS/Pi-hole path and logs.
+
+For transcoding diagnostics, use **WebAdmin → Transcoding**, refresh the runtime profile self-tests, start a stream that genuinely requires transcoding, and confirm that the effective `[ffmpeg-policy]` decision matches the selected execution profile.
 
 ---
 
@@ -443,15 +474,21 @@ compose.vaapi.yaml               VAAPI device overlay
 compose.gpu.yaml                 NVIDIA/NVENC runtime overlay
 start.sh                         Direct launcher + image refresh
 start-vpn.sh                     VPN launcher + image refresh
+docker/ffmpeg_wrapper.py         Runtime execution-profile policy for FFmpeg
 vpn/                             Gluetun wrapper/profile selection
+webadmin/transcoding_profiles.py Runtime profile tests and profile selection API
+webadmin/transcoding_verified_status.py Verified capability/policy telemetry
 webadmin/vpn_admin.py            VPN status/control/protection test
 webadmin/vpn_profiles.py         CyberGhost profile CRUD/import/startup
 webadmin/gluetun_admin.py        Gluetun status/actions/config/validation/log API
 webadmin/static/gluetun-admin.js Dedicated Gluetun WebAdmin page
+src/stremiosrv/transcode/        Native FFmpeg/HLS command construction and job lifecycle
 src/stremiosrv/library/          Library UI/addon/metadata
+tools/platform_performance_test.py Host-side end-to-end performance/readiness validation
 .github/workflows/               Validation/release/package workflows
 VPN.md                           VPN setup/security documentation
 VERSIONING.md                    Component version policy
+docs/PERFORMANCE.md              Performance/transcoding validation guide
 docs/releases/                   Release notes
 ```
 
