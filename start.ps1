@@ -7,6 +7,7 @@ Set-Location $Root
 function Get-PreferredIPv4 {
     if ($env:IPADDRESS) { return $env:IPADDRESS }
 
+    $udp = $null
     try {
         $udp = New-Object System.Net.Sockets.UdpClient
         $udp.Connect('1.1.1.1', 53)
@@ -42,13 +43,14 @@ function Test-ContainerExists([string]$Name) {
 
 function Invoke-Compose([string[]]$ComposeArgs) {
     $dockerArgs = @('compose') + $ComposeArgs
-    & docker @dockerArgs
-    return $LASTEXITCODE
+    & docker @dockerArgs | Out-Host
+    $code = $LASTEXITCODE
+    return [int]$code
 }
 
 $ip = Get-PreferredIPv4
 if (-not $ip -or -not (Test-IPv4 $ip)) {
-    Write-Error '[start] unable to determine a valid host IPv4 address. Set $env:IPADDRESS, e.g. $env:IPADDRESS="192.168.1.244"; .\start.ps1'
+    [Console]::Error.WriteLine('[start] unable to determine a valid host IPv4 address. Set $env:IPADDRESS, e.g. $env:IPADDRESS="192.168.1.244"; .\start.ps1')
     exit 1
 }
 
@@ -65,7 +67,7 @@ Write-Host "[start] Pi-hole    : http://$($env:PIHOLE_WEB_BIND_IP):8053/admin/"
 
 & docker compose version *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Error '[start] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.'
+    [Console]::Error.WriteLine('[start] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.')
     exit 1
 }
 
