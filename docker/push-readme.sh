@@ -14,8 +14,8 @@
 # Env overrides: DOCKERHUB_USER, REPO, README, DOCKER_CONFIG_JSON.
 set -e
 
-DOCKERHUB_USER="${DOCKERHUB_USER:-emmanique}"
-REPO="${REPO:-emmanique/stremio-libtorrent-server-webadmin}"
+DOCKERHUB_USER="${DOCKERHUB_USER:-edmanique}"
+REPO="${REPO:-edmanique/stremio-libtorrent-server-webadmin}"
 README="${README:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/README.md}"
 API="https://hub.docker.com/v2"
 DOCKER_CONFIG_JSON="${DOCKER_CONFIG_JSON:-$HOME/.docker/config.json}"
