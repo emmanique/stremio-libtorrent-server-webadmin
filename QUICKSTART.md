@@ -10,6 +10,15 @@ The default deployment is **package-only**. `compose.yaml` does not build the ap
 
 The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebAdmin by `webadmin/WEBADMIN_VERSION`, and the core package version by `pyproject.toml`.
 
+Current coordinated release:
+
+```text
+Core            1.6.9
+Server/Fork     1.6.9-server.18
+WebAdmin        1.4.1
+VPN Gateway     1.6.9-server.18
+```
+
 ## 1. Obtain the deployment files
 
 For a normal managed installation, clone the repository so that you also have `start.sh`, overrides and documentation:
@@ -40,14 +49,16 @@ The default images are:
 ```text
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest
 pihole/pihole:latest
 ```
 
-You can pin versions in `.env`:
+You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.9
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.2.7
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.1
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.18
 ```
 
 Do not store passwords, API tokens, private keys or certificates in the versioned `.env`.
@@ -110,7 +121,9 @@ docker compose up -d
 
 The persistent volumes remain untouched during image updates. Do not use `docker compose down -v` during upgrades unless you intentionally want to delete cache/configuration data.
 
-The WebAdmin reports independent Server and WebAdmin versions. Server updates use a transactional GHCR package pull with health validation and rollback. WebAdmin updates are host-side:
+The WebAdmin reports independent Server and WebAdmin versions. Server updates use a transactional GHCR package pull with health validation and rollback. A Server-only update replaces only the Stremio runtime; it does not recreate WebAdmin or Pi-hole.
+
+WebAdmin updates are host-side:
 
 ```bash
 docker compose pull webadmin
@@ -191,6 +204,14 @@ librarySubtitlesReports
 libraryLabelsLearned
 ```
 
+For a full platform/performance check, including container health, HTTP latency, DNS, VPN path and transcoding readiness:
+
+```bash
+python3 tools/platform_performance_test.py
+```
+
+See `docs/PERFORMANCE.md` for interpretation and optional synthetic encoding tests.
+
 ## 8. Pi-hole LAN DNS (optional)
 
 The base `compose.yaml` does not publish DNS port 53 on the host. When LAN DNS exposure is required, preserve the automatically detected address while adding the DNS override:
@@ -203,6 +224,24 @@ docker compose -f compose.yaml -f compose.dns.yaml up -d
 
 Ensure host port 53 is available first.
 
-## 9. VAAPI / NVIDIA (optional)
+## 9. VAAPI / NVIDIA transcoding (optional)
 
-Use the provided VAAPI or NVIDIA Compose override when the host exposes the corresponding GPU runtime. The default environment keeps the fork's VAAPI-oriented transcoding policy while retaining software fallback.
+The platform is **copy first**: compatible streams remain Direct Stream/`copy`. Choosing a hardware profile does not force needless re-encoding. The selected profile is applied only when the Stremio core has already decided that video transcoding is required.
+
+WebAdmin exposes explicit profiles only after real FFmpeg runtime self-tests. Available profiles can include VAAPI encode-only, VAAPI Full GPU, NVIDIA NVENC and CPU libx264/libx265 modes.
+
+VAAPI:
+
+```bash
+docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+```
+
+NVIDIA/NVENC:
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml up -d
+```
+
+For VAAPI Full GPU, decoded frames stay on VAAPI surfaces through scaling/format normalization and encoding, using `scale_vaapi` with `NV12` rather than a redundant software-download/hardware-upload cycle.
+
+After starting playback that genuinely requires transcoding, use **WebAdmin → Transcoding** to confirm the selected execution profile, runtime self-test result and effective `[ffmpeg-policy]` decision.
