@@ -14,10 +14,19 @@ def test_nvenc_hls():
     assert "hls" in cmd and "/tmp/j/index.m3u8" in cmd
 
 
-def test_vaapi_hls():
+def test_vaapi_hls_keeps_hw_frames():
     cmd = build_hls_cmd("http://x/0", DEC_TRANSCODE, "vaapi-renderD128", "/tmp/j")
     assert "h264_vaapi" in cmd
-    assert "vaapi" in cmd
+    assert "-hwaccel_output_format" in cmd and "vaapi" in cmd
+    assert "scale_vaapi=w=1920:h=-2:format=nv12" in cmd
+    assert not any("hwupload" in p for p in cmd)
+
+
+def test_vaapi_hls_without_scale_normalizes_nv12():
+    decision = {"video": {"action": "transcode"}, "audio": {"action": "copy"}}
+    cmd = build_hls_cmd("http://x/0", decision, "vaapi-renderD128", "/tmp/j")
+    assert "h264_vaapi" in cmd
+    assert "scale_vaapi=format=nv12" in cmd
 
 
 def test_cpu_hls():
