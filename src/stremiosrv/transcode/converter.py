@@ -44,9 +44,10 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
             argv += ["-vf", f"scale={w}:-2:flags=lanczos,format=yuv420p" if w else "format=yuv420p",
                      "-c:v", "h264_nvenc", "-preset", "p4"]
         elif profile and profile.startswith("vaapi"):
-            if w:
-                argv += ["-vf", f"scale_vaapi=w={w}:h=-2"]
-            argv += ["-c:v", "h264_vaapi"]
+            # The decoder already returns VAAPI surfaces. Keep them in GPU memory and normalise
+            # the encoder input to NV12 instead of mixing software format/hwupload operations.
+            vf = f"scale_vaapi=w={w}:h=-2:format=nv12" if w else "scale_vaapi=format=nv12"
+            argv += ["-vf", vf, "-c:v", "h264_vaapi"]
         else:
             if w:
                 argv += ["-vf", f"scale={w}:-2:flags=lanczos"]
