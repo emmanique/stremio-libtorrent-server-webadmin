@@ -5,6 +5,7 @@ def test_video_copy():
     cmd = build_video_cmd("http://x/0", {"action": "copy"}, "nvenc-linux")
     assert "-c:v" in cmd and "copy" in cmd
     assert "-force_key_frames:v" in cmd
+    assert "-hwaccel" not in cmd
 
 
 def test_video_nvenc_transcode_downscale():
@@ -13,9 +14,19 @@ def test_video_nvenc_transcode_downscale():
     assert any("scale=1920" in p for p in cmd)
 
 
-def test_video_vaapi_transcode():
+def test_video_vaapi_transcode_keeps_hw_frames():
     cmd = build_video_cmd("http://x/0", {"action": "transcode", "scale_width": 1920}, "vaapi-renderD128")
     assert "h264_vaapi" in cmd
+    assert "-hwaccel_output_format" in cmd and "vaapi" in cmd
+    assert "scale_vaapi=w=1920:h=-2:format=nv12" in cmd
+    assert not any("hwupload" in p for p in cmd)
+
+
+def test_video_vaapi_transcode_without_scale_stays_on_gpu():
+    cmd = build_video_cmd("http://x/0", {"action": "transcode"}, "vaapi-renderD128")
+    assert "h264_vaapi" in cmd
+    assert "scale_vaapi=format=nv12" in cmd
+    assert not any("hwupload" in p for p in cmd)
 
 
 def test_video_cpu_fallback():
