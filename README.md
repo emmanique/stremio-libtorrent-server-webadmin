@@ -8,7 +8,7 @@
 
 Self-hosted **Stremio streaming platform** built around an open `libtorrent` server and extended with WebAdmin, Library/Cache UI, Stremio Library Addon, Pi-hole, runtime-verified hardware transcoding, safe package updates and optional **CyberGhost OpenVPN** routing through Gluetun.
 
-The normal installation uses published GHCR packages. Local application builds are not required for normal installation or updates.
+The normal installation uses published GHCR packages by default. The same validated Server, WebAdmin and VPN images are also mirrored to Docker Hub under `edmanique/stremio-libtorrent-server-webadmin`. Local application builds are not required for normal installation or updates.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
@@ -40,7 +40,7 @@ See `VERSIONING.md` for release rules.
 
 | Area | Added in this fork |
 | --- | --- |
-| Deployment | Server + WebAdmin + Pi-hole stack using published GHCR images. |
+| Deployment | Server + WebAdmin + Pi-hole stack using published GHCR images, with validated Server/WebAdmin/VPN mirrors on Docker Hub. |
 | WebAdmin | Browser UI on `8090` for status, configuration, cache, logs, updates, addons, transcoding, VPN and Gluetun management. |
 | Library | Cache/library UI, add-by-magnet, pin/keep/delete, progress, series/episode navigation and disk awareness. |
 | Library Addon | Exposes cached titles to Stremio as `My Library` with local streams and metadata learning. |
@@ -109,6 +109,8 @@ The `:1053` component is a private DNS bridge, not an additional recursive resol
 
 ## Published images
 
+### GitHub Container Registry (default)
+
 ```text
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest
@@ -116,13 +118,40 @@ ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest
 pihole/pihole:latest
 ```
 
-Versioned images for this release:
+Versioned GHCR images for this release:
 
 ```text
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.1
 ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.18
 ```
+
+### Docker Hub mirror
+
+The validated release images are mirrored to a single Docker Hub repository using separate tags for Server, WebAdmin and VPN:
+
+```text
+edmanique/stremio-libtorrent-server-webadmin:latest
+edmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
+
+edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
+edmanique/stremio-libtorrent-server-webadmin:webadmin-1.4.1
+
+edmanique/stremio-libtorrent-server-webadmin:vpn-latest
+edmanique/stremio-libtorrent-server-webadmin:vpn-1.6.9-server.18
+```
+
+Pull from Docker Hub:
+
+```bash
+docker pull edmanique/stremio-libtorrent-server-webadmin:latest
+docker pull edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
+docker pull edmanique/stremio-libtorrent-server-webadmin:vpn-latest
+```
+
+For reproducible deployments, prefer the immutable/versioned tags instead of `latest`.
+
+The release workflow builds and smoke-tests the images once, publishes them to GHCR, and then mirrors the same validated artifacts to Docker Hub. This prevents the two registries from containing independently built binaries for the same release.
 
 ---
 
@@ -475,6 +504,7 @@ version tag
   ├─ build/test WebAdmin image
   ├─ build/test VPN gateway image
   ├─ publish versioned + latest GHCR packages
+  ├─ mirror validated Server/WebAdmin/VPN tags to Docker Hub
   └─ create/update GitHub Release
 ```
 
@@ -493,6 +523,8 @@ compose.gpu.yaml                 NVIDIA/NVENC runtime overlay
 start.sh                         Direct launcher + image refresh
 start-vpn.sh                     VPN launcher + image refresh
 docker/ffmpeg_wrapper.py         Runtime execution-profile policy for FFmpeg
+docker/publish.sh                Manual validated Docker Hub publisher
+docker/push-readme.sh            Docker Hub overview synchronization helper
 vpn/                             Gluetun wrapper/profile selection
 webadmin/transcoding_profiles.py Runtime profile tests and profile selection API
 webadmin/transcoding_verified_status.py Verified capability/policy telemetry
