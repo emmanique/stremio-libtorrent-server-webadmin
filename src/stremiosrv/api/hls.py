@@ -5,6 +5,8 @@ server byte-for-byte — the player follows whatever URIs we publish.
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from pathlib import Path
 
@@ -17,6 +19,32 @@ from stremiosrv.transcode.probe import probe_media
 router = APIRouter(prefix="/hlsv2")
 
 _M3U8 = "application/vnd.apple.mpegurl"
+_ADMIN_CONFIG = os.getenv("STREMIOSRV_EXTERNAL_CONFIG", "/config/admin-settings.json")
+
+
+def _admin_settings() -> dict:
+    try:
+        with open(_ADMIN_CONFIG, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _codec_list(value, fallback: list[str]) -> list[str]:
+    if isinstance(value, str):
+        codecs = [item.strip().lower() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        codecs = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
+        codecs = []
+    return codecs or list(fallback)
+
+
+def _effective_codecs(client_codecs: list[str], server_codecs: list[str], fallback: list[str]) -> list[str]:
+    client = {str(c).strip().lower() for c in (client_codecs or fallback) if str(c).strip()}
+    server = {str(c).strip().lower() for c in (server_codecs or fallback) if str(c).strip()}
+    return sorted(client & server)
 
 
 def _converter(request: Request):
@@ -31,16 +59,6 @@ def _wait_file(path: Path, timeout: float) -> bool:
         time.sleep(0.2)
     return path.exists()
 
-
-# HEAD is accepted on the read routes below. FastAPI, unlike bare Starlette, does NOT add HEAD to a
-# GET route, so `@router.get` alone answers 405 — which is what the byte-range route already avoids
-# by declaring both methods explicitly. Clients that probe a URL before playing it get a hard
-# failure otherwise.
-#
-# /destroy is deliberately NOT in that set. It is the one route here whose GET has a side effect
-# (it tears a transcode job down), and HEAD is defined as safe: a crawler, proxy or link-checker
-# sending HEAD must not be able to kill someone's playback. It stays GET-only until the reference
-# is shown to require otherwise.
 
 @router.api_route("/probe", methods=["GET", "HEAD"])
 def probe(mediaURL: str) -> dict:
@@ -61,7 +79,12 @@ def master(
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
     pr = probe_media(mediaURL)
-    dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
+    admin = _admin_settings()
+    server_video = _codec_list(admin.get("transcoding_direct_video_codecs"), ["h264"])
+    server_audio = _codec_list(admin.get("transcoding_direct_audio_codecs"), ["aac"])
+    effective_video = _effective_codecs(videoCodecs, server_video, ["h264"])
+    effective_audio = _effective_codecs(audioCodecs, server_audio, ["aac"])
+    dec = decide(pr, effective_video, effective_audio, maxAudioChannels, maxWidth)
     try:
         d = conv.ensure_job(job_id, mediaURL, dec)
     except ValueError as e:
@@ -78,7 +101,6 @@ def destroy(job_id: str, request: Request) -> dict:
         try:
             conv.stop(job_id)
         except ValueError as e:
-            # This route deletes a directory, so a malformed id is refused rather than ignored.
             raise HTTPException(status_code=400, detail="invalid job id") from e
     return {"ok": True}
 
@@ -92,10 +114,6 @@ def serve_file(job_id: str, filename: str, request: Request):
         path = conv.job_file(job_id, filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job path") from e
-    # A request for a segment or a playlist is the only evidence this server ever gets that anyone
-    # is still watching: ffmpeg keeps encoding whether or not the output is being read. Recorded
-    # before the wait below, so a client blocked on a segment that has not been written yet still
-    # counts as present.
     conv.touch(job_id)
     is_playlist = filename.endswith(".m3u8")
     if not _wait_file(path, 25 if is_playlist else 35):
