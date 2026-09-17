@@ -33,7 +33,10 @@ def build_video_cmd(media_url: str, decision: dict, profile: str | None) -> list
     elif profile and profile.startswith("vaapi"):
         cmd = [*base, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi",
                "-i", media_url, "-map", "v:0"]
-        vf = f"scale_vaapi=w={w}:h=-2" if w else "format=nv12|vaapi,hwupload"
+        # Hardware decode already produces VAAPI surfaces. Keep the frames on the GPU and
+        # normalise to NV12 with scale_vaapi; the previous software format+hwupload path tried
+        # to upload frames that were already hardware frames and could fail at runtime.
+        vf = f"scale_vaapi=w={w}:h=-2:format=nv12" if w else "scale_vaapi=format=nv12"
         cmd += ["-vf", vf, "-c:v", "h264_vaapi"]
     else:  # CPU fallback
         cmd = [*base, "-i", media_url, "-map", "v:0"]
