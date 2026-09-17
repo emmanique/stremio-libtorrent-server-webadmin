@@ -36,9 +36,23 @@ function Test-IPv4([string]$Address) {
     return $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork
 }
 
+function Invoke-NativeQuiet([string]$FilePath, [string[]]$Arguments) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 turns native stderr into ErrorRecord objects.
+        # Some probes are expected to return a non-zero status, so do not let
+        # $ErrorActionPreference='Stop' convert them into terminating errors.
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments *> $null
+        return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Test-ContainerExists([string]$Name) {
-    & docker container inspect $Name *> $null
-    return $LASTEXITCODE -eq 0
+    $rc = Invoke-NativeQuiet 'docker' @('container', 'inspect', $Name)
+    return $rc -eq 0
 }
 
 function Invoke-Compose([string[]]$ComposeArgs) {
@@ -65,8 +79,8 @@ Write-Host "[start] API        : http://${ip}:11470"
 Write-Host "[start] Library    : https://${ip}:12470/library/"
 Write-Host "[start] Pi-hole    : http://$($env:PIHOLE_WEB_BIND_IP):8053/admin/"
 
-& docker compose version *> $null
-if ($LASTEXITCODE -ne 0) {
+$composeVersionRc = Invoke-NativeQuiet 'docker' @('compose', 'version')
+if ($composeVersionRc -ne 0) {
     [Console]::Error.WriteLine('[start] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.')
     exit 1
 }
@@ -78,8 +92,8 @@ if ($args.Count -eq 0) {
 
     if (Test-ContainerExists 'stremio-gluetun') {
         Write-Host '[start] switching VPN -> direct mode (persistent volumes are preserved)...'
-        & docker rm -f stremio-libtorrent-server *> $null
-        & docker rm -f stremio-gluetun *> $null
+        [void](Invoke-NativeQuiet 'docker' @('rm', '-f', 'stremio-libtorrent-server'))
+        [void](Invoke-NativeQuiet 'docker' @('rm', '-f', 'stremio-gluetun'))
     }
 
     $rc = Invoke-Compose @('up', '-d', '--remove-orphans')
