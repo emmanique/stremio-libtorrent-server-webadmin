@@ -9,6 +9,7 @@ COPY version_lifecycle.py .
 COPY transcoding_config.py .
 COPY transcoding_runtime_fix.py .
 COPY transcoding_profiles.py .
+COPY transcoding_policy_parser.py .
 COPY transcoding_verified_status.py .
 COPY addon_links.py .
 COPY vpn_admin.py .
