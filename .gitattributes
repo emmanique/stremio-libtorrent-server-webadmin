@@ -3,3 +3,5 @@
 Dockerfile text eol=lf
 .dockerignore text eol=lf
 *.inc text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
