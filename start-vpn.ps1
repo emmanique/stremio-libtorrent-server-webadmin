@@ -56,9 +56,23 @@ function Protect-KeyFile([string]$Path) {
     }
 }
 
+function Invoke-NativeQuiet([string]$FilePath, [string[]]$Arguments) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 turns native stderr into ErrorRecord objects.
+        # Several Docker checks below are probes where a non-zero result is
+        # expected and handled explicitly.
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments *> $null
+        return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Test-ContainerExists([string]$Name) {
-    & docker container inspect $Name *> $null
-    return $LASTEXITCODE -eq 0
+    $rc = Invoke-NativeQuiet 'docker' @('container', 'inspect', $Name)
+    return $rc -eq 0
 }
 
 function Invoke-Compose([string[]]$ComposeArgs) {
@@ -92,8 +106,8 @@ if (-not $env:VPN_CONTROL_API_KEY) {
     }
 }
 
-& docker compose version *> $null
-if ($LASTEXITCODE -ne 0) {
+$composeVersionRc = Invoke-NativeQuiet 'docker' @('compose', 'version')
+if ($composeVersionRc -ne 0) {
     [Console]::Error.WriteLine('[vpn] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.')
     exit 1
 }
@@ -114,8 +128,8 @@ if ($args.Count -eq 0) {
 
     $vpnImage = if ($env:VPN_IMAGE) { $env:VPN_IMAGE } else { 'ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest' }
     Write-Host '[vpn] checking TUN support in the Docker Desktop Linux backend...'
-    & docker run --rm --privileged --device '/dev/net/tun:/dev/net/tun' --entrypoint /bin/sh $vpnImage -c 'test -c /dev/net/tun' *> $null
-    if ($LASTEXITCODE -ne 0) {
+    $tunRc = Invoke-NativeQuiet 'docker' @('run', '--rm', '--privileged', '--device', '/dev/net/tun:/dev/net/tun', '--entrypoint', '/bin/sh', $vpnImage, '-c', 'test -c /dev/net/tun')
+    if ($tunRc -ne 0) {
         [Console]::Error.WriteLine('[vpn] /dev/net/tun is not available to Docker Desktop. Ensure Linux containers/WSL2 are enabled and restart Docker Desktop.')
         exit 1
     }
@@ -129,7 +143,7 @@ if ($args.Count -eq 0) {
 
     if (-not (Test-ContainerExists 'stremio-gluetun') -and (Test-ContainerExists 'stremio-libtorrent-server')) {
         Write-Host '[vpn] switching direct -> VPN mode (persistent volumes are preserved)...'
-        & docker rm -f stremio-libtorrent-server *> $null
+        [void](Invoke-NativeQuiet 'docker' @('rm', '-f', 'stremio-libtorrent-server'))
     }
 
     $rc = Invoke-Compose @('up', '-d', '--remove-orphans')
