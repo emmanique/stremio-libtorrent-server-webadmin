@@ -7,6 +7,7 @@ Set-Location $Root
 function Get-PreferredIPv4 {
     if ($env:IPADDRESS) { return $env:IPADDRESS }
 
+    $udp = $null
     try {
         $udp = New-Object System.Net.Sockets.UdpClient
         $udp.Connect('1.1.1.1', 53)
@@ -62,13 +63,14 @@ function Test-ContainerExists([string]$Name) {
 
 function Invoke-Compose([string[]]$ComposeArgs) {
     $dockerArgs = @('compose', '-f', 'compose.vpn.yaml') + $ComposeArgs
-    & docker @dockerArgs
-    return $LASTEXITCODE
+    & docker @dockerArgs | Out-Host
+    $code = $LASTEXITCODE
+    return [int]$code
 }
 
 $ip = Get-PreferredIPv4
 if (-not $ip -or -not (Test-IPv4 $ip)) {
-    Write-Error '[vpn] unable to determine a valid host IPv4 address. Set $env:IPADDRESS, e.g. $env:IPADDRESS="192.168.1.244"; .\start-vpn.ps1'
+    [Console]::Error.WriteLine('[vpn] unable to determine a valid host IPv4 address. Set $env:IPADDRESS, e.g. $env:IPADDRESS="192.168.1.244"; .\start-vpn.ps1')
     exit 1
 }
 
@@ -92,7 +94,7 @@ if (-not $env:VPN_CONTROL_API_KEY) {
 
 & docker compose version *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Error '[vpn] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.'
+    [Console]::Error.WriteLine('[vpn] Docker Compose is not available. Install/start Docker Desktop and use Linux containers.')
     exit 1
 }
 
@@ -114,14 +116,14 @@ if ($args.Count -eq 0) {
     Write-Host '[vpn] checking TUN support in the Docker Desktop Linux backend...'
     & docker run --rm --privileged --device '/dev/net/tun:/dev/net/tun' --entrypoint /bin/sh $vpnImage -c 'test -c /dev/net/tun' *> $null
     if ($LASTEXITCODE -ne 0) {
-        Write-Error '[vpn] /dev/net/tun is not available to Docker Desktop. Ensure Linux containers/WSL2 are enabled and restart Docker Desktop.'
+        [Console]::Error.WriteLine('[vpn] /dev/net/tun is not available to Docker Desktop. Ensure Linux containers/WSL2 are enabled and restart Docker Desktop.')
         exit 1
     }
 
     Write-Host '[vpn] validating/refreshing trusted LAN certificate outside the VPN tunnel...'
     $rc = Invoke-Compose @('--profile', 'bootstrap', 'run', '--rm', 'cert-bootstrap')
     if ($rc -ne 0) {
-        Write-Error '[vpn] trusted stremio.rocks certificate is not available. VPN mode was not started.'
+        [Console]::Error.WriteLine('[vpn] trusted stremio.rocks certificate is not available. VPN mode was not started.')
         exit 1
     }
 
