@@ -32,6 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip uv
           uv sync --dev
+          python -m pip install -r webadmin/requirements.txt
 
       - name: Run deterministic functional test gate
         shell: bash
@@ -63,6 +64,10 @@ jobs:
             tests/test_probe.py \
             tests/test_profiler.py \
             tests/test_hls_routes.py
+
+      - name: Validate WebAdmin configuration lifecycle
+        run: |
+          timeout 120s uv run --with-requirements webadmin/requirements.txt pytest -q tests/test_webadmin_config_lifecycle.py
 
       - name: Validate Python and shell syntax
         run: |
