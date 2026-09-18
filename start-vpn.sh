@@ -91,14 +91,14 @@ if [ ! -c /dev/net/tun ]; then
     exit 1
 fi
 
-# Preserve hardware transcoding in VPN mode. The VAAPI overlay is applied
-# automatically when the configured render node exists on the host.
+VAAPI_DEVICE=${VAAPI_DEVICE:-/dev/dri/renderD128}
+export VAAPI_DEVICE
 COMPOSE_FILES="-f compose.vpn.yaml"
-if [ -c "${VAAPI_DEVICE:-/dev/dri/renderD128}" ] && [ -f compose.vaapi.yaml ]; then
-    COMPOSE_FILES="$COMPOSE_FILES -f compose.vaapi.yaml"
-    echo "[vpn] VAAPI      : enabled (${VAAPI_DEVICE:-/dev/dri/renderD128})"
+if [ -c "$VAAPI_DEVICE" ]; then
+    echo "[vpn] VAAPI      : enabled ($VAAPI_DEVICE)"
 else
-    echo "[vpn] VAAPI      : unavailable; starting without /dev/dri overlay"
+    echo "[vpn] ERROR: VAAPI render node is not available: $VAAPI_DEVICE" >&2
+    exit 1
 fi
 
 echo "[vpn] host IPv4 : $IPADDRESS"
@@ -126,7 +126,23 @@ if [ "$#" -eq 0 ]; then
 
     _enter_vpn_mode
     # shellcheck disable=SC2086
-    exec docker compose $COMPOSE_FILES up -d --remove-orphans
+    docker compose $COMPOSE_FILES up -d --remove-orphans
+
+    echo "[vpn] validating runtime mounts..."
+    if ! docker exec stremio-libtorrent-server test -c "$VAAPI_DEVICE"; then
+        echo "[vpn] ERROR: $VAAPI_DEVICE is not mounted in stremio-libtorrent-server." >&2
+        exit 1
+    fi
+    if ! docker exec stremio-libtorrent-server test -r /config/admin-settings.json; then
+        echo "[vpn] ERROR: /config/admin-settings.json is not readable in stremio-libtorrent-server." >&2
+        exit 1
+    fi
+    if ! docker exec stremio-webadmin test -w /config/admin-settings.json; then
+        echo "[vpn] ERROR: /config/admin-settings.json is not writable in stremio-webadmin." >&2
+        exit 1
+    fi
+    echo "[vpn] runtime validation passed: VAAPI and persistent configuration are mounted."
+    exit 0
 fi
 
 # shellcheck disable=SC2086
