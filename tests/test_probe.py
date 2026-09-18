@@ -1,4 +1,9 @@
-from stremiosrv.transcode.probe import map_probe
+import subprocess
+
+import pytest
+
+from stremiosrv.transcode import probe as probe_module
+from stremiosrv.transcode.probe import ProbeTimeoutError, _internal_media_url, map_probe, probe_media
 
 FFPROBE = {
     "format": {"format_name": "matroska,webm", "duration": "120.5"},
@@ -38,3 +43,22 @@ def test_no_hdr_for_sdr():
          "color_transfer": "bt709", "color_primaries": "bt709"}]}
     s = map_probe(j)["streams"][0]
     assert s["isHdr"] is False and s["isDoVi"] is False
+
+
+def test_internal_stremio_rocks_url_uses_loopback():
+    url = "https://192-168-1-245.519b6502d940.stremio.rocks:12470/abc/0?x=1"
+    assert _internal_media_url(url) == "http://127.0.0.1:11470/abc/0?x=1"
+
+
+def test_external_media_url_is_unchanged():
+    url = "https://example.com/video.mkv"
+    assert _internal_media_url(url) == url
+
+
+def test_probe_timeout_is_classified(monkeypatch):
+    def boom(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["ffprobe"], timeout=30)
+
+    monkeypatch.setattr(probe_module.subprocess, "run", boom)
+    with pytest.raises(ProbeTimeoutError):
+        probe_media("http://127.0.0.1:11470/hash/0", timeout=30)
