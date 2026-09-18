@@ -198,6 +198,44 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
     return _result(profile_id, ok, reason)
 
 
+def _recommended_profile(items: list[dict[str, object]]) -> str:
+    available = {str(item.get("id")) for item in items if item.get("available")}
+    for profile_id in (
+        "nvenc-h264",
+        "vaapi-full-h264",
+        "vaapi-h264",
+        "cpu-h264",
+        "preserve",
+    ):
+        if profile_id in available:
+            return profile_id
+    return "preserve"
+
+
+def _hardware_detection(items: list[dict[str, object]], device: str) -> dict[str, object]:
+    available = {str(item.get("id")) for item in items if item.get("available")}
+    if "nvenc-h264" in available or "nvenc-hevc" in available:
+        accelerator = "nvenc"
+        label = "NVIDIA NVENC"
+        detected = True
+    elif any(profile_id.startswith("vaapi-") for profile_id in available):
+        accelerator = "vaapi"
+        label = "VAAPI GPU (Intel/AMD DRM)"
+        detected = True
+    else:
+        accelerator = "cpu"
+        label = "CPU software encoding"
+        detected = False
+
+    return {
+        "detected": detected,
+        "accelerator": accelerator,
+        "label": label,
+        "device": device if accelerator == "vaapi" else None,
+        "lxcCompatible": accelerator == "vaapi",
+    }
+
+
 def _profiles(force: bool = False) -> dict[str, object]:
     now = time.monotonic()
     if not force and PROFILE_CACHE["value"] is not None and now - float(PROFILE_CACHE["at"]) < 300:
@@ -209,6 +247,8 @@ def _profiles(force: bool = False) -> dict[str, object]:
     device = str(config.get("transcoding_vaapi_device") or "/dev/dri/renderD128")
     items = [_test_profile(container, profile_id, device, binary) for profile_id in PROFILE_META]
     selected, quality = _selected()
+    recommended = _recommended_profile(items)
+    hardware = _hardware_detection(items, device)
     value = {
         "checkedAt": datetime.now(UTC).isoformat(),
         "selected": selected,
@@ -216,8 +256,11 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "device": device,
         "ffmpeg": binary,
         "profiles": items,
+        "recommendedProfile": recommended,
+        "hardwareDetection": hardware,
         "rule": (
-            "Direct Stream remains Direct Stream. Choose an explicit tested pipeline. "
+            "Direct Stream remains Direct Stream. Hardware is detected from real runtime self-tests. "
+            "The recommended profile is preselected when legacy settings are active, but it is only applied after operator confirmation. "
             "'GPU encode only' leaves decode on CPU; 'Full GPU' is offered only when both H.264 and HEVC hardware decode plus hardware encode pass the runtime test. No silent fallback."
         ),
     }
