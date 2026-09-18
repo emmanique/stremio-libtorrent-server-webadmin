@@ -274,7 +274,8 @@ _original_update_worker = transactional.update_worker
 def guarded_server_update_worker():
     installed = _installed_server_version()
     available = _remote_server_version()
-    if installed and available and installed == available:
+    component = _component(installed, available)
+    if component["updateAvailable"] is not True:
         transactional._write_result(
             status="succeeded",
             phase="no-op",
@@ -283,7 +284,11 @@ def guarded_server_update_worker():
             repositoryUrl=SOURCE_REPO,
             branch=SOURCE_BRANCH,
             packageRepository=transactional.PACKAGE_REPO,
-            message="Server is already at the latest SERVER_VERSION; no container change was made.",
+            message=(
+                "Server is already at the latest SERVER_VERSION; no container change was made."
+                if component["versionState"] == "up-to-date"
+                else f"Installed server {installed} is newer than advertised {available}; downgrade disabled."
+            ),
         )
         return
     _original_update_worker()
