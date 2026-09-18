@@ -53,7 +53,16 @@ STREMIO_ROCKS_RE = re.compile(
 
 def _request_text(url: str, timeout: int = 5) -> str | None:
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "stremio-webadmin-version"})
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}t={int(datetime.now(UTC).timestamp())}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "stremio-webadmin-version",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+        )
         value = urllib.request.urlopen(req, timeout=timeout).read(4096).decode("utf-8").strip()
         return value or None
     except Exception:
@@ -161,15 +170,37 @@ def _connection_urls() -> dict[str, object]:
     }
 
 
+def _version_key(value: str | None) -> tuple[int, ...] | None:
+    if not value:
+        return None
+    numbers = tuple(int(item) for item in re.findall(r"\d+", value))
+    return numbers or None
+
+
 def _component(installed: str | None, available: str | None, **extra) -> dict:
-    if installed and available:
-        update_available: bool | None = installed != available
+    installed_key = _version_key(installed)
+    available_key = _version_key(available)
+    if installed_key is not None and available_key is not None:
+        if available_key > installed_key:
+            update_available: bool | None = True
+            version_state = "update-available"
+        elif available_key < installed_key:
+            update_available = False
+            version_state = "installed-newer"
+        else:
+            update_available = False
+            version_state = "up-to-date"
+    elif installed and available:
+        update_available = installed != available
+        version_state = "update-available" if update_available else "up-to-date"
     else:
         update_available = None
+        version_state = "unknown"
     return {
         "installed": installed,
         "available": available,
         "updateAvailable": update_available,
+        "versionState": version_state,
         **extra,
     }
 
@@ -218,7 +249,7 @@ def github_version_compat():
         "available": bool(available),
         "version": available,
         "installed": installed,
-        "updateAvailable": bool(available and installed and available != installed),
+        "updateAvailable": _component(installed, available)["updateAvailable"],
         "repositoryUrl": SOURCE_REPO,
         "branch": SOURCE_BRANCH,
         "packageRepository": transactional.PACKAGE_REPO,
@@ -273,7 +304,8 @@ def guarded_update():
         raise HTTPException(409, "installed SERVER_VERSION could not be determined; update disabled")
     if not available:
         raise HTTPException(503, "available SERVER_VERSION could not be verified; update disabled")
-    if installed == available:
+    component = _component(installed, available)
+    if component["updateAvailable"] is not True:
         transactional._write_result(
             status="succeeded",
             phase="no-op",
@@ -290,7 +322,11 @@ def guarded_update():
             "updateAvailable": False,
             "installed": installed,
             "available": available,
-            "message": f"Server {installed} is already up to date. Update disabled.",
+            "message": (
+                f"Server {installed} is already up to date. Update disabled."
+                if component["versionState"] == "up-to-date"
+                else f"Installed server {installed} is newer than advertised {available}; downgrade disabled."
+            ),
         }
 
     threading.Thread(target=guarded_server_update_worker, daemon=True).start()
