@@ -27,6 +27,7 @@ services:
       IPADDRESS: "${IPADDRESS:?Set IPADDRESS or run sh start-vpn.sh}"
       CERT_FILE: "${CERT_FILE:-certificates.pem}"
       STREMIOSRV_CACHE_ROOT: /root/.stremio-server
+      STREMIOSRV_CACHE_OWNER_ID: stremio-libtorrent-server
     entrypoint: ["/bin/sh", "-ec"]
     command: |
       CACHE=/root/.stremio-server
@@ -98,7 +99,6 @@ services:
     image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
     pull_policy: always
     container_name: stremio-libtorrent-server
-    hostname: stremio-libtorrent-server
     restart: unless-stopped
     network_mode: "service:gluetun"
     depends_on:
