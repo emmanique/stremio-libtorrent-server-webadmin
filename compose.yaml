@@ -61,7 +61,7 @@ services:
       timeout: 5s
       retries: 3
     devices:
-      - /dev/dri:/dev/dri
+      - "${VAAPI_DEVICE:-/dev/dri/renderD128}:${VAAPI_DEVICE:-/dev/dri/renderD128}"
 
   webadmin:
     image: "${WEBADMIN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest}"
