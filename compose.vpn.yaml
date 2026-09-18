@@ -137,6 +137,8 @@ services:
     volumes:
       - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
       - stremio-config:/config:ro
+    devices:
+      - "${VAAPI_DEVICE:-/dev/dri/renderD128}:${VAAPI_DEVICE:-/dev/dri/renderD128}"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:11470/health"]
       interval: 30s
