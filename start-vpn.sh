@@ -136,16 +136,28 @@ if [ "$#" -eq 0 ]; then
     docker compose $COMPOSE_FILES up -d --remove-orphans
 
     echo "[vpn] validating runtime mounts..."
-    if ! docker exec stremio-libtorrent-server test -c "$VAAPI_DEVICE"; then
+    # Resolve the actual containers from the Compose service. During recreate,
+    # Compose may briefly use a temporary replacement name before final rename.
+    STREMIO_CID=$(docker compose $COMPOSE_FILES ps -q stremio-libtorrent-server)
+    WEBADMIN_CID=$(docker compose $COMPOSE_FILES ps -q webadmin)
+    if [ -z "$STREMIO_CID" ]; then
+        echo "[vpn] ERROR: stremio-libtorrent-server service container was not found." >&2
+        exit 1
+    fi
+    if [ -z "$WEBADMIN_CID" ]; then
+        echo "[vpn] ERROR: webadmin service container was not found." >&2
+        exit 1
+    fi
+    if ! docker exec "$STREMIO_CID" test -c "$VAAPI_DEVICE"; then
         echo "[vpn] ERROR: $VAAPI_DEVICE is not mounted in stremio-libtorrent-server." >&2
         exit 1
     fi
-    if ! docker exec stremio-libtorrent-server test -r /config/admin-settings.json; then
+    if ! docker exec "$STREMIO_CID" test -r /config/admin-settings.json; then
         echo "[vpn] ERROR: /config/admin-settings.json is not readable in stremio-libtorrent-server." >&2
         exit 1
     fi
-    if ! docker exec stremio-webadmin test -w /config/admin-settings.json; then
-        echo "[vpn] ERROR: /config/admin-settings.json is not writable in stremio-webadmin." >&2
+    if ! docker exec "$WEBADMIN_CID" test -w /config/admin-settings.json; then
+        echo "[vpn] ERROR: /config/admin-settings.json is not writable in webadmin." >&2
         exit 1
     fi
     echo "[vpn] runtime validation passed: VAAPI and persistent configuration are mounted."
