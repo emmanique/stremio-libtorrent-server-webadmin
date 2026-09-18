@@ -63,7 +63,8 @@ jobs:
             tests/test_converter_cmd.py \
             tests/test_probe.py \
             tests/test_profiler.py \
-            tests/test_hls_routes.py
+            tests/test_hls_routes.py \
+            tests/test_ffmpeg_wrapper_policy.py
 
       - name: Validate WebAdmin configuration lifecycle
         run: |
