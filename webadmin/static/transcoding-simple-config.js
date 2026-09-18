@@ -68,7 +68,7 @@
     const item = selectedItem();
     $('simpleTranscodeDetail').textContent = item
       ? `${item.description} Encoder: ${item.encoder || 'unchanged'} · engine: ${item.engine}.`
-      : 'Choose one explicit verified profile. No automatic encoder choice is made.';
+      : 'No verified execution profile is available.';
     $('simpleTranscodeSave').disabled = !item || !item.available;
   }
 
@@ -81,11 +81,9 @@
 
     const select = $('simpleTranscodeProfile');
     const options = [];
-    if (data.selected === 'legacy') {
-      options.push('<option value="" selected disabled>Legacy settings active — choose a verified profile</option>');
-    }
+    const effectiveSelection = data.selected === 'legacy' ? data.recommendedProfile : data.selected;
     for (const item of data.profiles || []) {
-      const selected = item.id === data.selected ? 'selected' : '';
+      const selected = item.id === effectiveSelection ? 'selected' : '';
       const disabled = item.available ? '' : 'disabled';
       const suffix = item.available ? 'verified' : 'unavailable';
       options.push(`<option value="${item.id}" ${selected} ${disabled}>${item.label} — ${suffix}</option>`);
@@ -95,7 +93,11 @@
     $('simpleTranscodeChecks').innerHTML = (data.profiles || []).filter(item => item.id !== 'preserve').map(item =>
       `<div class="simpleTranscodeCheck ${item.available ? 'ok' : 'no'}"><b>${item.label} · ${item.available ? 'VERIFIED' : 'NOT AVAILABLE'}</b>${item.reason || ''}</div>`
     ).join('');
-    $('simpleTranscodeStatus').textContent = `FFmpeg ${data.ffmpeg || 'unavailable'} · VAAPI device ${data.device || 'n/a'} · checked ${new Date(data.checkedAt).toLocaleTimeString()}`;
+    const hw = data.hardwareDetection || {};
+    const recommendation = data.recommendedProfile
+      ? ` · recommended ${data.recommendedProfile}${data.selected === 'legacy' ? ' (not yet applied)' : ''}`
+      : '';
+    $('simpleTranscodeStatus').textContent = `${hw.label || 'Hardware not detected'}${hw.device ? ' · ' + hw.device : ''}${recommendation} · checked ${new Date(data.checkedAt).toLocaleTimeString()}`;
     updateDetail();
   }
 
