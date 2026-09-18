@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from stremiosrv.transcode.fingerprint import decide
-from stremiosrv.transcode.probe import probe_media
+from stremiosrv.transcode.probe import ProbeTimeoutError, probe_media
 
 router = APIRouter(prefix="/hlsv2")
 
@@ -60,9 +60,16 @@ def _wait_file(path: Path, timeout: float) -> bool:
     return path.exists()
 
 
+def _probe_or_504(media_url: str) -> dict:
+    try:
+        return probe_media(media_url)
+    except ProbeTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+
+
 @router.api_route("/probe", methods=["GET", "HEAD"])
 def probe(mediaURL: str) -> dict:
-    return probe_media(mediaURL)
+    return _probe_or_504(mediaURL)
 
 
 @router.api_route("/{job_id}/master.m3u8", methods=["GET", "HEAD"])
@@ -78,7 +85,7 @@ def master(
     conv = _converter(request)
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
-    pr = probe_media(mediaURL)
+    pr = _probe_or_504(mediaURL)
     admin = _admin_settings()
     server_video = _codec_list(admin.get("transcoding_direct_video_codecs"), ["h264"])
     server_audio = _codec_list(admin.get("transcoding_direct_audio_codecs"), ["aac"])
