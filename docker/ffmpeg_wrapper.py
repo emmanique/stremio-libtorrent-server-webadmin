@@ -146,6 +146,18 @@ def _strip_hw_decode(args: list[str]) -> list[str]:
     )
 
 
+def _has_explicit_hw_pipeline(args: list[str]) -> bool:
+    explicit = {
+        "-init_hw_device",
+        "-filter_hw_device",
+        "-hwaccel",
+        "-hwaccel_device",
+        "-hwaccel_output_format",
+        "-vaapi_device",
+    }
+    return any(token in explicit for token in args)
+
+
 def _insert_before_output_codec_options(args: list[str], extra: list[str]) -> list[str]:
     """Insert tuning/filter options immediately before -c:v."""
     for index, token in enumerate(args):
@@ -168,6 +180,15 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
     # replace an actual transcode encoder, preventing unnecessary re-encoding.
     if current == "copy":
         return args, f"profile={profile_name}; video=copy preserved"
+
+    # Do not rewrite an already explicit hardware pipeline targeting the same
+    # encoder. This protects manual diagnostics and upstream commands that have
+    # deliberately constructed their own VAAPI/NVENC device/filter graph.
+    if current == target and _has_explicit_hw_pipeline(args):
+        return args, (
+            f"profile={profile_name}; explicit hardware pipeline preserved; "
+            f"encoder={current}"
+        )
 
     encoders = _available_encoders()
     if target not in encoders:
