@@ -12,7 +12,11 @@
       el.style.borderColor = '';
       return;
     }
-    if (component.updateAvailable) {
+    if (component.versionState === 'installed-newer') {
+      el.textContent = '● Installed version is newer';
+      el.style.color = '';
+      el.style.borderColor = '';
+    } else if (component.updateAvailable) {
       el.textContent = '● Update available';
       el.style.color = '#f4d35e';
       el.style.borderColor = '#b89835';
@@ -196,11 +200,13 @@
           : data.server?.updateAvailable === false
             ? `Server is up to date (${data.server.installed}) · Update disabled`
             : 'Server version check unavailable · Update disabled';
-        const webText = data.webadmin?.updateAvailable === true
-          ? `WebAdmin package update available: ${data.webadmin.installed || 'unknown'} → ${data.webadmin.available}`
-          : data.webadmin?.updateAvailable === false
-            ? `WebAdmin is up to date (${data.webadmin.installed})`
-            : 'WebAdmin version check unavailable';
+        const webText = data.webadmin?.versionState === 'installed-newer'
+          ? `WebAdmin installed version ${data.webadmin.installed} is newer than advertised ${data.webadmin.available}; downgrade disabled`
+          : data.webadmin?.updateAvailable === true
+            ? `WebAdmin package update available: ${data.webadmin.installed || 'unknown'} → ${data.webadmin.available}`
+            : data.webadmin?.updateAvailable === false
+              ? `WebAdmin is up to date (${data.webadmin.installed})`
+              : 'WebAdmin version check unavailable';
         status.textContent = `${serverText} · ${webText}`;
       }
     } catch (_) {
