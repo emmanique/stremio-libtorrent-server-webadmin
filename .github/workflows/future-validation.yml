@@ -67,7 +67,9 @@ jobs:
 
       - name: Validate WebAdmin configuration lifecycle
         run: |
-          timeout 120s uv run --with-requirements webadmin/requirements.txt pytest -q tests/test_webadmin_config_lifecycle.py
+          timeout 120s uv run --with-requirements webadmin/requirements.txt pytest -q \
+            tests/test_webadmin_config_lifecycle.py \
+            tests/test_webadmin_transcoding_detection.py
 
       - name: Validate Python and shell syntax
         run: |
