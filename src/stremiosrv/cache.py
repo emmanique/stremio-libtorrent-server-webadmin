@@ -69,7 +69,7 @@ OWNER_FILE = ".evictor-owner"
 _TOKEN = uuid.uuid4().hex  # this process's identity, minted once per interpreter
 # A restart mints a new token but keeps the hostname, and a container's own dead process is not a
 # rival -- without this the survivor of a restart locks itself out of its own cache root.
-_HOST = socket.gethostname()
+_HOST = os.getenv("STREMIOSRV_CACHE_OWNER_ID") or socket.gethostname()
 
 
 def read_owner(root: str) -> dict | None:
