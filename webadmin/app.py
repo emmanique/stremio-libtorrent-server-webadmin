@@ -215,6 +215,37 @@ def write_config(values):
         return persisted
 
 
+def _verify_server_config(values: dict[str, object]) -> None:
+    """Verify the running Stremio container sees the same persisted config."""
+    try:
+        container = client().containers.get(CONTAINER)
+        result = container.exec_run(["cat", "/config/admin-settings.json"])
+    except Exception as exc:
+        raise OSError(f"could not verify configuration inside {CONTAINER}: {exc}") from exc
+    if result.exit_code != 0:
+        output = result.output.decode("utf-8", errors="replace").strip()
+        raise OSError(
+            f"{CONTAINER} cannot read /config/admin-settings.json"
+            + (f": {output}" if output else "")
+        )
+    try:
+        server_config = json.loads(result.output.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise OSError(f"{CONTAINER} sees invalid configuration JSON: {exc}") from exc
+    if not isinstance(server_config, dict):
+        raise OSError(f"{CONTAINER} configuration is not a JSON object")
+    missing = {
+        key: value
+        for key, value in values.items()
+        if key not in server_config or server_config[key] != value
+    }
+    if missing:
+        raise OSError(
+            "server configuration view does not match saved values for: "
+            + ", ".join(sorted(missing))
+        )
+
+
 def audit(action, detail=""):
     STATE.mkdir(parents=True, exist_ok=True)
     with (STATE / "admin.log").open("a", encoding="utf-8") as f:
@@ -431,6 +462,7 @@ def save_config(body: Values):
         raise HTTPException(400, f"read-only settings: {', '.join(sorted(locked))}")
     try:
         persisted = write_config(body.values)
+        _verify_server_config(body.values)
     except (OSError, TypeError, ValueError) as exc:
         audit("config.update.failed", str(exc))
         raise HTTPException(500, f"configuration was not persisted: {exc}")
@@ -447,6 +479,7 @@ def save_settings(body: SettingsBody):
     values = body.model_dump()
     try:
         persisted = write_config(values)
+        _verify_server_config(values)
     except (OSError, TypeError, ValueError) as exc:
         audit("settings.update.failed", str(exc))
         raise HTTPException(500, f"settings were not persisted: {exc}")
@@ -504,18 +537,37 @@ def cache_remove(body: CacheBody):
         raise HTTPException(503, str(exc))
 
 
-def _wait_for_server(timeout: float = 60.0) -> tuple[bool, str]:
+def _wait_for_server(container=None, timeout: float = 60.0) -> tuple[bool, str]:
+    """Wait for Stremio health without depending on the VPN/Docker DNS path."""
     deadline = time.monotonic() + timeout
     last_error = "server did not become healthy"
     while time.monotonic() < deadline:
-        try:
-            with httpx.Client(timeout=3) as http:
-                response = http.get(STREMIO_URL + "/health")
-            if response.status_code < 400:
-                return True, ""
-            last_error = f"health returned HTTP {response.status_code}"
-        except Exception as exc:
-            last_error = str(exc)
+        if container is not None:
+            try:
+                container.reload()
+                state = container.attrs.get("State", {})
+                if state.get("Running"):
+                    result = container.exec_run(
+                        ["curl", "-fsS", "http://127.0.0.1:11470/health"]
+                    )
+                    if result.exit_code == 0:
+                        return True, ""
+                    last_error = result.output.decode(
+                        "utf-8", errors="replace"
+                    ).strip() or f"container health command exited {result.exit_code}"
+                else:
+                    last_error = f"container state is {state.get('Status') or 'not running'}"
+            except Exception as exc:
+                last_error = str(exc)
+        else:
+            try:
+                with httpx.Client(timeout=3) as http:
+                    response = http.get(STREMIO_URL + "/health")
+                if response.status_code < 400:
+                    return True, ""
+                last_error = f"health returned HTTP {response.status_code}"
+            except Exception as exc:
+                last_error = str(exc)
         time.sleep(1)
     return False, last_error
 
@@ -540,7 +592,11 @@ def restart():
         container.reload()
         after = container.attrs.get("State", {}).get("StartedAt")
 
-        healthy, detail = _wait_for_server()
+        if before and after and before == after:
+            audit("server.restart.failed", "container start timestamp did not change")
+            raise HTTPException(500, "server restart was requested but the container did not restart")
+
+        healthy, detail = _wait_for_server(container=container)
         if not healthy:
             audit("server.restart.failed", detail)
             raise HTTPException(503, f"server restarted but health validation failed: {detail}")
