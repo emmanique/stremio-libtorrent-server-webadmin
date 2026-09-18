@@ -36,6 +36,8 @@ SOURCE_REPO = os.getenv(
 SOURCE_ARCHIVE = SOURCE_REPO.rstrip("/") + "/archive/refs/heads/main.tar.gz"
 IMAGE = os.getenv("STREMIO_IMAGE", "stremio-libtorrent-server-webadmin:local")
 UPDATE_LOCK = threading.Lock()
+CONFIG_LOCK = threading.RLock()
+RESTART_LOCK = threading.Lock()
 
 DESCRIPTIONS = {
     "http_port": "Porta HTTP interna da API do servidor Stremio.",
@@ -172,12 +174,45 @@ def read_config():
 
 
 def write_config(values):
-    CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    current = read_config()
-    current.update(values)
-    tmp = CONFIG.with_suffix(".tmp")
-    tmp.write_text(json.dumps(current, indent=2), encoding="utf-8")
-    os.replace(tmp, CONFIG)
+    """Persist WebAdmin settings atomically and verify the committed values."""
+    with CONFIG_LOCK:
+        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        current = read_config()
+        current.update(values)
+        tmp = CONFIG.with_name(f".{CONFIG.name}.{os.getpid()}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(current, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, CONFIG)
+            try:
+                directory_fd = os.open(CONFIG.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+        finally:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+
+        persisted = read_config()
+        missing = {
+            key: value
+            for key, value in values.items()
+            if key not in persisted or persisted[key] != value
+        }
+        if missing:
+            raise OSError(
+                "configuration verification failed for: "
+                + ", ".join(sorted(missing))
+            )
+        return persisted
 
 
 def audit(action, detail=""):
@@ -394,16 +429,33 @@ def save_config(body: Values):
         raise HTTPException(400, f"unknown settings: {', '.join(sorted(unknown))}")
     if locked:
         raise HTTPException(400, f"read-only settings: {', '.join(sorted(locked))}")
-    write_config(body.values)
+    try:
+        persisted = write_config(body.values)
+    except (OSError, TypeError, ValueError) as exc:
+        audit("config.update.failed", str(exc))
+        raise HTTPException(500, f"configuration was not persisted: {exc}")
     audit("config.update", ",".join(body.values))
-    return {"ok": True, "restartRequired": True}
+    return {
+        "ok": True,
+        "restartRequired": True,
+        "persisted": {key: persisted[key] for key in body.values},
+    }
 
 
 @app.put("/api/settings")
 def save_settings(body: SettingsBody):
-    write_config(body.model_dump())
+    values = body.model_dump()
+    try:
+        persisted = write_config(values)
+    except (OSError, TypeError, ValueError) as exc:
+        audit("settings.update.failed", str(exc))
+        raise HTTPException(500, f"settings were not persisted: {exc}")
     audit("settings.update")
-    return {"ok": True, "settings": body.model_dump()}
+    return {
+        "ok": True,
+        "restartRequired": True,
+        "settings": {key: persisted[key] for key in values},
+    }
 
 
 def relay(method, path):
@@ -452,14 +504,62 @@ def cache_remove(body: CacheBody):
         raise HTTPException(503, str(exc))
 
 
+def _wait_for_server(timeout: float = 60.0) -> tuple[bool, str]:
+    deadline = time.monotonic() + timeout
+    last_error = "server did not become healthy"
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client(timeout=3) as http:
+                response = http.get(STREMIO_URL + "/health")
+            if response.status_code < 400:
+                return True, ""
+            last_error = f"health returned HTTP {response.status_code}"
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(1)
+    return False, last_error
+
+
 @app.post("/api/restart", status_code=202)
 def restart():
+    if not RESTART_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "server restart already in progress")
     try:
-        client().containers.get(CONTAINER).restart(timeout=20)
-        audit("server.restart")
-        return {"ok": True, "message": "restart requested"}
+        if CONFIG.exists():
+            try:
+                data = json.loads(CONFIG.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise HTTPException(500, f"saved configuration is unreadable: {exc}")
+            if not isinstance(data, dict):
+                raise HTTPException(500, "saved configuration is not a JSON object")
+
+        container = client().containers.get(CONTAINER)
+        container.reload()
+        before = container.attrs.get("State", {}).get("StartedAt")
+        container.restart(timeout=20)
+        container.reload()
+        after = container.attrs.get("State", {}).get("StartedAt")
+
+        healthy, detail = _wait_for_server()
+        if not healthy:
+            audit("server.restart.failed", detail)
+            raise HTTPException(503, f"server restarted but health validation failed: {detail}")
+
+        audit("server.restart", f"startedAt={after}")
+        return {
+            "ok": True,
+            "message": "server restarted and configuration reloaded",
+            "startedAtBefore": before,
+            "startedAtAfter": after,
+            "configurationFile": str(CONFIG),
+        }
+    except HTTPException:
+        raise
     except Exception as exc:
+        audit("server.restart.failed", str(exc))
         raise HTTPException(500, str(exc))
+    finally:
+        RESTART_LOCK.release()
 
 
 def update_worker():
