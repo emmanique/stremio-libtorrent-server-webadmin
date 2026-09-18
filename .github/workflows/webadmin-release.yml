@@ -1,0 +1,95 @@
+name: Release WebAdmin
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "webadmin/**"
+      - ".github/workflows/webadmin-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: webadmin-release-main
+  cancel-in-progress: false
+
+jobs:
+  publish-webadmin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Read WebAdmin version
+        shell: bash
+        run: |
+          set -euo pipefail
+          WEBADMIN_VERSION="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          test -n "$WEBADMIN_VERSION"
+          echo "WEBADMIN_VERSION=$WEBADMIN_VERSION" >> "$GITHUB_ENV"
+          echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
+
+      - name: Validate WebAdmin Python syntax
+        run: python -m compileall -q webadmin
+
+      - name: Build WebAdmin image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"             --label "org.opencontainers.image.revision=${GITHUB_SHA}"             --label "org.opencontainers.image.version=${WEBADMIN_VERSION}"             --label "org.opencontainers.image.title=Stremio Server WebAdmin UI"             -t "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}"             -t "${WEBADMIN_IMAGE}:latest"             ./webadmin
+
+      - name: Smoke-test WebAdmin image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() { docker rm -f webadmin-release-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          cleanup
+          docker run -d             --name webadmin-release-smoke             -p 18090:8090             -v /var/run/docker.sock:/var/run/docker.sock             "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}" >/dev/null
+
+          healthy=""
+          for i in $(seq 1 90); do
+            if body="$(curl -fsS http://127.0.0.1:18090/health 2>/dev/null)"; then
+              healthy="$body"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$healthy" ]; then
+            echo "WebAdmin smoke test failed." >&2
+            docker logs --tail 100 webadmin-release-smoke >&2 || true
+            exit 1
+          fi
+
+          curl -fsS http://127.0.0.1:18090/api/component-versions | grep -q "${WEBADMIN_VERSION}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish WebAdmin package
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}"
+          docker push "${WEBADMIN_IMAGE}:latest"
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "## WebAdmin ${WEBADMIN_VERSION}"
+            echo
+            echo "- \`${WEBADMIN_IMAGE}:${WEBADMIN_VERSION}\`"
+            echo "- \`${WEBADMIN_IMAGE}:latest\`"
+            echo "- Source commit: \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
