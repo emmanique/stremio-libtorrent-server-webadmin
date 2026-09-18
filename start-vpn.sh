@@ -46,6 +46,13 @@ _container_exists() {
 _enter_vpn_mode() {
     if ! _container_exists stremio-gluetun && _container_exists stremio-libtorrent-server; then
         echo "[vpn] switching direct -> VPN mode (persistent volumes are preserved)..."
+        # This container is deliberately being retired, so release its advisory
+        # cache-evictor claim before removal. Otherwise the replacement may wait
+        # up to the stale-owner timeout before managing the same cache again.
+        docker exec stremio-libtorrent-server sh -c '
+          CACHE="${STREMIOSRV_CACHE_ROOT:-/root/.stremio-server}"
+          rm -f "$CACHE/.evictor-owner"
+        ' >/dev/null 2>&1 || true
         docker rm -f stremio-libtorrent-server >/dev/null 2>&1 || true
     fi
 }
