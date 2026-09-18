@@ -1,7 +1,9 @@
-# VAAPI-only overlay. Use this on Linux hosts that expose /dev/dri but do not
-# need the NVIDIA container runtime:
+# VAAPI-only overlay. Pass only the render node required for hardware
+# transcoding. This is LXC-safe and avoids invalid /dev/dri/card* entries
+# exposed by some unprivileged Proxmox containers.
+#
 #   docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 services:
   stremio-libtorrent-server:
     devices:
-      - /dev/dri:/dev/dri
+      - "${VAAPI_DEVICE:-/dev/dri/renderD128}:${VAAPI_DEVICE:-/dev/dri/renderD128}"
