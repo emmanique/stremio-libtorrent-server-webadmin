@@ -10,6 +10,7 @@ services:
     environment:
       STREMIOSRV_BT_LISTEN_PORT: "${STREMIOSRV_BT_LISTEN_PORT:-6881}"
       STREMIOSRV_CACHE_ROOT: /root/.stremio-server
+      STREMIOSRV_CACHE_OWNER_ID: stremio-libtorrent-server
       STREMIOSRV_EXTERNAL_CONFIG: /config/admin-settings.json
       CERT_FILE: "${CERT_FILE:-certificates.pem}"
       STREMIOSRV_CERT_FILE: "${CERT_FILE:-certificates.pem}"
