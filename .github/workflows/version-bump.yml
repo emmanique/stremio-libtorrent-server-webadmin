@@ -70,17 +70,87 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          CURRENT="$(tr -d '[:space:]' < SERVER_VERSION)"
           printf '%s\n' "$VERSION" > SERVER_VERSION
           printf '%s\n' "$VERSION" > FORK_VERSION
           printf '%s\n' "$VERSION" > webadmin/WEBADMIN_VERSION
 
-          python - <<'PY'
+          CURRENT="$CURRENT" python - <<'PY'
           import os, pathlib, re
+
+          version = os.environ["VERSION"]
+          current = os.environ["CURRENT"]
+
           path = pathlib.Path("pyproject.toml")
           text = path.read_text(encoding="utf-8")
-          version = os.environ["VERSION"]
           updated, count = re.subn(
-              r'(?m)^version\s*=\s*"[^"]+"\s*$',
+              r'(?m)^version\s*=\s*"[^"]+"\s*
+      - name: Create release notes template
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/releases/v$VERSION.md"
+          if [ ! -e "$NOTES" ]; then
+            cat > "$NOTES" <<EOF
+          # Stremio Server WebAdmin $VERSION
+
+          ## Summary
+
+          Describe the user-visible changes in this release.
+
+          ## Components
+
+          - Fork platform/server: $VERSION
+          - WebAdmin: $VERSION
+          - VPN gateway: $VERSION
+
+          ## Validation
+
+          - CI
+          - Dependency validation
+          - Deterministic regression tests
+          - Network integration tests
+          - Server/WebAdmin/VPN image builds and smoke tests
+
+          ## Upgrade notes
+
+          Preserve persistent Docker volumes. Do not use `docker compose down -v` during upgrade.
+          EOF
+          fi
+
+      - name: Validate prepared release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/ci/repo-guard.sh
+          uv lock --check
+          python -m compileall -q src webadmin docker
+
+      - name: Push release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH="${{ steps.version.outputs.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add SERVER_VERSION FORK_VERSION webadmin/WEBADMIN_VERSION pyproject.toml uv.lock README.md QUICKSTART.md "docs/releases/v$VERSION.md"
+          git commit -m "Prepare release $VERSION"
+          git push origin "$BRANCH"
+
+      - name: Open release pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH="${{ steps.version.outputs.branch }}"
+          gh pr create             --base main             --head "$BRANCH"             --title "Release $VERSION"             --body "Prepare coordinated release $VERSION. Merge only after CI and Dependencies are green."
+,
               f'version = "{version}"',
               text,
               count=1,
@@ -88,6 +158,13 @@ jobs:
           if count != 1:
               raise SystemExit("Could not update pyproject.toml version")
           path.write_text(updated, encoding="utf-8")
+
+          for name in ("README.md", "QUICKSTART.md"):
+              doc = pathlib.Path(name)
+              text = doc.read_text(encoding="utf-8")
+              if current not in text:
+                  raise SystemExit(f"{name} does not contain current version {current}")
+              doc.write_text(text.replace(current, version), encoding="utf-8")
           PY
 
           python -m pip install --upgrade uv
