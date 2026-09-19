@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-current-${{ github.ref }}
+  group: ci-current-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
