@@ -3,7 +3,7 @@ name: Release package
 on:
   push:
     tags:
-      - "v*"
+      - "v1.*"
   workflow_dispatch:
     inputs:
       release_tag:
