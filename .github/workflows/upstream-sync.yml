@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - ".github/workflows/upstream-sync.yml"
+      - ".github/workflows/ci.yml"
       - ".github/upstream-protected-paths.txt"
       - "tools/upstream/**"
   schedule:
@@ -14,17 +15,24 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
-  issues: write
 
 concurrency:
   group: upstream-controlled-sync
   cancel-in-progress: true
 
 jobs:
-  synchronize:
+  prepare:
+    name: Prepare controlled merge
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      blocked: ${{ steps.sync.outputs.blocked }}
+      main_sha: ${{ steps.sync.outputs.main_sha }}
+      target: ${{ steps.sync.outputs.target }}
+      version: ${{ steps.sync.outputs.version }}
+      branch: ${{ steps.sync.outputs.branch }}
+      integration_sha: ${{ steps.sync.outputs.integration_sha }}
 
     steps:
       - name: Check out fork
@@ -38,7 +46,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPSTREAM_URL: https://github.com/andrewhack/stremio-libtorrent-server.git
           UPSTREAM_NAME: andrewhack/stremio-libtorrent-server
           TARGET_BRANCH: upstream/integration
@@ -53,29 +60,72 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Open reconciliation issue when blocked
+      - name: Stop when manual reconciliation is required
         if: steps.sync.outcome == 'failure'
         shell: bash
+        run: |
+          echo "Controlled upstream merge requires manual reconciliation." >&2
+          exit 1
+
+  validate:
+    name: Validate fork after upstream merge
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: upstream/integration
+    permissions:
+      contents: read
+
+  promote:
+    name: Promote validated upstream merge
+    needs:
+      - prepare
+      - validate
+    if: needs.prepare.outputs.changed == 'true' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Promote integration branch safely
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_MAIN: ${{ needs.prepare.outputs.main_sha }}
+          INTEGRATION_SHA: ${{ needs.prepare.outputs.integration_sha }}
         run: |
           set -euo pipefail
-          TITLE="Upstream sync requires manual reconciliation"
 
-          if [ -f upstream-sync-report.md ]; then
-            BODY=upstream-sync-report.md
+          git fetch origin main develop/2.x upstream/integration --prune
+
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          test "$CURRENT_MAIN" = "$EXPECTED_MAIN" || {
+            echo "main moved during validation: expected $EXPECTED_MAIN, current $CURRENT_MAIN" >&2
+            echo "No promotion performed; the next upstream-sync run will rebuild on the new main." >&2
+            exit 1
+          }
+
+          test "$(git rev-parse origin/upstream/integration)" = "$INTEGRATION_SHA"
+
+          git push origin "$INTEGRATION_SHA:refs/heads/main"
+
+          # Keep develop aligned only when nobody advanced it independently
+          # while the upstream validation was running.
+          git fetch origin develop/2.x --prune
+          DEVELOP_SHA="$(git rev-parse origin/develop/2.x)"
+          if [ "$DEVELOP_SHA" = "$EXPECTED_MAIN" ]; then
+            git push origin "$INTEGRATION_SHA:refs/heads/develop/2.x"
           else
-            printf '%s\n' "Controlled upstream sync failed before producing a report. Inspect this workflow run." > /tmp/upstream-sync-failure.md
-            BODY=/tmp/upstream-sync-failure.md
+            echo "develop/2.x has independent work; leaving it unchanged."
           fi
 
-          EXISTING="$(gh issue list --state open --search "$TITLE in:title" --json number,title --jq 'map(select(.title == "'"$TITLE"'"))[0].number // empty')"
-          if [ -n "$EXISTING" ]; then
-            gh issue edit "$EXISTING" --body-file "$BODY"
-          else
-            gh issue create --title "$TITLE" --body-file "$BODY"
-          fi
+          git push origin --delete upstream/integration || true
 
-      - name: Enforce clean controlled sync
-        if: steps.sync.outcome == 'failure'
-        run: exit 1
+          echo "Validated upstream merge promoted to main: $INTEGRATION_SHA"
