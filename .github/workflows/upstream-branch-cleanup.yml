@@ -1,0 +1,50 @@
+name: Upstream branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/upstream-branch-cleanup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove completed temporary upstream branches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branches=(
+            "feature/upstream-1.6.11-library-compat"
+            "maintenance/upstream-1.6.11-compat"
+            "maintenance/upstream-806dde-compat"
+            "maintenance/upstream-controlled-sync"
+            "upstream/integration"
+          )
+
+          for name in "${branches[@]}"; do
+            case "$name" in
+              main|develop/2.x|legacy/1.x)
+                echo "Refusing to delete protected branch $name" >&2
+                exit 1
+                ;;
+            esac
+
+            if git ls-remote --exit-code --heads origin "refs/heads/$name" >/dev/null 2>&1; then
+              echo "Deleting $name"
+              git push origin --delete "$name"
+            else
+              echo "Already absent: $name"
+            fi
+          done
