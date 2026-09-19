@@ -1,5 +1,5 @@
-# Fork-owned runtime/integration paths. The upstream sync workflow always
-# restores these paths from the fork before creating its review PR.
+# Fork-owned runtime and integration paths.
+# The upstream review workflow classifies changes here as PROTECTED and never imports them automatically.
 Dockerfile
 compose.yaml
 compose.dns.yaml
@@ -11,6 +11,10 @@ compose.hub.yaml
 .gitignore
 start.sh
 start-vpn.sh
+start.ps1
+start-vpn.ps1
+start.bat
+start-vpn.bat
 vpn
 SERVER_VERSION
 FORK_VERSION
@@ -24,26 +28,18 @@ docker/ffmpeg_wrapper.py
 docker/launch.sh
 docker/publish.sh
 docker/push-readme.sh
-.github/workflows/upstream-sync.yml
-.github/workflows/fork-guard.yml
-.github/workflows/library-addon-guard.yml
-.github/workflows/future-validation.yml
-.github/workflows/vpn-integration-guard.yml
-.github/workflows/2x-ci.yml
-.github/workflows/2x-dependency-validation.yml
-.github/workflows/2x-release.yml
+tools/ci
+.github/workflows/ci.yml
+.github/workflows/dependencies.yml
+.github/workflows/version-bump.yml
+.github/workflows/release.yml
+.github/workflows/upstream-review.yml
 .github/dependabot.yml
-docs/BRANCHING-2X.md
-docs/releases/v2.0.0.md
-.github/workflows/release-package.yml
-.github/workflows/release-on-main.yml
-.github/workflows/package-public-check.yml
 .github/upstream-protected-paths.txt
 .github/UPSTREAM_BASE
+docs/BRANCHING-2X.md
 
-# Fork-specific Library Addon presentation/metadata integration. Keep these
-# stable during automated upstream imports; upstream changes are reported and
-# can be integrated deliberately on the permanent future branch.
+# Fork-specific Library Addon presentation/metadata integration.
 src/stremiosrv/library/__init__.py
 src/stremiosrv/library/addon.py
 src/stremiosrv/library/addon_model.py
