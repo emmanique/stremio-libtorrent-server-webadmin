@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.0
+# Stremio Server WebAdmin 2.0.1
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=develop%2F2.x)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,19 +6,19 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.0** introduces one runtime topology, one Compose file and one release version across the Server, WebAdmin and VPN gateway.
+Version **2.0.1** introduces one runtime topology, one Compose file and one release version across the Server, WebAdmin and VPN gateway.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.0 at a glance
+## 2.0.1 at a glance
 
 ```text
-Core        2.0.0
-Server      2.0.0
-WebAdmin    2.0.0
-VPN Gateway 2.0.0
+Core        2.0.1
+Server      2.0.1
+WebAdmin    2.0.1
+VPN Gateway 2.0.1
 ```
 
 Version sources:
@@ -405,9 +405,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.0
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.0
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.0
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.1
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.1
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.1
 ```
 
 Stable moving aliases:
@@ -422,9 +422,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.0
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.0
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.0
+edmanique/stremio-libtorrent-server-webadmin:2.0.1
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.1
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.1
 ```
 
 ---
@@ -584,7 +584,7 @@ VERSIONING.md
 
 Current planned release:
 
-[docs/releases/v2.0.0.md](docs/releases/v2.0.0.md)
+[docs/releases/v2.0.1.md](docs/releases/v2.0.1.md)
 
 Versioning:
 

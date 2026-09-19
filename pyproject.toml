@@ -1,6 +1,6 @@
 [project]
 name = "stremiosrv"
-version = "2.0.0"
+version = "2.0.1"
 description = "Open, self-hosted Stremio streaming server (libtorrent engine + bundled web player)"
 readme = "README.md"
 license = "MIT"
