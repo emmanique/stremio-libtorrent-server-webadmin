@@ -178,16 +178,13 @@ def test_without_a_wanted_file_the_biggest_addressable_file_wins():
     assert am.playable_index(e) == 7
 
 
-def test_without_a_wanted_file_only_the_main_file_plays_and_only_once_complete():
-    """The main file is the largest the torrent lists, by declared size; the bytes on disk decide
-    only WHEN it plays. A smaller file that happens to be complete -- a sample, another episode, a
-    text file -- is never offered in its place: that is how a film's page played its sample once
-    untracked torrents gained their indices."""
+def test_ranking_with_no_wanted_file_uses_bytes_downloaded_not_declared_size():
+    """Engine-derived state keeps the fork's established behavior: declared size
+    does not prove what is actually present. The complete file with the most
+    downloaded bytes wins when no explicit wanted file exists."""
     e = _entry(files=[{"index": 1, "name": "a.mkv", "size": 9000, "downloaded": 100},
-                      {"index": 2, "name": "b.mkv", "size": 10, "downloaded": 10}])
-    assert am.playable_index(e) is None
-    e["files"][0]["downloaded"] = 9000
-    assert am.playable_index(e) == 1
+                      {"index": 2, "name": "b.mkv", "size": 10, "downloaded": 5000}])
+    assert am.playable_index(e) == 2
 
 
 def test_a_file_the_engine_can_address_beats_one_it_cannot():
