@@ -71,6 +71,46 @@ else
     printf '\nIPADDRESS=%s\n' "$IPADDRESS" >> "$ENV_FILE"
 fi
 
+# Migrate legacy Compose-scoped volumes to the stable global names used by
+# compose.yaml. The migration is intentionally non-destructive: legacy volumes
+# are retained, existing stable volumes are never overwritten, and data is
+# copied only when the stable destination does not yet exist.
+_migrate_volume() {
+    logical=$1
+    stable=$2
+
+    if docker volume inspect "$stable" >/dev/null 2>&1; then
+        return
+    fi
+
+    legacy=$(docker volume ls --format '{{.Name}}' 2>/dev/null \
+        | awk -v suffix="_$logical" '$0 ~ suffix "$" {print; exit}')
+
+    if [ -z "$legacy" ]; then
+        return
+    fi
+
+    echo "[start] migrating persistent volume: $legacy -> $stable"
+    docker volume create "$stable" >/dev/null
+    if ! docker run --rm \
+        -v "$legacy:/source:ro" \
+        -v "$stable:/target" \
+        alpine sh -c 'cd /source && tar cf - . | tar xpf - -C /target'; then
+        echo "[start] volume migration failed: $legacy -> $stable" >&2
+        echo "[start] legacy volume was not modified." >&2
+        docker volume rm "$stable" >/dev/null 2>&1 || true
+        exit 1
+    fi
+}
+
+_migrate_volume stremio-cache stremio-cache
+_migrate_volume stremio-config stremio-config
+_migrate_volume webadmin-data stremio-webadmin-data
+_migrate_volume pihole-etc stremio-pihole-etc
+_migrate_volume pihole-dnsmasq stremio-pihole-dnsmasq
+_migrate_volume vpn-data stremio-vpn-data
+_migrate_volume gluetun-data stremio-gluetun-data
+
 COMPOSE_ARGS="-f compose.yaml"
 if [ -e "${VAAPI_DEVICE:-/dev/dri/renderD128}" ]; then
     COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
