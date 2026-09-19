@@ -429,6 +429,14 @@ edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.0
 
 ---
 
+# Repository automation
+
+The repository uses five permanent workflows for CI, dependency validation, coordinated version bumps, releases and selective upstream review.
+
+See [docs/WORKFLOWS.md](docs/WORKFLOWS.md) for the complete operating model.
+
+---
+
 # Development model
 
 2.x uses dedicated branches:
