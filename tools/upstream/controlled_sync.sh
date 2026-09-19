@@ -18,6 +18,10 @@ git remote add upstream "$UPSTREAM_URL" 2>/dev/null || git remote set-url upstre
 git fetch --prune origin main
 git fetch --prune upstream main
 
+# Seed the remote-tracking ref when a previous integration branch exists so
+# --force-with-lease can verify that nobody changed it unexpectedly.
+git fetch origin "$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" 2>/dev/null || true
+
 MAIN_SHA="$(git rev-parse origin/main)"
 TARGET_SHA="$(git rev-parse upstream/main)"
 TARGET_VERSION="$(git show "$TARGET_SHA:pyproject.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
