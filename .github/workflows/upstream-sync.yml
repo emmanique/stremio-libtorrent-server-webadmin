@@ -1,0 +1,74 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-controlled-sync
+  cancel-in-progress: true
+
+jobs:
+  synchronize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Controlled merge from principal
+        id: sync
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_URL: https://github.com/andrewhack/stremio-libtorrent-server.git
+          UPSTREAM_NAME: andrewhack/stremio-libtorrent-server
+          TARGET_BRANCH: upstream/integration
+        run: bash tools/upstream/controlled_sync.sh
+
+      - name: Upload sync assessment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-sync-report
+          path: upstream-sync-report.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Open reconciliation issue when blocked
+        if: steps.sync.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TITLE="Upstream sync requires manual reconciliation"
+
+          if [ -f upstream-sync-report.md ]; then
+            BODY=upstream-sync-report.md
+          else
+            printf '%s\n' "Controlled upstream sync failed before producing a report. Inspect this workflow run." > /tmp/upstream-sync-failure.md
+            BODY=/tmp/upstream-sync-failure.md
+          fi
+
+          EXISTING="$(gh issue list --state open --search "$TITLE in:title" --json number,title --jq 'map(select(.title == "'"$TITLE"'"))[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body-file "$BODY"
+          else
+            gh issue create --title "$TITLE" --body-file "$BODY"
+          fi
+
+      - name: Enforce clean controlled sync
+        if: steps.sync.outcome == 'failure'
+        run: exit 1
