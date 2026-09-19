@@ -32,10 +32,29 @@ is_protected() {
 }
 
 restore_from_main() {
-    local path="$1"
+    local path="$1" entry mode blob
+
     if git cat-file -e "$MAIN_SHA:$path" 2>/dev/null; then
-        git checkout "$MAIN_SHA" -- "$path"
-        git add -- "$path"
+        entry="$(git ls-tree "$MAIN_SHA" -- "$path")"
+        mode="$(printf '%s\n' "$entry" | awk '{print $1}')"
+        blob="$(printf '%s\n' "$entry" | awk '{print $3}')"
+
+        test -n "$mode"
+        test -n "$blob"
+
+        # Preserve the exact Git blob from fork main. Using checkout/add here can
+        # normalize CRLF/LF through attributes and create a false protected-path
+        # modification even when the logical content is identical.
+        git update-index --add --cacheinfo "$mode,$blob,$path"
+
+        mkdir -p "$(dirname "$path")"
+        if [ "$mode" = "120000" ]; then
+            rm -f -- "$path"
+            ln -s "$(git cat-file blob "$blob")" "$path"
+        else
+            git cat-file blob "$blob" > "$path"
+            [ "$mode" = "100755" ] && chmod +x "$path" || true
+        fi
     else
         git rm -rf --ignore-unmatch -- "$path" >/dev/null 2>&1 || true
     fi
