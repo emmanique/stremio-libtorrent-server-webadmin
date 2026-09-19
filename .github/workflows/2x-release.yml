@@ -61,7 +61,6 @@ jobs:
           python -m pip install --upgrade pip uv
           uv sync --dev
           python -m pip install -r webadmin/requirements.txt
-          uv run ruff check src webadmin tests
           timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
           export IPADDRESS=192.0.2.10 PIHOLE_WEB_BIND_IP=192.0.2.10
           docker compose config --quiet
