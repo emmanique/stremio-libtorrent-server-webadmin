@@ -64,7 +64,21 @@ jobs:
           PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q             tests/test_app.py             tests/test_config.py             tests/test_health.py             tests/test_webadmin_config_lifecycle.py             tests/test_single_compose_vpn.py
 
       - name: Build dependency-sensitive images
+        shell: bash
         run: |
-          docker build -t dependency-check-server .
-          docker build -t dependency-check-webadmin ./webadmin
-          docker build -t dependency-check-vpn ./vpn
+          set -euo pipefail
+          build_retry() {
+            tag="$1"
+            context="$2"
+            for attempt in 1 2 3; do
+              if docker build -t "$tag" "$context"; then
+                return 0
+              fi
+              echo "Docker build failed for $tag (attempt $attempt/3)." >&2
+              [ "$attempt" -eq 3 ] && return 1
+              sleep $((attempt * 5))
+            done
+          }
+          build_retry dependency-check-server .
+          build_retry dependency-check-webadmin ./webadmin
+          build_retry dependency-check-vpn ./vpn
