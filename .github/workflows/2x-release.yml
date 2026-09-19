@@ -57,11 +57,26 @@ jobs:
           echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
 
       - name: Run release test gate
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip uv
           uv sync --dev
           python -m pip install -r webadmin/requirements.txt
-          PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
+
+          PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt             pytest -q -m "not integration" tests
+
+          integration_ok=0
+          for attempt in 1 2 3; do
+            echo "Network integration attempt $attempt/3"
+            if PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt               pytest -q -m integration tests; then
+              integration_ok=1
+              break
+            fi
+            [ "$attempt" -eq 3 ] || sleep $((attempt * 10))
+          done
+          test "$integration_ok" -eq 1
+
           export IPADDRESS=192.0.2.10 PIHOLE_WEB_BIND_IP=192.0.2.10
           docker compose config --quiet
 
