@@ -49,7 +49,7 @@ jobs:
           uv lock --check
           uv sync --dev
           python -m pip install -r webadmin/requirements.txt
-          uv run python -m pip check
+          uv pip check
           python -m pip check
 
       - name: Audit Python dependencies
