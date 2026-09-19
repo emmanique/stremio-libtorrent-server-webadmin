@@ -6,6 +6,7 @@ on:
       - main
       - develop/2.x
       - "release/**"
+      - "maintenance/**"
     paths-ignore:
       - "**/*.md"
       - "docs/**"
