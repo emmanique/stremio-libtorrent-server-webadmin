@@ -25,6 +25,7 @@ GLUETUN_CONTAINER = os.getenv("VPN_CONTAINER", "stremio-gluetun")
 STREMIO_CONTAINER = os.getenv("STREMIO_CONTAINER", "stremio-libtorrent-server")
 CONTROL_URL = os.getenv("VPN_CONTROL_URL", "http://stremio-gluetun:8000").rstrip("/")
 CONTROL_API_KEY = os.getenv("VPN_CONTROL_API_KEY", "")
+ENABLED_FILE = VPN_DIR / "enabled"
 SCRIPT_TAG = '<script src="/vpn-admin.js"></script>'
 VPN_LOCK = threading.Lock()
 
@@ -99,6 +100,25 @@ def _read_text(filename: str) -> str:
         return (VPN_DIR / filename).read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+def _vpn_requested() -> bool:
+    try:
+        value = ENABLED_FILE.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return False
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def _set_vpn_requested(enabled: bool) -> None:
+    VPN_DIR.mkdir(parents=True, exist_ok=True)
+    if enabled:
+        _secure_write(ENABLED_FILE, "on\n")
+    else:
+        try:
+            ENABLED_FILE.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _read_public_config() -> dict[str, object]:
@@ -201,18 +221,21 @@ def vpn_status():
     gluetun = _container(GLUETUN_CONTAINER)
     stremio = _container(STREMIO_CONTAINER)
     routed, network_mode = _routing_state(gluetun, stremio)
+    requested = _vpn_requested()
     env = _env(gluetun)
     firewall_on = str(env.get("FIREWALL", "on")).lower() not in {"off", "false", "0", "no"}
-    control_status, control_error = _control_optional("/v1/vpn/status") if gluetun else (None, None)
-    public_ip, public_error = _control_optional("/v1/publicip/ip") if gluetun else (None, None)
-    settings, _ = _control_optional("/v1/vpn/settings") if gluetun else (None, None)
+    control_status, control_error = _control_optional("/v1/vpn/status") if gluetun and requested else (None, None)
+    public_ip, public_error = _control_optional("/v1/publicip/ip") if gluetun and requested else (None, None)
+    settings, _ = _control_optional("/v1/vpn/settings") if gluetun and requested else (None, None)
     rx, tx = _network_stats(gluetun)
 
     state = (gluetun.attrs.get("State", {}) if gluetun else {}) or {}
     health = state.get("Health", {}) if isinstance(state.get("Health"), dict) else {}
-    vpn_state = str((control_status or {}).get("status") or "unavailable")
+    vpn_state = str((control_status or {}).get("status") or ("starting" if requested else "stopped"))
+    vpn_running = requested and vpn_state == "running"
     return {
-        "deploymentMode": "vpn" if routed else "direct",
+        "deploymentMode": "vpn" if requested else "direct",
+        "vpnRequested": requested,
         "gluetun": {
             "present": gluetun is not None,
             "running": bool(gluetun and gluetun.status == "running"),
@@ -227,17 +250,18 @@ def vpn_status():
             "txBytes": tx,
         },
         "routing": {
-            "stremioThroughVpn": routed,
+            "stremioThroughGateway": routed,
+            "stremioThroughVpn": bool(routed and vpn_running),
             "networkMode": network_mode,
-            "killSwitchActive": bool(routed and firewall_on),
-            "failClosed": bool(routed and firewall_on),
+            "killSwitchActive": bool(routed and requested and firewall_on),
+            "failClosed": bool(routed and requested and firewall_on),
         },
         "runtime": _runtime_settings(settings),
         "config": _read_public_config(),
         "limitations": {
             "portForwarding": False,
             "portForwardingMessage": "CyberGhost VPN does not provide VPN port forwarding; outbound P2P remains available.",
-            "disconnectBehaviour": "Disconnect is fail-closed: Stremio loses Internet access instead of falling back to the host WAN.",
+            "disconnectBehaviour": "VPN OFF is an intentional direct mode. If the VPN fails while enabled, direct fallback is not enabled.",
         },
         "busy": VPN_LOCK.locked(),
     }
@@ -310,78 +334,99 @@ def _missing_credentials() -> list[str]:
     return [label for key, label in required.items() if not config.get(key)]
 
 
-def apply_vpn_config():
-    missing = _missing_credentials()
-    if missing:
-        raise HTTPException(409, "missing CyberGhost material: " + ", ".join(missing))
-    gluetun = _container(GLUETUN_CONTAINER)
-    if gluetun is None:
-        raise HTTPException(
-            409,
-            "VPN stack is not active. Run 'sh start-vpn.sh' on the Docker host, then apply again.",
-        )
+def _wait_for_vpn_running(timeout: float = 60.0) -> tuple[bool, str | None]:
+    deadline = time.monotonic() + timeout
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        try:
+            status = _control("GET", "/v1/vpn/status", timeout=3)
+            if status.get("status") == "running":
+                return True, None
+        except Exception as exc:
+            last_error = str(exc)
+    return False, last_error
 
+
+def apply_vpn_config():
+    if _container(GLUETUN_CONTAINER) is None:
+        raise HTTPException(409, "VPN gateway container is not available")
+    if not _vpn_requested():
+        return {
+            "ok": True,
+            "message": "VPN configuration saved. VPN remains disabled until explicitly enabled.",
+            "status": vpn_status(),
+        }
+    return reconnect_vpn()
+
+
+def connect_vpn():
+    if _container(GLUETUN_CONTAINER) is None:
+        raise HTTPException(409, "VPN gateway container is not available")
+    active = _read_text("active_profile")
+    if not active:
+        raise HTTPException(409, "select or activate a VPN connection before enabling VPN")
     if not VPN_LOCK.acquire(blocking=False):
         raise HTTPException(409, "another VPN operation is already running")
     try:
-        gluetun.restart(timeout=15)
-        _audit("vpn.apply")
-        deadline = time.monotonic() + 45
-        last_error = None
-        while time.monotonic() < deadline:
-            time.sleep(1)
-            try:
-                status = _control("GET", "/v1/vpn/status", timeout=3)
-                if status.get("status") == "running":
-                    return {
-                        "ok": True,
-                        "message": "CyberGhost configuration applied and VPN is running.",
-                        "status": vpn_status(),
-                    }
-            except Exception as exc:
-                last_error = str(exc)
+        _set_vpn_requested(True)
+        _audit("vpn.enable", f"profile={active}")
+        running, detail = _wait_for_vpn_running()
         return {
             "ok": True,
-            "message": "VPN container restarted; connection is still converging.",
-            "detail": last_error,
+            "message": "VPN is running." if running else "VPN enable requested; connection is still converging.",
+            "detail": detail,
             "status": vpn_status(),
         }
     finally:
         VPN_LOCK.release()
 
 
-def _set_vpn_status(desired: str):
-    if _container(GLUETUN_CONTAINER) is None:
-        raise HTTPException(409, "VPN stack is not active; run sh start-vpn.sh first")
-    if not CONTROL_API_KEY:
-        raise HTTPException(503, "VPN control API key is not configured")
-    try:
-        result = _control("PUT", "/v1/vpn/status", {"status": desired}, timeout=10)
-        _audit(f"vpn.{desired}")
-        return {"ok": True, "result": result, "status": vpn_status()}
-    except Exception as exc:
-        raise HTTPException(503, f"Gluetun control API unavailable: {exc}")
-
-
-def connect_vpn():
-    return _set_vpn_status("running")
-
-
 def disconnect_vpn():
-    return _set_vpn_status("stopped")
-
-
-def reconnect_vpn():
+    if _container(GLUETUN_CONTAINER) is None:
+        raise HTTPException(409, "VPN gateway container is not available")
     if not VPN_LOCK.acquire(blocking=False):
         raise HTTPException(409, "another VPN operation is already running")
     try:
-        _control("PUT", "/v1/vpn/status", {"status": "stopped"}, timeout=10)
-        time.sleep(1)
-        result = _control("PUT", "/v1/vpn/status", {"status": "running"}, timeout=10)
+        if _vpn_requested():
+            try:
+                _control("PUT", "/v1/vpn/status", {"status": "stopped"}, timeout=10)
+            except Exception:
+                pass
+        _set_vpn_requested(False)
+        _audit("vpn.disable")
+        time.sleep(2)
+        return {
+            "ok": True,
+            "message": "VPN disabled. Gateway remains running in direct mode.",
+            "status": vpn_status(),
+        }
+    finally:
+        VPN_LOCK.release()
+
+
+def reconnect_vpn():
+    if not _vpn_requested():
+        return connect_vpn()
+    if not VPN_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "another VPN operation is already running")
+    try:
+        try:
+            _control("PUT", "/v1/vpn/status", {"status": "stopped"}, timeout=10)
+            time.sleep(1)
+            _control("PUT", "/v1/vpn/status", {"status": "running"}, timeout=10)
+        except Exception:
+            # The supervisor may still be starting Gluetun; keep the persistent
+            # enable request and let it converge without restarting the container.
+            pass
         _audit("vpn.reconnect")
-        return {"ok": True, "result": result, "status": vpn_status()}
-    except Exception as exc:
-        raise HTTPException(503, f"VPN reconnect failed: {exc}")
+        running, detail = _wait_for_vpn_running(timeout=45)
+        return {
+            "ok": True,
+            "message": "VPN reconnected." if running else "VPN restart requested; connection is still converging.",
+            "detail": detail,
+            "status": vpn_status(),
+        }
     finally:
         VPN_LOCK.release()
 
@@ -416,16 +461,22 @@ def _stremio_public_ip() -> str | None:
 
 def test_vpn_protection():
     status = vpn_status()
-    routed = bool(status["routing"]["stremioThroughVpn"])
+    routed = bool(status["routing"].get("stremioThroughGateway"))
+    requested = bool(status.get("vpnRequested"))
     running = status["gluetun"]["vpnStatus"] == "running"
     vpn_ip = status["gluetun"].get("publicIp")
     host_ip = _host_public_ip()
     stremio_ip = _stremio_public_ip()
 
     if not routed:
+        result = "ROUTING-ERROR"
+        protected = False
+        reason = "Stremio is not sharing the persistent gateway network namespace."
+        leak_blocked = False
+    elif not requested:
         result = "DIRECT"
         protected = False
-        reason = "Stremio is not sharing the Gluetun network namespace."
+        reason = "VPN is intentionally disabled; Stremio is using direct Internet through the persistent gateway."
         leak_blocked = False
     elif running:
         matches_vpn = bool(stremio_ip and vpn_ip and stremio_ip == vpn_ip)
