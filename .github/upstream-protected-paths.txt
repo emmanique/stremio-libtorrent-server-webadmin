@@ -20,6 +20,7 @@ SERVER_VERSION
 FORK_VERSION
 VERSIONING.md
 tools/release
+tools/upstream
 docs/WORKFLOWS.md
 README.md
 uv.lock
@@ -38,7 +39,7 @@ tools/ci
 .github/workflows/dependencies.yml
 .github/workflows/version-bump.yml
 .github/workflows/release.yml
-.github/workflows/upstream-review.yml
+.github/workflows/upstream-sync.yml
 .github/dependabot.yml
 .github/upstream-protected-paths.txt
 .github/UPSTREAM_BASE
