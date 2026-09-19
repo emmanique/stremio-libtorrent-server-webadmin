@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-v2-${{ github.ref }}
+  group: ci-current-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
