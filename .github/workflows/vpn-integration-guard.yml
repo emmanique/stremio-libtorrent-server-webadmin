@@ -49,7 +49,14 @@ jobs:
           grep -q 'one compose.yaml' start-vpn.sh
 
       - name: Build WebAdmin with VPN module
-        run: docker build -t webadmin-vpn-validation:local ./webadmin
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            docker build -t webadmin-vpn-validation:local ./webadmin && break
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
 
       - name: Smoke-test VPN connection profile CRUD
         shell: bash
