@@ -1,6 +1,8 @@
 # Quick Start
 
-This fork runs three coordinated services with Docker Compose:
+This fork runs four coordinated services from one Docker Compose topology:
+
+- `gluetun` — persistent network gateway; DIRECT when VPN is disabled and VPN gateway when enabled;
 
 - `stremio-libtorrent-server` — published Stremio streaming runtime from GHCR by default, mirrored to Docker Hub;
 - `webadmin` — published administration UI from GHCR by default, mirrored to Docker Hub, on port `8090`;
@@ -15,10 +17,10 @@ The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebA
 Current coordinated release:
 
 ```text
-Core            1.6.9
-Server/Fork     1.6.9-server.18
-WebAdmin        1.4.1
-VPN Gateway     1.6.9-server.18
+Core            2.0.0
+Server/Fork     2.0.0
+WebAdmin        2.0.0
+VPN Gateway     2.0.0
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +62,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:1.4.1
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:1.6.9-server.18
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.0
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.0
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.0
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +73,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
+edmanique/stremio-libtorrent-server-webadmin:2.0.0
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-1.4.1
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.0
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-1.6.9-server.18
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.0
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:1.6.9-server.18
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-1.4.1
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-1.6.9-server.18
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.0
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.0
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.0
 ```
 
 Or follow the moving aliases:
@@ -282,3 +284,18 @@ docker compose -f compose.yaml -f compose.gpu.yaml up -d
 For VAAPI Full GPU, decoded frames stay on VAAPI surfaces through scaling/format normalization and encoding, using `scale_vaapi` with `NV12` rather than a redundant software-download/hardware-upload cycle.
 
 After starting playback that genuinely requires transcoding, use **WebAdmin → Transcoding** to confirm the selected execution profile, runtime self-test result and effective `[ffmpeg-policy]` decision.
+
+
+## 10. VPN in 2.x
+
+There is no separate VPN Compose stack in 2.x.
+
+Start the platform normally:
+
+```bash
+sh start.sh
+```
+
+On first start the gateway remains in DIRECT mode. Configure a CyberGhost/OpenVPN profile in **WebAdmin → VPN**, then enable the VPN there. Disabling VPN returns the persistent gateway to DIRECT mode without stopping the Gluetun container or changing Stremio's network namespace.
+
+The legacy `start-vpn.*` files are compatibility wrappers only.
