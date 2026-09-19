@@ -56,7 +56,7 @@ grep -q '_activate_image' webadmin/package_update.py
 grep -q '/api/component-versions' webadmin/version_lifecycle.py
 
 grep -q 'httpsCert.json' webadmin/version_lifecycle.py
-grep -q 'stremio\.rocks' webadmin/version_lifecycle.py
+grep -q 'STREMIO_ROCKS_RE' webadmin/version_lifecycle.py
 grep -q '/api/transcoding/profiles' webadmin/transcoding_profiles.py
 grep -q 'runtime-profile-self-test' webadmin/transcoding_verified_status.py
 
