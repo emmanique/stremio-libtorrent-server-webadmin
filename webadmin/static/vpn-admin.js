@@ -130,16 +130,16 @@
     $('vpnRx').textContent = fmtBytes(g.rxBytes);
     $('vpnTx').textContent = fmtBytes(g.txBytes);
     if (data.deploymentMode !== 'vpn') {
-      $('vpnModeHint').innerHTML = '<b>Direct mode is active.</b> Create/import a connection, activate it, then run <code>sh start-vpn.sh</code> on the Docker host.';
+      $('vpnModeHint').innerHTML = '<b>Direct mode is active.</b> The gateway remains online; create/import a connection and enable VPN when ready.';
     } else if (!g.controlAvailable) {
       $('vpnModeHint').innerHTML = `<b>VPN stack detected, control API not ready.</b> ${esc(g.controlError || 'Gluetun may still be starting or waiting for a valid profile.')}`;
     } else {
       $('vpnModeHint').innerHTML = `<b>VPN mode is active.</b> ${esc(active.name || 'Selected connection')} routes Stremio through Gluetun. ${(data.startupProfileId && data.startupProfileId === data.activeProfileId) ? 'This is also the startup connection.' : ''}`;
     }
-    const controllable = !!g.controlAvailable && data.deploymentMode === 'vpn';
-    $('vpnConnect').disabled = !controllable || running;
-    $('vpnDisconnect').disabled = !controllable || !running;
-    $('vpnReconnect').disabled = !controllable;
+    const controllable = !!g.present;
+    $('vpnConnect').disabled = !controllable || running || data.deploymentMode === 'vpn';
+    $('vpnDisconnect').disabled = !controllable || data.deploymentMode !== 'vpn';
+    $('vpnReconnect').disabled = !controllable || data.deploymentMode !== 'vpn';
   }
 
   function featureLabels(p) {
