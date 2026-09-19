@@ -177,10 +177,19 @@ networks:
         - subnet: 172.30.0.0/24
 
 volumes:
+  # Stable global names keep persistent state attached to the installation even
+  # when the checkout directory or Compose project name changes.
   stremio-cache:
+    name: stremio-cache
   stremio-config:
+    name: stremio-config
   webadmin-data:
+    name: stremio-webadmin-data
   pihole-etc:
+    name: stremio-pihole-etc
   pihole-dnsmasq:
+    name: stremio-pihole-dnsmasq
   vpn-data:
+    name: stremio-vpn-data
   gluetun-data:
+    name: stremio-gluetun-data
