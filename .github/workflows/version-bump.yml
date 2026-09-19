@@ -20,17 +20,20 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out main
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Validate version
+      - name: Validate requested version
         id: version
         shell: bash
         env:
@@ -38,133 +41,83 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import os, re
+          import os
+          import re
+
           current = open("SERVER_VERSION", encoding="utf-8").read().strip()
           requested = os.environ["REQUESTED"].strip()
-          pat = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-          if not pat.fullmatch(requested):
+
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", requested):
               raise SystemExit(f"Invalid semantic version: {requested}")
-          cur = tuple(map(int, current.split(".")))
-          new = tuple(map(int, requested.split(".")))
-          if new <= cur:
-              raise SystemExit(f"Version must increase: current={current}, requested={requested}")
-          if new[0] != 2:
+
+          current_tuple = tuple(map(int, current.split(".")))
+          requested_tuple = tuple(map(int, requested.split(".")))
+
+          if requested_tuple <= current_tuple:
+              raise SystemExit(
+                  f"Version must increase: current={current}, requested={requested}"
+              )
+
+          if requested_tuple[0] != 2:
               raise SystemExit("This workflow manages the 2.x release line only.")
           PY
+
           echo "version=$REQUESTED" >> "$GITHUB_OUTPUT"
           echo "branch=release/$REQUESTED" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure release branch does not already exist
+      - name: Ensure release branch is new
         shell: bash
         run: |
           set -euo pipefail
           BRANCH="${{ steps.version.outputs.branch }}"
           if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
-            echo "Branch $BRANCH already exists; review/update it instead of overwriting it." >&2
+            echo "Branch $BRANCH already exists. Review or remove it before retrying." >&2
             exit 1
           fi
 
-      - name: Update coordinated versions
+      - name: Update coordinated version files
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           CURRENT="$(tr -d '[:space:]' < SERVER_VERSION)"
+
           printf '%s\n' "$VERSION" > SERVER_VERSION
           printf '%s\n' "$VERSION" > FORK_VERSION
           printf '%s\n' "$VERSION" > webadmin/WEBADMIN_VERSION
 
           CURRENT="$CURRENT" python - <<'PY'
-          import os, pathlib, re
+          import os
+          import pathlib
+          import re
 
           version = os.environ["VERSION"]
           current = os.environ["CURRENT"]
 
-          path = pathlib.Path("pyproject.toml")
-          text = path.read_text(encoding="utf-8")
+          pyproject = pathlib.Path("pyproject.toml")
+          text = pyproject.read_text(encoding="utf-8")
           updated, count = re.subn(
-              r'(?m)^version\s*=\s*"[^"]+"\s*
-      - name: Create release notes template
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          NOTES="docs/releases/v$VERSION.md"
-          if [ ! -e "$NOTES" ]; then
-            cat > "$NOTES" <<EOF
-          # Stremio Server WebAdmin $VERSION
-
-          ## Summary
-
-          Describe the user-visible changes in this release.
-
-          ## Components
-
-          - Fork platform/server: $VERSION
-          - WebAdmin: $VERSION
-          - VPN gateway: $VERSION
-
-          ## Validation
-
-          - CI
-          - Dependency validation
-          - Deterministic regression tests
-          - Network integration tests
-          - Server/WebAdmin/VPN image builds and smoke tests
-
-          ## Upgrade notes
-
-          Preserve persistent Docker volumes. Do not use `docker compose down -v` during upgrade.
-          EOF
-          fi
-
-      - name: Validate prepared release
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash tools/ci/repo-guard.sh
-          uv lock --check
-          python -m compileall -q src webadmin docker
-
-      - name: Push release branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          BRANCH="${{ steps.version.outputs.branch }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add SERVER_VERSION FORK_VERSION webadmin/WEBADMIN_VERSION pyproject.toml uv.lock README.md QUICKSTART.md "docs/releases/v$VERSION.md"
-          git commit -m "Prepare release $VERSION"
-          git push origin "$BRANCH"
-
-      - name: Open release pull request
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          BRANCH="${{ steps.version.outputs.branch }}"
-          gh pr create             --base main             --head "$BRANCH"             --title "Release $VERSION"             --body "Prepare coordinated release $VERSION. Merge only after CI and Dependencies are green."
-,
+              r'(?m)^version\s*=\s*"[^"]+"\s*$',
               f'version = "{version}"',
               text,
               count=1,
           )
           if count != 1:
               raise SystemExit("Could not update pyproject.toml version")
-          path.write_text(updated, encoding="utf-8")
+          pyproject.write_text(updated, encoding="utf-8")
 
-          for name in ("README.md", "QUICKSTART.md"):
-              doc = pathlib.Path(name)
-              text = doc.read_text(encoding="utf-8")
+          for filename in ("README.md", "QUICKSTART.md"):
+              path = pathlib.Path(filename)
+              text = path.read_text(encoding="utf-8")
               if current not in text:
-                  raise SystemExit(f"{name} does not contain current version {current}")
-              doc.write_text(text.replace(current, version), encoding="utf-8")
+                  raise SystemExit(
+                      f"{filename} does not contain current version {current}"
+                  )
+              path.write_text(
+                  text.replace(current, version),
+                  encoding="utf-8",
+              )
           PY
 
           python -m pip install --upgrade uv
@@ -176,34 +129,42 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          NOTES="docs/releases/v$VERSION.md"
-          if [ ! -e "$NOTES" ]; then
-            cat > "$NOTES" <<EOF
-          # Stremio Server WebAdmin $VERSION
+          python - <<'PY'
+          import os
+          import pathlib
 
-          ## Summary
+          version = os.environ["VERSION"]
+          path = pathlib.Path(f"docs/releases/v{version}.md")
 
-          Describe the user-visible changes in this release.
+          if not path.exists():
+              path.write_text(
+                  f"""# Stremio Server WebAdmin {version}
 
-          ## Components
+## Summary
 
-          - Fork platform/server: $VERSION
-          - WebAdmin: $VERSION
-          - VPN gateway: $VERSION
+Describe the user-visible changes in this release.
 
-          ## Validation
+## Components
 
-          - CI
-          - Dependency validation
-          - Deterministic regression tests
-          - Network integration tests
-          - Server/WebAdmin/VPN image builds and smoke tests
+- Fork platform/server: {version}
+- WebAdmin: {version}
+- VPN gateway: {version}
 
-          ## Upgrade notes
+## Validation
 
-          Preserve persistent Docker volumes. Do not use `docker compose down -v` during upgrade.
-          EOF
-          fi
+- CI
+- Dependency validation
+- Deterministic regression tests
+- Network integration tests
+- Server/WebAdmin/VPN image builds and smoke tests
+
+## Upgrade notes
+
+Preserve persistent Docker volumes. Do not use `docker compose down -v` during upgrade.
+""",
+                  encoding="utf-8",
+              )
+          PY
 
       - name: Validate prepared release
         shell: bash
@@ -213,16 +174,27 @@ jobs:
           uv lock --check
           python -m compileall -q src webadmin docker
 
-      - name: Push release branch
+      - name: Create release branch
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           BRANCH="${{ steps.version.outputs.branch }}"
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git checkout -b "$BRANCH"
-          git add SERVER_VERSION FORK_VERSION webadmin/WEBADMIN_VERSION pyproject.toml uv.lock "docs/releases/v$VERSION.md"
+          git add \
+            SERVER_VERSION \
+            FORK_VERSION \
+            webadmin/WEBADMIN_VERSION \
+            pyproject.toml \
+            uv.lock \
+            README.md \
+            QUICKSTART.md \
+            "docs/releases/v$VERSION.md"
+
           git commit -m "Prepare release $VERSION"
           git push origin "$BRANCH"
 
@@ -234,4 +206,9 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           BRANCH="${{ steps.version.outputs.branch }}"
-          gh pr create             --base main             --head "$BRANCH"             --title "Release $VERSION"             --body "Prepare coordinated release $VERSION. Merge only after CI and Dependencies are green."
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Release $VERSION" \
+            --body "Prepare coordinated release $VERSION. Merge only after CI and Dependencies are green."
