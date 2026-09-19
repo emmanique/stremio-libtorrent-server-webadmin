@@ -146,6 +146,7 @@ jobs:
           PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt             pytest -q -m "not integration" tests
 
       - name: Network integration tests
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
