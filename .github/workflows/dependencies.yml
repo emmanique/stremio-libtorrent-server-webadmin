@@ -1,0 +1,94 @@
+name: Dependencies
+
+on:
+  push:
+    branches:
+      - main
+      - develop/2.x
+      - "release/**"
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "webadmin/requirements.txt"
+      - "Dockerfile"
+      - "webadmin/Dockerfile"
+      - "vpn/Dockerfile"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  pull_request:
+    branches:
+      - main
+      - develop/2.x
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "webadmin/requirements.txt"
+      - "Dockerfile"
+      - "webadmin/Dockerfile"
+      - "vpn/Dockerfile"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate lock and dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip uv pip-audit
+          uv lock --check
+          uv sync --dev
+          python -m pip install -r webadmin/requirements.txt
+          uv pip check
+          python -m pip check
+
+      - name: Audit dependencies
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip-audit -r webadmin/requirements.txt
+          uv export --no-dev --format requirements-txt -o /tmp/core-requirements.txt
+          pip-audit -r /tmp/core-requirements.txt
+
+      - name: Dependency-sensitive regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q             tests/test_app.py             tests/test_config.py             tests/test_health.py             tests/test_webadmin_config_lifecycle.py             tests/test_single_compose_vpn.py
+
+      - name: Build dependency-sensitive images
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_retry() {
+            tag="$1"
+            context="$2"
+            for attempt in 1 2 3; do
+              docker build -t "$tag" "$context" && return 0
+              [ "$attempt" -eq 3 ] && return 1
+              sleep $((attempt * 5))
+            done
+          }
+          build_retry dependency-server:test .
+          build_retry dependency-webadmin:test ./webadmin
+          build_retry dependency-vpn:test ./vpn
