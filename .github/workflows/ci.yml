@@ -67,10 +67,18 @@ jobs:
           changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
 
           if printf '%s\n' "$changed" | grep -Eq '^(Dockerfile|compose\.yaml|compose\.(gpu|vaapi|dns|hub)\.yaml|vpn/|docker/ffmpeg_wrapper\.py|docker/webadmin_entrypoint\.py)$'; then
-            git diff --quiet "$BASE_SHA"...HEAD -- SERVER_VERSION FORK_VERSION && {
+            if git diff --quiet "$BASE_SHA"...HEAD -- SERVER_VERSION FORK_VERSION; then
               echo "Runtime/distribution changed without SERVER_VERSION/FORK_VERSION bump." >&2
               exit 1
-            }
+            fi
+          fi
+
+          webadmin_changed="$(printf '%s\n' "$changed" | grep -E '^webadmin/' | grep -v '^webadmin/WEBADMIN_VERSION$' || true)"
+          if [ -n "$webadmin_changed" ]; then
+            if git diff --quiet "$BASE_SHA"...HEAD -- webadmin/WEBADMIN_VERSION; then
+              echo "WebAdmin changed without WEBADMIN_VERSION bump." >&2
+              exit 1
+            fi
           fi
 
           if printf '%s\n' "$changed" | grep -Eq '^webadmin/'; then
