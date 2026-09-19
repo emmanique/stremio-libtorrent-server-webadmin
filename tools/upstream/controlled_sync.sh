@@ -85,6 +85,7 @@ if git merge-base --is-ancestor "$TARGET_SHA" "$MAIN_SHA"; then
     } >> "$REPORT"
 
     emit_output changed false
+    emit_output main_sha "$MAIN_SHA"
     emit_output target "$TARGET_SHA"
     emit_output version "$TARGET_VERSION"
     emit_output branch "$TARGET_BRANCH"
@@ -128,6 +129,7 @@ if [ "$merge_rc" -ne 0 ]; then
 
         emit_output changed false
         emit_output blocked true
+        emit_output main_sha "$MAIN_SHA"
         emit_output target "$TARGET_SHA"
         emit_output version "$TARGET_VERSION"
         emit_output branch "$TARGET_BRANCH"
@@ -180,6 +182,7 @@ write_header
 
 emit_output changed true
 emit_output blocked false
+emit_output main_sha "$MAIN_SHA"
 emit_output target "$TARGET_SHA"
 emit_output version "$TARGET_VERSION"
 emit_output branch "$TARGET_BRANCH"
