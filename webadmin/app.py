@@ -120,7 +120,7 @@ DEFAULTS = {
     "prefetch_next_fraction": 0.05,
     "prefetch_next_max_bytes": 134217728,
     "prefetch_trigger_fraction": 0.90,
-    "library_ui": False,
+    "library_ui": True,
     "library_owner": "",
     "library_allow_http": False,
     "library_addon_allow": "",

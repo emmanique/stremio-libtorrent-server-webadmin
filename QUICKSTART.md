@@ -17,10 +17,10 @@ The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebA
 Current coordinated release:
 
 ```text
-Core            2.0.1
-Server/Fork     2.0.1
-WebAdmin        2.0.1
-VPN Gateway     2.0.1
+Core            2.0.2
+Server/Fork     2.0.2
+WebAdmin        2.0.2
+VPN Gateway     2.0.2
 ```
 
 ## 1. Obtain the deployment files
@@ -62,9 +62,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.1
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.1
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.1
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.2
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.2
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.2
 ```
 
 ### Docker Hub — alternative mirror
@@ -73,21 +73,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:2.0.1
+edmanique/stremio-libtorrent-server-webadmin:2.0.2
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.1
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.2
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.1
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.2
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.1
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.1
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.1
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.2
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.2
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.2
 ```
 
 Or follow the moving aliases:
