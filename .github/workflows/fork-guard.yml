@@ -37,6 +37,19 @@ jobs:
             echo 'SERVER_VERSION and FORK_VERSION must contain the same value.' >&2
             exit 1
           }
+          SERVER_VERSION_VALUE="$(tr -d '[:space:]' < SERVER_VERSION)"
+          if printf '%s' "$SERVER_VERSION_VALUE" | grep -q '^2\.'; then
+            WEBADMIN_VERSION_VALUE="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+            CORE_VERSION_VALUE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+            test "$SERVER_VERSION_VALUE" = "$WEBADMIN_VERSION_VALUE" || {
+              echo '2.x requires WebAdmin to use the unified platform version.' >&2
+              exit 1
+            }
+            test "$SERVER_VERSION_VALUE" = "$CORE_VERSION_VALUE" || {
+              echo '2.x requires the core package to use the unified platform version.' >&2
+              exit 1
+            }
+          fi
           grep -q 'COPY vpn_profiles.py' webadmin/Dockerfile
           grep -q 'vpn_profiles.install(app)' webadmin/transcoding_verified_status.py
 
