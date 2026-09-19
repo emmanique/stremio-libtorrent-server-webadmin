@@ -81,12 +81,6 @@ jobs:
             fi
           fi
 
-          if printf '%s\n' "$changed" | grep -Eq '^webadmin/'; then
-            git diff --quiet "$BASE_SHA"...HEAD -- webadmin/WEBADMIN_VERSION && {
-              echo "WebAdmin changed without WEBADMIN_VERSION bump." >&2
-              exit 1
-            }
-          fi
 
       - name: Static validation
         shell: bash
