@@ -143,6 +143,11 @@ jobs:
           export PIHOLE_DNS_BIND_IP=192.0.2.10
           test ! -e compose.vpn.yaml
           docker compose -f compose.yaml config --quiet
+          # Docker Compose accepts hostname + network_mode: service:<name> at
+          # config time, but Docker rejects that combination when creating the
+          # container. Guard the shared-network contract explicitly.
+          test "$(docker compose -f compose.yaml config --format json | jq -r '.services["stremio-libtorrent-server"].hostname // empty')" = ""
+          test "$(docker compose -f compose.yaml config --format json | jq -r '.services["stremio-libtorrent-server"].network_mode')" = "service:gluetun"
           docker compose -f compose.yaml -f compose.dns.yaml config --quiet
           docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
           docker compose -f compose.yaml -f compose.gpu.yaml config --quiet
