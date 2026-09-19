@@ -6,15 +6,16 @@ on:
       - main
       - develop/2.x
       - "release/**"
-      - "feature/**"
-      - "fix/**"
-      - "hotfix/**"
-      - "upstream-import/**"
-      - "maintenance/**"
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   pull_request:
     branches:
       - main
       - develop/2.x
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
