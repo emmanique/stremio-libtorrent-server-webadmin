@@ -3,7 +3,7 @@ name: Release WebAdmin
 on:
   push:
     branches:
-      - main
+      - legacy/1.x
     paths:
       - "webadmin/**"
       - ".github/workflows/webadmin-release.yml"
