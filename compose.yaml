@@ -177,19 +177,15 @@ networks:
         - subnet: 172.30.0.0/24
 
 volumes:
-  # Stable global names keep persistent state attached to the installation even
-  # when the checkout directory or Compose project name changes.
+  # Keep the historical Compose-managed volume identities. The top-level
+  # project name is fixed to "stremio-platform", so these resolve to the same
+  # stremio-platform_* volumes used by existing installations even when the
+  # checkout directory changes. This also keeps plain "docker compose up"
+  # upgrade-safe without requiring a bootstrap migration.
   stremio-cache:
-    name: stremio-cache
   stremio-config:
-    name: stremio-config
   webadmin-data:
-    name: stremio-webadmin-data
   pihole-etc:
-    name: stremio-pihole-etc
   pihole-dnsmasq:
-    name: stremio-pihole-dnsmasq
   vpn-data:
-    name: stremio-vpn-data
   gluetun-data:
-    name: stremio-gluetun-data
