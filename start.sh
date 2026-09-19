@@ -58,6 +58,30 @@ PIHOLE_WEB_BIND_IP=${PIHOLE_WEB_BIND_IP:-$IPADDRESS}
 PIHOLE_DNS_BIND_IP=${PIHOLE_DNS_BIND_IP:-$IPADDRESS}
 export PIHOLE_WEB_BIND_IP PIHOLE_DNS_BIND_IP
 
+# Persist the detected address for every later Compose/WebAdmin operation.  A
+# shell-only export disappears as soon as this launcher exits, which made a
+# fresh install fall back to localhost/0.0.0.0 on subsequent restarts.
+ENV_FILE="$ROOT/.env"
+if [ ! -f "$ENV_FILE" ]; then
+    cp "$ROOT/.env.example" "$ENV_FILE"
+fi
+if grep -q '^IPADDRESS=' "$ENV_FILE"; then
+    sed -i "s/^IPADDRESS=.*/IPADDRESS=$IPADDRESS/" "$ENV_FILE"
+else
+    printf '\nIPADDRESS=%s\n' "$IPADDRESS" >> "$ENV_FILE"
+fi
+
+COMPOSE_ARGS="-f compose.yaml"
+if [ -e "${VAAPI_DEVICE:-/dev/dri/renderD128}" ]; then
+    COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
+    echo "[start] VAAPI render node detected: ${VAAPI_DEVICE:-/dev/dri/renderD128}"
+elif [ -e /dev/nvidia0 ] && command -v nvidia-smi >/dev/null 2>&1; then
+    COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+    echo "[start] NVIDIA GPU detected: enabling GPU overlay"
+else
+    echo "[start] no supported GPU render node detected: CPU fallback"
+fi
+
 echo "[start] detected host IPv4: $IPADDRESS"
 echo "[start] Web Player : http://$IPADDRESS:8080"
 echo "[start] WebAdmin   : http://$IPADDRESS:8090"
@@ -72,8 +96,11 @@ fi
 
 if [ "$#" -eq 0 ]; then
     echo "[start] pulling published images..."
-    docker compose pull
-    exec docker compose up -d --remove-orphans
+    # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
+    docker compose $COMPOSE_ARGS pull
+    # shellcheck disable=SC2086
+    exec docker compose $COMPOSE_ARGS up -d --remove-orphans
 fi
 
-exec docker compose "$@"
+# shellcheck disable=SC2086
+exec docker compose $COMPOSE_ARGS "$@"
