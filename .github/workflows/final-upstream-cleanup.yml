@@ -1,0 +1,50 @@
+name: Final upstream cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/final-upstream-cleanup.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-upstream-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Delete completed temporary branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for branch in             maintenance/upstream-compat-base             maintenance/upstream-validation             upstream/integration
+          do
+            if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+              echo "Deleting $branch"
+              git push origin --delete "$branch"
+            else
+              echo "Already absent: $branch"
+            fi
+          done
+
+      - name: Remove this one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/final-upstream-cleanup.yml
+          git commit -m "Remove completed final upstream cleanup workflow"
+          git push origin HEAD:main
