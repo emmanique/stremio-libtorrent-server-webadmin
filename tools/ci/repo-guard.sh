@@ -2,7 +2,7 @@
 set -euo pipefail
 trap 'echo "repo-guard failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-for file in   SERVER_VERSION FORK_VERSION VERSIONING.md VPN.md compose.yaml   start.sh start-vpn.sh vpn/Dockerfile vpn/entrypoint.sh Dockerfile   webadmin/Dockerfile webadmin/WEBADMIN_VERSION webadmin/app.py   webadmin/fork_update.py webadmin/package_update.py webadmin/version_lifecycle.py   webadmin/vpn_admin.py webadmin/vpn_profiles.py webadmin/transcoding_config.py   webadmin/transcoding_runtime_fix.py webadmin/transcoding_profiles.py   webadmin/transcoding_verified_status.py webadmin/static/vpn-admin.js; do
+for file in   SERVER_VERSION FORK_VERSION VERSIONING.md VPN.md compose.yaml   start.sh start-vpn.sh vpn/Dockerfile vpn/entrypoint.sh Dockerfile   webadmin/Dockerfile webadmin/WEBADMIN_VERSION webadmin/app.py   webadmin/fork_update.py webadmin/package_update.py webadmin/version_lifecycle.py   webadmin/vpn_admin.py webadmin/vpn_profiles.py webadmin/transcoding_config.py   webadmin/transcoding_runtime_fix.py webadmin/transcoding_profiles.py   webadmin/transcoding_verified_status.py webadmin/static/vpn-admin.js tools/release/prepare_version.py; do
   test -f "$file" || { echo "Missing fork-owned file: $file" >&2; exit 1; }
 done
 
