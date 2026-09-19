@@ -540,3 +540,36 @@ def test_a_file_still_downloading_gets_no_row_even_when_the_disk_says_it_is_whol
     whole = dict(arriving, downloaded=4096, progress=1.0)
     state = statemod.build(str(tmp_path), _FakeEngine({name: ih}, [], live={ih: [whole]}))
     assert len(am.streams_for_meta_id(state, "tt0000011:1:5", ORIGIN)) == 1
+
+
+def test_resume_file_list_never_substitutes_a_complete_sample_for_the_main_movie():
+    """A resume-derived list has authoritative torrent indices. The largest declared
+    video is the movie; a smaller complete sample must not be offered while the movie
+    itself is still incomplete."""
+    e = _entry(
+        filesFrom="resume",
+        files=[
+            {"index": 1, "name": "movie.mkv", "size": 9000, "downloaded": 100, "progress": 0.01},
+            {"index": 2, "name": "sample.mkv", "size": 10, "downloaded": 10, "progress": 1.0},
+        ],
+    )
+    assert am.playable_index(e) is None
+
+    e["files"][0]["downloaded"] = 9000
+    e["files"][0]["progress"] = 1.0
+    assert am.playable_index(e) == 1
+
+
+def test_resume_episode_list_never_falls_back_to_another_complete_episode():
+    """When resume metadata can identify the requested episode, an incomplete match
+    means no local stream yet. The addon must not fall through to another complete
+    episode merely because the torrent label matches the series."""
+    e = _entry(
+        filesFrom="resume",
+        label={"type": "series", "metaId": "tt0000099", "season": 2, "episode": 1, "name": "Pack"},
+        files=[
+            {"index": 0, "name": "Show.S02E01.mkv", "size": 1000, "downloaded": 100, "progress": 0.1},
+            {"index": 1, "name": "Show.S02E02.mkv", "size": 1000, "downloaded": 1000, "progress": 1.0},
+        ],
+    )
+    assert am.streams_for_meta_id({"entries": [e]}, "tt0000099:2:1", ORIGIN) == []
