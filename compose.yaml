@@ -1,13 +1,59 @@
 name: stremio-platform
 
 services:
+  gluetun:
+    image: "${VPN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest}"
+    pull_policy: always
+    container_name: stremio-gluetun
+    hostname: stremio-gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: "${TZ:-Africa/Luanda}"
+      STREMIO_VPN_CONFIG_DIR: /vpn
+      STREMIO_VPN_ENABLED_FILE: /vpn/enabled
+      STREMIO_DNS_PROXY_PORT: "${STREMIO_DNS_PROXY_PORT:-1053}"
+      STREMIO_DIRECT_DNS_UPSTREAM: "${STREMIO_DIRECT_DNS_UPSTREAM:-1.1.1.1}"
+      FIREWALL: "on"
+      DNS_SERVER: "on"
+      DNS_ADDRESS: "127.0.0.1"
+      DNS_KEEP_NAMESERVER: "off"
+      DNS_UPSTREAM_RESOLVER_TYPE: "${VPN_DNS_UPSTREAM_RESOLVER_TYPE:-dot}"
+      DNS_UPSTREAM_RESOLVERS: "${VPN_DNS_UPSTREAM_RESOLVERS:-cloudflare}"
+      FIREWALL_INPUT_PORTS: "1053,${STREMIOSRV_BT_LISTEN_PORT:-6881},8000,8080,11470,12470"
+      FIREWALL_OUTBOUND_SUBNETS: "${VPN_LAN_CIDRS:-192.168.0.0/16,172.30.0.0/24}"
+      HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: "{\"auth\":\"apikey\",\"apikey\":\"${VPN_CONTROL_API_KEY:-}\"}"
+    ports:
+      - "${IPADDRESS:-0.0.0.0}:8080:8080"
+      - "${IPADDRESS:-0.0.0.0}:11470:11470"
+      - "${IPADDRESS:-0.0.0.0}:12470:12470"
+      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/tcp"
+      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp"
+    volumes:
+      - vpn-data:/vpn
+      - gluetun-data:/gluetun
+    networks:
+      stremio-internal:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/stremio-vpn-supervisor.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
   stremio-libtorrent-server:
     image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
     pull_policy: always
     container_name: stremio-libtorrent-server
     hostname: stremio-libtorrent-server
     restart: unless-stopped
+    network_mode: "service:gluetun"
     environment:
+      STREMIOSRV_DNS_SERVER: "${STREMIOSRV_DNS_SERVER:-172.30.0.53}"
       STREMIOSRV_BT_LISTEN_PORT: "${STREMIOSRV_BT_LISTEN_PORT:-6881}"
       STREMIOSRV_CACHE_ROOT: /root/.stremio-server
       STREMIOSRV_CACHE_OWNER_ID: stremio-libtorrent-server
@@ -16,17 +62,10 @@ services:
       STREMIOSRV_CERT_FILE: "${CERT_FILE:-certificates.pem}"
       IPADDRESS: "${IPADDRESS:-}"
       SERVER_URL: "${SERVER_URL:-}"
-
-      # Cache / Library addon. The routes only exist when this is enabled. The addon exposes
-      # content already present on the server as a Stremio catalog and local stream source.
-      # Access remains protected by the per-install token plus the private-network/CIDR guard.
       STREMIOSRV_LIBRARY_UI: "${STREMIOSRV_LIBRARY_UI:-true}"
       STREMIOSRV_LIBRARY_ALLOW_HTTP: "${STREMIOSRV_LIBRARY_ALLOW_HTTP:-false}"
       STREMIOSRV_LIBRARY_OWNER: "${STREMIOSRV_LIBRARY_OWNER:-}"
       STREMIOSRV_LIBRARY_ADDON_ALLOW: "${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}"
-
-      # Fork-owned FFmpeg policy. Values saved in WebAdmin take precedence over
-      # these environment defaults after they are persisted to admin-settings.json.
       TRANSCODING_MODE: "${TRANSCODING_MODE:-auto}"
       TRANSCODING_HWACCEL: "${TRANSCODING_HWACCEL:-vaapi}"
       VAAPI_DEVICE: "${VAAPI_DEVICE:-/dev/dri/renderD128}"
@@ -40,21 +79,12 @@ services:
       TRANSCODING_DIRECT_AUDIO_CODECS: "${TRANSCODING_DIRECT_AUDIO_CODECS:-aac,mp3,ac3}"
       TRANSCODING_FALLBACK_CODEC: "${TRANSCODING_FALLBACK_CODEC:-libx264}"
       TRANSCODING_HW_DECODE: "${TRANSCODING_HW_DECODE:-true}"
-    dns:
-      - 172.30.0.53
-    ports:
-      - "${IPADDRESS:-0.0.0.0}:8080:8080"
-      - "${IPADDRESS:-0.0.0.0}:11470:11470"
-      - "${IPADDRESS:-0.0.0.0}:12470:12470"
-      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/tcp"
-      - "${IPADDRESS:-0.0.0.0}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp"
     volumes:
       - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
       - stremio-config:/config:ro
-    networks:
-      stremio-internal:
-        ipv4_address: 172.30.0.10
     depends_on:
+      gluetun:
+        condition: service_healthy
       pihole:
         condition: service_started
     healthcheck:
@@ -73,7 +103,7 @@ services:
     environment:
       WEBADMIN_STATE: /data
       STREMIO_CONFIG_FILE: /config/admin-settings.json
-      STREMIO_URL: http://stremio-libtorrent-server:11470
+      STREMIO_URL: http://gluetun:11470
       STREMIO_CONTAINER: stremio-libtorrent-server
       STREMIO_IMAGE: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
       STREMIO_PACKAGE_REPO: "${STREMIO_PACKAGE_REPO:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin}"
@@ -81,11 +111,9 @@ services:
       STREMIO_SOURCE_REPO: "${STREMIO_SOURCE_REPO:-https://github.com/emmanique/stremio-libtorrent-server-webadmin}"
       STREMIO_SOURCE_BRANCH: "${STREMIO_SOURCE_BRANCH:-main}"
       STREMIO_UPDATE_HEALTH_TIMEOUT: "${STREMIO_UPDATE_HEALTH_TIMEOUT:-180}"
-      # VPN settings can be prepared in direct mode; start-vpn.sh later reuses
-      # the same private vpn-data volume and injects the control API key.
       VPN_CONFIG_DIR: /vpn
       VPN_CONTAINER: stremio-gluetun
-      VPN_CONTROL_URL: http://stremio-gluetun:8000
+      VPN_CONTROL_URL: http://gluetun:8000
       VPN_CONTROL_API_KEY: "${VPN_CONTROL_API_KEY:-}"
       IPADDRESS: "${IPADDRESS:-localhost}"
       WEB_PLAYER_URL: "http://${IPADDRESS:-localhost}:8080"
@@ -112,13 +140,9 @@ services:
       TZ: "${TZ:-Africa/Luanda}"
       FTLCONF_webserver_api_password: "${PIHOLE_PASSWORD:-}"
       FTLCONF_dns_listeningMode: all
-      FTLCONF_dns_upstreams: "${PIHOLE_UPSTREAM_DNS:-1.1.1.1;1.0.0.1}"
-
-      # Locked Pi-hole v6 baseline for the Stremio platform.
-      # FTLCONF values are authoritative/read-only in Pi-hole while present as
-      # environment variables, so these settings cannot be changed from the
-      # Pi-hole Web UI, CLI or pihole.toml. Change the Compose baseline in the
-      # repository if the platform policy must be revised.
+      # One stable upstream in both modes. The VPN supervisor exposes 172.30.0.10:1053:
+      # DIRECT -> configured public resolver; VPN ON -> Gluetun local resolver through the tunnel.
+      FTLCONF_dns_upstreams: "172.30.0.10#1053"
       FTL_CMD: "no-daemon -- --dns-forward-max 300"
       FTLCONF_dns_cache_size: "10000"
       FTLCONF_dns_cache_optimizer: "3600"
@@ -134,9 +158,6 @@ services:
       FTLCONF_database_maxDBdays: "30"
       FTLCONF_database_DBinterval: "60"
       FTLCONF_database_useWAL: "true"
-    # DNS stays available to Stremio on the internal Docker network without
-    # occupying host port 53. Use compose.dns.yaml when Pi-hole must also be
-    # exposed as the DNS server for the LAN.
     expose:
       - "53/tcp"
       - "53/udp"
@@ -163,3 +184,4 @@ volumes:
   pihole-etc:
   pihole-dnsmasq:
   vpn-data:
+  gluetun-data:
