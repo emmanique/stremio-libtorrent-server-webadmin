@@ -1,6 +1,13 @@
 name: Upstream sync
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/upstream-sync.yml"
+      - ".github/upstream-protected-paths.txt"
+      - "tools/upstream/**"
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
