@@ -30,7 +30,7 @@ def test_server_url_env_is_written_whether_or_not_server_url_is_set():
     the default 127.0.0.1 one). Writing the file only when SERVER_URL is set would change what an
     install without SERVER_URL sees."""
     block = _seed_block()
-    assert block.index(_WRITE) < block.index('if [ -n "${SERVER_URL}" ]; then')
+    assert block.index(_WRITE) < block.index('if [ -n "${SERVER_URL:-}" ]; then')
 
 
 def test_the_app_gets_the_server_url_the_player_is_seeded_with():
