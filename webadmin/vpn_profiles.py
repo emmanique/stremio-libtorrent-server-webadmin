@@ -489,29 +489,23 @@ def activate_profile(profile_id: str):
         raise HTTPException(409, "VPN profile is incomplete: " + ", ".join(missing))
     _refresh_runtime(profile_id)
     _set_marker(ACTIVE_FILE, profile_id)
+    _set_marker(NEXT_FILE, profile_id)
     gluetun = legacy._container(legacy.GLUETUN_CONTAINER)
     if gluetun is None:
         _audit("vpn.profile.activate", f"profile={profile_id} mode=prepared")
         return {"ok": True, "profile": _public(profile_id), "started": False,
-                "message": "Connection prepared. Run 'sh start-vpn.sh' on the Docker host to start VPN mode."}
+                "message": "Connection prepared, but the persistent VPN gateway container is unavailable."}
     if not legacy.VPN_LOCK.acquire(blocking=False):
         raise HTTPException(409, "another VPN operation is already running")
     try:
-        _set_marker(NEXT_FILE, profile_id)
-        gluetun.restart(timeout=15)
-        deadline, last_error = time.monotonic() + 60, None
-        while time.monotonic() < deadline:
-            time.sleep(1)
-            try:
-                status = legacy._control("GET", "/v1/vpn/status", timeout=3)
-                if status.get("status") == "running":
-                    _audit("vpn.profile.activate", f"profile={profile_id} mode=restart")
-                    return {"ok": True, "profile": _public(profile_id), "started": True,
-                            "message": f"VPN connection '{meta.get('name', profile_id)}' is active."}
-            except Exception as exc:
-                last_error = str(exc)
+        legacy._set_vpn_requested(True)
+        _audit("vpn.profile.activate", f"profile={profile_id} mode=supervisor")
+        running, last_error = legacy._wait_for_vpn_running(timeout=60)
+        if running:
+            return {"ok": True, "profile": _public(profile_id), "started": True,
+                    "message": f"VPN connection '{meta.get('name', profile_id)}' is active."}
         return {"ok": True, "profile": _public(profile_id), "started": True,
-                "message": "VPN gateway restarted; the connection is still converging.", "detail": last_error}
+                "message": "VPN enable requested; the connection is still converging.", "detail": last_error}
     finally:
         legacy.VPN_LOCK.release()
 
