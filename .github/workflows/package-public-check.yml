@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - "Release package"
+      - "2.x Release"
     types:
       - completed
   workflow_dispatch:
