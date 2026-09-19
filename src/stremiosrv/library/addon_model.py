@@ -259,8 +259,18 @@ def playable_index(entry: dict) -> int | None:
                 return f["index"] if is_complete(f) else None
     # Complete only. Ranking by raw bytes would hand back a neighbour's boundary spill, and
     # offering a file still arriving cannot keep the promise the row makes.
+    # A resume-derived file list is the torrent's authoritative ordering after the
+    # engine handle is gone. For a film, the main file is the largest declared video;
+    # never substitute a smaller complete sample merely because it finished first.
+    if entry.get("filesFrom") == "resume" and addressable:
+        main_file = max(addressable, key=lambda f: f.get("size") or 0)
+        return main_file["index"] if is_complete(main_file) else None
+
     complete = [f for f in addressable if is_complete(f)]
     if complete:
+        # Engine-derived state keeps the fork's established behavior: when no
+        # explicit wanted file exists, use the complete addressable file with
+        # the most bytes actually present.
         return max(complete, key=lambda f: f.get("downloaded") or 0)["index"]
     if addressable:
         return None
@@ -352,14 +362,38 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
         if not label or (label.get("metaId") or "") != base:
             continue
         stream = None
+        resume_resolved = False
         if season is not None:
             # The pack's own files first: they cover every episode it holds, not only the one the
-            # label happens to name. The label match stays below as the fallback for a torrent
-            # whose file names carry no readable episode number -- there, the label is all we have.
+            # label happens to name.
             idx = episode_index(e, season, episode)
             if idx is not None:
                 stream = stream_for(e, origin, idx)
-        if stream is None and _label_matches(label, base, season, episode):
+
+            # Resume-derived lists are authoritative about torrent file indices even after the
+            # engine handle is gone. If they can identify the requested episode at all, then a
+            # missing stream means that exact episode is incomplete and we must NOT fall back to a
+            # different complete file. Likewise, if the resume record contains episode-like files
+            # but not the requested episode, guessing from the label can serve the wrong episode.
+            if e.get("filesFrom") == "resume":
+                addressable = [f for f in (e.get("files") or [])
+                               if isinstance(f.get("index"), int)]
+                names = [f.get("name") or "" for f in addressable]
+                match = pinsmod.select_wanted_file(
+                    names, {"season": season, "episode": episode}
+                )
+                if match is not None:
+                    resume_resolved = True
+                elif names and any(
+                    pinsmod.select_wanted_file(
+                        names, {"season": season, "episode": candidate}
+                    ) is not None
+                    for candidate in range(1, 100)
+                ):
+                    resume_resolved = True
+
+        if (stream is None and not resume_resolved
+                and _label_matches(label, base, season, episode)):
             stream = stream_for(e, origin)
         if stream is not None:
             out.append(stream)
