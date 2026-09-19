@@ -1,0 +1,160 @@
+name: Version bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New semantic version, e.g. 2.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate version
+        id: version
+        shell: bash
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, re
+          current = open("SERVER_VERSION", encoding="utf-8").read().strip()
+          requested = os.environ["REQUESTED"].strip()
+          pat = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+          if not pat.fullmatch(requested):
+              raise SystemExit(f"Invalid semantic version: {requested}")
+          cur = tuple(map(int, current.split(".")))
+          new = tuple(map(int, requested.split(".")))
+          if new <= cur:
+              raise SystemExit(f"Version must increase: current={current}, requested={requested}")
+          if new[0] != 2:
+              raise SystemExit("This workflow manages the 2.x release line only.")
+          PY
+          echo "version=$REQUESTED" >> "$GITHUB_OUTPUT"
+          echo "branch=release/$REQUESTED" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure release branch does not already exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ steps.version.outputs.branch }}"
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            echo "Branch $BRANCH already exists; review/update it instead of overwriting it." >&2
+            exit 1
+          fi
+
+      - name: Update coordinated versions
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" > SERVER_VERSION
+          printf '%s\n' "$VERSION" > FORK_VERSION
+          printf '%s\n' "$VERSION" > webadmin/WEBADMIN_VERSION
+
+          python - <<'PY'
+          import os, pathlib, re
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text(encoding="utf-8")
+          version = os.environ["VERSION"]
+          updated, count = re.subn(
+              r'(?m)^version\s*=\s*"[^"]+"\s*$',
+              f'version = "{version}"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update pyproject.toml version")
+          path.write_text(updated, encoding="utf-8")
+          PY
+
+          python -m pip install --upgrade uv
+          uv lock
+
+      - name: Create release notes template
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/releases/v$VERSION.md"
+          if [ ! -e "$NOTES" ]; then
+            cat > "$NOTES" <<EOF
+          # Stremio Server WebAdmin $VERSION
+
+          ## Summary
+
+          Describe the user-visible changes in this release.
+
+          ## Components
+
+          - Fork platform/server: $VERSION
+          - WebAdmin: $VERSION
+          - VPN gateway: $VERSION
+
+          ## Validation
+
+          - CI
+          - Dependency validation
+          - Deterministic regression tests
+          - Network integration tests
+          - Server/WebAdmin/VPN image builds and smoke tests
+
+          ## Upgrade notes
+
+          Preserve persistent Docker volumes. Do not use `docker compose down -v` during upgrade.
+          EOF
+          fi
+
+      - name: Validate prepared release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/ci/repo-guard.sh
+          uv lock --check
+          python -m compileall -q src webadmin docker
+
+      - name: Push release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH="${{ steps.version.outputs.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add SERVER_VERSION FORK_VERSION webadmin/WEBADMIN_VERSION pyproject.toml uv.lock "docs/releases/v$VERSION.md"
+          git commit -m "Prepare release $VERSION"
+          git push origin "$BRANCH"
+
+      - name: Open release pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH="${{ steps.version.outputs.branch }}"
+          gh pr create             --base main             --head "$BRANCH"             --title "Release $VERSION"             --body "Prepare coordinated release $VERSION. Merge only after CI and Dependencies are green."
