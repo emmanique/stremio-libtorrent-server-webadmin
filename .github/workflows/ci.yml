@@ -90,6 +90,41 @@ jobs:
           node --check webadmin/static/vpn-admin.js
           node --check webadmin/static/addon-connect.js
 
+      - name: Windows launcher validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          pwsh -NoProfile -Command '
+            $ErrorActionPreference = "Stop"
+            foreach ($file in @("start.ps1", "start-vpn.ps1")) {
+              $tokens = $null
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                (Resolve-Path $file),
+                [ref]$tokens,
+                [ref]$errors
+              ) | Out-Null
+              if ($errors.Count -gt 0) {
+                $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+                exit 1
+              }
+            }
+          '
+          python - <<'PY'
+          from pathlib import Path
+          for name in ("start.bat", "start-vpn.bat"):
+              text = Path(name).read_text(encoding="utf-8", errors="replace").lower()
+              assert "powershell.exe" in text, f"{name} does not invoke PowerShell"
+              assert "%*" in text, f"{name} does not forward arguments"
+              assert "exit /b %errorlevel%" in text, f"{name} does not preserve exit code"
+
+          docs = Path("docs/WINDOWS.md").read_text(encoding="utf-8", errors="replace")
+          root = Path("WINDOWS.md").read_text(encoding="utf-8", errors="replace")
+          for name in ("start.bat", "start-vpn.bat", "start.ps1", "start-vpn.ps1"):
+              assert name in docs, f"docs/WINDOWS.md missing {name}"
+              assert name in root, f"WINDOWS.md missing {name}"
+          PY
+
       - name: Compose validation
         shell: bash
         run: |
@@ -191,48 +226,3 @@ jobs:
 
           python tools/ci/vpn-profile-smoke.py
 
-  windows:
-    name: Windows launchers
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Parse PowerShell launchers
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          foreach ($file in @('start.ps1', 'start-vpn.ps1')) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $file),
-              [ref]$tokens,
-              [ref]$errors
-            ) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
-              exit 1
-            }
-          }
-
-      - name: Validate batch wrappers
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          foreach ($file in @('start.bat', 'start-vpn.bat')) {
-            $text = Get-Content -Raw $file
-            if ($text -notmatch 'powershell\.exe') { throw "$file does not invoke PowerShell" }
-            if ($text -notmatch '%\*') { throw "$file does not forward arguments" }
-            if ($text -notmatch 'exit /b %ERRORLEVEL%') { throw "$file does not preserve exit code" }
-          }
-
-      - name: Validate Windows documentation
-        shell: powershell
-        run: |
-          $fullGuide = Get-Content -Raw docs/WINDOWS.md
-          $rootGuide = Get-Content -Raw WINDOWS.md
-          foreach ($name in @('start.bat', 'start-vpn.bat', 'start.ps1', 'start-vpn.ps1')) {
-            if ($fullGuide -notmatch [regex]::Escape($name)) { throw "docs/WINDOWS.md missing $name" }
-            if ($rootGuide -notmatch [regex]::Escape($name)) { throw "WINDOWS.md missing $name" }
-          }
