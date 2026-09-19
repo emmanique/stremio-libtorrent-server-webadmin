@@ -262,28 +262,29 @@ def _container_action(action: str):
         raise HTTPException(400, "unsupported Gluetun action")
     container = _container(GLUETUN_CONTAINER)
     if container is None:
-        raise HTTPException(409, "Gluetun container is not deployed. Start the VPN stack with sh start-vpn.sh first.")
+        raise HTTPException(409, "Persistent VPN gateway container is not deployed.")
     if not GLUETUN_LOCK.acquire(blocking=False):
         raise HTTPException(409, "another Gluetun operation is already running")
     try:
-        if action == "start":
-            if container.status != "running":
-                container.start()
-                _wait_for_container_running()
-        elif action == "stop":
-            container.stop(timeout=15)
-        else:
-            container.restart(timeout=15)
+        # The gateway container owns Stremio's network namespace and must stay running.
+        # These controls operate on the VPN tunnel only.
+        if container.status != "running":
+            container.start()
             _wait_for_container_running()
-        vpn_admin._audit(f"gluetun.{action}")
-        return {"ok": True, "action": action, "status": gluetun_status()}
+        if action == "start":
+            result = vpn_admin.connect_vpn()
+        elif action == "stop":
+            result = vpn_admin.disconnect_vpn()
+        else:
+            result = vpn_admin.reconnect_vpn()
+        vpn_admin._audit(f"gluetun.tunnel.{action}")
+        return {"ok": True, "action": action, "vpn": result, "status": gluetun_status()}
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(503, f"Gluetun {action} failed: {exc}")
+        raise HTTPException(503, f"Gluetun tunnel {action} failed: {exc}")
     finally:
         GLUETUN_LOCK.release()
-
 
 def start_gluetun():
     return _container_action("start")
