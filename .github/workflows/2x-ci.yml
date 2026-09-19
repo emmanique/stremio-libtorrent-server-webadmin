@@ -1,0 +1,98 @@
+name: 2.x Continuous Validation
+
+on:
+  push:
+    branches:
+      - develop/2.x
+      - "feature/**"
+      - "release/2.*"
+      - "hotfix/2.*"
+  pull_request:
+    branches:
+      - develop/2.x
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 2x-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Functional and packaging validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --dev
+          python -m pip install -r webadmin/requirements.txt
+
+      - name: Version contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER="$(tr -d '[:space:]' < SERVER_VERSION)"
+          FORK="$(tr -d '[:space:]' < FORK_VERSION)"
+          WEBADMIN="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+          test "$SERVER" = "$FORK"
+          test "$SERVER" = "$WEBADMIN"
+          test "$SERVER" = "$CORE"
+          case "$SERVER" in 2.*) ;; *) echo "2.x branch requires a 2.x version" >&2; exit 1;; esac
+
+      - name: Static validation
+        run: |
+          uv run ruff check src webadmin tests
+          python -m compileall -q src webadmin docker
+          node --check webadmin/static/vpn-admin.js
+          node --check webadmin/static/gluetun-admin.js
+          sh -n start.sh
+          sh -n start-vpn.sh
+          sh -n vpn/entrypoint.sh
+          sh -n docker/launch.sh
+          sh -n docker/publish.sh
+
+      - name: Validate unified Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          export IPADDRESS=192.0.2.10
+          export PIHOLE_WEB_BIND_IP=192.0.2.10
+          test ! -e compose.vpn.yaml
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml -f compose.dns.yaml config --quiet
+          docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
+          docker compose -f compose.yaml -f compose.gpu.yaml config --quiet
+          grep -q '^  gluetun:' compose.yaml
+          grep -q 'network_mode: "service:gluetun"' compose.yaml
+          grep -q 'stremio-config:/config:ro' compose.yaml
+
+      - name: Full unit and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
+
+      - name: Build all runtime images
+        run: |
+          docker build -t stremio-2x-server:test .
+          docker build -t stremio-2x-webadmin:test ./webadmin
+          docker build -t stremio-2x-vpn:test ./vpn
+
+      - name: Image smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh stremio-2x-vpn:test -c 'test -x /stremio-vpn-entrypoint && test -x /gluetun-entrypoint'
+          docker run --rm --entrypoint python stremio-2x-webadmin:test -c 'import app; print("webadmin import ok")'
