@@ -1,0 +1,178 @@
+name: Upstream review
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-review
+  cancel-in-progress: true
+
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch principal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/andrewhack/stremio-libtorrent-server.git ||             git remote set-url upstream https://github.com/andrewhack/stremio-libtorrent-server.git
+          git fetch --prune upstream main
+
+      - name: Build assessment
+        id: assessment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="$(tr -d '[:space:]' < .github/UPSTREAM_BASE)"
+          TARGET="$(git rev-parse upstream/main)"
+          VERSION="$(git show "$TARGET:pyproject.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
+          SHORT="${TARGET:0:12}"
+          REPORT="/tmp/upstream-assessment.md"
+
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch upstream "$BASE"
+
+          if [ "$BASE" = "$TARGET" ]; then
+            {
+              echo "# Upstream review"
+              echo
+              echo "Principal is already at the integrated baseline."
+              echo
+              echo "- Version: `$VERSION`"
+              echo "- SHA: `$TARGET`"
+            } > "$REPORT"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            is_protected() {
+              candidate="$1"
+              while IFS= read -r protected; do
+                [ -n "$protected" ] || continue
+                case "$protected" in \#*) continue ;; esac
+                if [ "$candidate" = "$protected" ] || [ "${candidate#"$protected"/}" != "$candidate" ]; then
+                  return 0
+                fi
+              done < .github/upstream-protected-paths.txt
+              return 1
+            }
+
+            blob_at() {
+              ref="$1"; file="$2"
+              git rev-parse "$ref:$file" 2>/dev/null || true
+            }
+
+            already=0
+            safe=0
+            manual=0
+            protected_count=0
+
+            {
+              echo "# Upstream review"
+              echo
+              echo "- Principal: `andrewhack/stremio-libtorrent-server`"
+              echo "- Integrated baseline: `$BASE`"
+              echo "- Principal target: `$TARGET`"
+              echo "- Principal version: `$VERSION`"
+              echo
+              echo "## Commits"
+              echo
+              git log --reverse --pretty='- `%h` %s' "$BASE..$TARGET"
+              echo
+              echo "## File classification"
+              echo
+              echo "| File | Status | Classification | Reason |"
+              echo "| --- | --- | --- | --- |"
+            } > "$REPORT"
+
+            while IFS=$'\t' read -r status path extra; do
+              [ -n "$path" ] || continue
+              case "$status" in
+                R*|C*) [ -n "${extra:-}" ] && path="$extra" ;;
+              esac
+
+              fork_blob="$(blob_at HEAD "$path")"
+              base_blob="$(blob_at "$BASE" "$path")"
+              target_blob="$(blob_at "$TARGET" "$path")"
+
+              if [ -n "$fork_blob" ] && [ "$fork_blob" = "$target_blob" ]; then
+                class="ALREADY_INTEGRATED"
+                reason="Fork already contains the principal version."
+                already=$((already + 1))
+              elif is_protected "$path"; then
+                class="PROTECTED"
+                reason="Fork-owned path; review only, never import automatically."
+                protected_count=$((protected_count + 1))
+              elif [ -z "$fork_blob" ] && [ -n "$target_blob" ]; then
+                class="SAFE_CANDIDATE"
+                reason="New principal file not present in the fork."
+                safe=$((safe + 1))
+              elif [ -n "$base_blob" ] && [ "$fork_blob" = "$base_blob" ]; then
+                class="SAFE_CANDIDATE"
+                reason="Fork has not changed this file since the integrated baseline."
+                safe=$((safe + 1))
+              else
+                class="MANUAL_RECONCILE"
+                reason="Fork and principal differ independently."
+                manual=$((manual + 1))
+              fi
+
+              printf '| `%s` | %s | **%s** | %s |\n' "$path" "$status" "$class" "$reason" >> "$REPORT"
+            done < <(git diff --name-status "$BASE" "$TARGET")
+
+            {
+              echo
+              echo "## Summary"
+              echo
+              echo "- Already integrated: $already"
+              echo "- Safe candidates: $safe"
+              echo "- Manual reconcile: $manual"
+              echo "- Protected: $protected_count"
+              echo
+              echo "No principal code was imported by this workflow."
+            } >> "$REPORT"
+
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+            echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+          fi
+
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          cp "$REPORT" upstream-assessment.md
+
+      - name: Upload assessment
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-assessment
+          path: upstream-assessment.md
+          retention-days: 30
+
+      - name: Open or update review issue
+        if: steps.assessment.outputs.changed == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.assessment.outputs.version }}"
+          TARGET="${{ steps.assessment.outputs.target }}"
+          SHORT="${{ steps.assessment.outputs.short }}"
+          TITLE="Upstream review required: $VERSION ($SHORT)"
+
+          EXISTING="$(gh issue list --state open --search "$TITLE in:title" --json number,title --jq 'map(select(.title == "'"$TITLE"'"))[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body-file upstream-assessment.md
+          else
+            gh issue create --title "$TITLE" --body-file upstream-assessment.md
+          fi
