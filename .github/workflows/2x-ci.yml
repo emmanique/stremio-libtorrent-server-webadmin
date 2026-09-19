@@ -85,10 +85,24 @@ jobs:
           PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
 
       - name: Build all runtime images
+        shell: bash
         run: |
-          docker build -t stremio-2x-server:test .
-          docker build -t stremio-2x-webadmin:test ./webadmin
-          docker build -t stremio-2x-vpn:test ./vpn
+          set -euo pipefail
+          build_retry() {
+            tag="$1"
+            context="$2"
+            for attempt in 1 2 3; do
+              if docker build -t "$tag" "$context"; then
+                return 0
+              fi
+              echo "Docker build failed for $tag (attempt $attempt/3)." >&2
+              [ "$attempt" -eq 3 ] && return 1
+              sleep $((attempt * 5))
+            done
+          }
+          build_retry stremio-2x-server:test .
+          build_retry stremio-2x-webadmin:test ./webadmin
+          build_retry stremio-2x-vpn:test ./vpn
 
       - name: Image smoke tests
         shell: bash
