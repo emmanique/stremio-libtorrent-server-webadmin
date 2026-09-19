@@ -19,6 +19,11 @@ vpn
 SERVER_VERSION
 FORK_VERSION
 VERSIONING.md
+tools/release
+docs/WORKFLOWS.md
+README.md
+uv.lock
+pyproject.toml
 QUICKSTART.md
 VPN.md
 INSTALL-SEPARATED-V2.md
