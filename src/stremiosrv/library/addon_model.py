@@ -384,12 +384,19 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
                 )
                 if match is not None:
                     resume_resolved = True
+                elif len(addressable) > 1:
+                    # A multi-file resume record is a pack. If its names do not
+                    # let us prove which file is the requested episode, the
+                    # label is not enough to guess safely.
+                    resume_resolved = True
                 elif names and any(
                     pinsmod.select_wanted_file(
                         names, {"season": season, "episode": candidate}
                     ) is not None
                     for candidate in range(1, 100)
                 ):
+                    # A lone file that clearly names a different episode must
+                    # not be offered on the labelled episode page.
                     resume_resolved = True
 
         if (stream is None and not resume_resolved
