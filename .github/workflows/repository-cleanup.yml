@@ -1,0 +1,90 @@
+name: Repository cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/repository-cleanup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete obsolete branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --prune
+
+          obsolete=(
+            "feature/single-compose-vpn-state"
+            "fix/cache-owner-stable-server-24"
+            "fix/self-probe-timeout-server-23"
+            "fix/upstream-version-tracking"
+            "fix/vaapi-lxc-detection-1.4.4"
+            "fix/version-direction-cache-1.4.7"
+            "fix/vpn-cache-owner-id-server-25"
+            "fix/vpn-runtime-validation-container-id-server-26"
+            "fix/vpn-save-restart-1.4.6"
+            "fix/vpn-vaapi-config-persistence-1.4.5"
+            "fix/webadmin-config-reliability-server21"
+            "future"
+            "hotfix/webadmin-config-restart-1.4.3"
+            "release/2.0.0-finalize"
+            "release/2.0.0-publish"
+            "release/2.0.0"
+            "upstream-sync/c8abfda54c41"
+            "upstream-sync/9c2480b5ad6e"
+            "windows-launchers"
+            "maintenance/workflow-cleanup"
+          )
+
+          for name in "${obsolete[@]}"; do
+            case "$name" in
+              main|develop/2.x|legacy/1.x|feature/upstream-1.6.11-library-compat)
+                echo "Refusing to delete protected branch $name" >&2
+                exit 1
+                ;;
+            esac
+
+            if git ls-remote --exit-code --heads origin "refs/heads/$name" >/dev/null 2>&1; then
+              echo "Deleting obsolete branch: $name"
+              git push origin --delete "$name"
+            else
+              echo "Already absent: $name"
+            fi
+          done
+
+      - name: Delete orphan tag without a release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v1.6.9-server.12"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Refusing to delete $TAG because it has a published GitHub Release." >&2
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Deleting orphan tag: $TAG"
+            git push origin ":refs/tags/$TAG"
+          else
+            echo "Orphan tag already absent: $TAG"
+          fi
