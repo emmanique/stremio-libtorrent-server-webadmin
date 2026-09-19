@@ -49,7 +49,8 @@ services:
     image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
     pull_policy: always
     container_name: stremio-libtorrent-server
-    hostname: stremio-libtorrent-server
+    # This service shares Gluetun's network namespace. Docker forbids a separate
+    # hostname together with network_mode: service:gluetun.
     restart: unless-stopped
     network_mode: "service:gluetun"
     environment:
