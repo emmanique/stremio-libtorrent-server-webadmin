@@ -81,10 +81,24 @@ jobs:
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Build release images
+        shell: bash
         run: |
-          docker build -t "$SERVER_IMAGE:$VERSION" -t "$SERVER_IMAGE:2" -t "$SERVER_IMAGE:latest" .
-          docker build -t "$WEBADMIN_IMAGE:$VERSION" -t "$WEBADMIN_IMAGE:2" -t "$WEBADMIN_IMAGE:latest" ./webadmin
-          docker build -t "$VPN_IMAGE:$VERSION" -t "$VPN_IMAGE:2" -t "$VPN_IMAGE:latest" ./vpn
+          set -euo pipefail
+          build_retry() {
+            context="$1"
+            shift
+            for attempt in 1 2 3; do
+              if docker build "$@" "$context"; then
+                return 0
+              fi
+              echo "Docker release build failed for $context (attempt $attempt/3)." >&2
+              [ "$attempt" -eq 3 ] && return 1
+              sleep $((attempt * 5))
+            done
+          }
+          build_retry . -t "$SERVER_IMAGE:$VERSION" -t "$SERVER_IMAGE:2" -t "$SERVER_IMAGE:latest"
+          build_retry ./webadmin -t "$WEBADMIN_IMAGE:$VERSION" -t "$WEBADMIN_IMAGE:2" -t "$WEBADMIN_IMAGE:latest"
+          build_retry ./vpn -t "$VPN_IMAGE:$VERSION" -t "$VPN_IMAGE:2" -t "$VPN_IMAGE:latest"
 
       - name: Smoke test release images
         shell: bash
