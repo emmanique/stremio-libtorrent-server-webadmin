@@ -6,7 +6,6 @@ compose.dns.yaml
 compose.vaapi.yaml
 compose.gpu.yaml
 compose.hub.yaml
-compose.vpn.yaml
 .env
 .env.example
 .gitignore
@@ -30,6 +29,12 @@ docker/push-readme.sh
 .github/workflows/library-addon-guard.yml
 .github/workflows/future-validation.yml
 .github/workflows/vpn-integration-guard.yml
+.github/workflows/2x-ci.yml
+.github/workflows/2x-dependency-validation.yml
+.github/workflows/2x-release.yml
+.github/dependabot.yml
+docs/BRANCHING-2X.md
+docs/releases/v2.0.0.md
 .github/workflows/release-package.yml
 .github/workflows/release-on-main.yml
 .github/workflows/package-public-check.yml
