@@ -177,12 +177,34 @@ prepare_profile() {
 start_vpn_child() {
     prepare_profile || return 1
     stop_dns_proxy
-    # Gluetun's resolver binds 127.0.0.1:53 in this same namespace.
-    start_dns_proxy 127.0.0.1
     echo "[vpn] enabling VPN profile: $PROFILE_ID"
     echo "[vpn] allowed outbound LAN subnets: $FIREWALL_OUTBOUND_SUBNETS"
     /gluetun-entrypoint "$@" &
     VPN_PID=$!
+
+    # Gluetun starts its resolver asynchronously. Do not expose the private DNS
+    # proxy until 127.0.0.1:53 is actually accepting queries; otherwise Pi-hole
+    # can hit a dead resolver while Gluetun is still starting and the VPN
+    # healthcheck may enter a restart loop.
+    echo "[vpn] waiting for Gluetun DNS resolver on 127.0.0.1:53..."
+    tries=0
+    while [ "$tries" -lt 30 ]; do
+        if ! kill -0 "$VPN_PID" >/dev/null 2>&1; then
+            wait "$VPN_PID" 2>/dev/null || true
+            VPN_PID=""
+            echo "[vpn] Gluetun exited before its DNS resolver became ready" >&2
+            return 1
+        fi
+        if nc -z -w 1 127.0.0.1 53 >/dev/null 2>&1; then
+            start_dns_proxy 127.0.0.1
+            echo "[vpn] Gluetun DNS resolver ready"
+            return 0
+        fi
+        tries=$((tries + 1))
+        sleep 1
+    done
+
+    echo "[vpn] Gluetun DNS resolver did not become ready within 30 seconds" >&2
     return 0
 }
 
