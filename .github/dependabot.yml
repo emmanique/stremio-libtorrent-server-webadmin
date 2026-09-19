@@ -1,0 +1,65 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Luanda"
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/webadmin"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:15"
+      timezone: "Africa/Luanda"
+    open-pull-requests-limit: 5
+    groups:
+      webadmin-python:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "Africa/Luanda"
+
+  - package-ecosystem: "docker"
+    directory: "/webadmin"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:45"
+      timezone: "Africa/Luanda"
+
+  - package-ecosystem: "docker"
+    directory: "/vpn"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Africa/Luanda"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop/2.x"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:15"
+      timezone: "Africa/Luanda"
