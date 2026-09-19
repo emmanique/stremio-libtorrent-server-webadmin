@@ -64,7 +64,7 @@ jobs:
             exit 1
           }
 
-      - name: Create release tag when absent
+      - name: Ensure release tag points to validated main
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,17 +72,38 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; nothing to do."
-            exit 0
-          fi
+          VALIDATED="${{ github.event.workflow_run.head_sha }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Stremio Server WebAdmin $VERSION"
-          git push origin "$TAG"
-          echo "Published $TAG from validated main commit."
+          git fetch origin --tags --force
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            EXISTING="$(git rev-list -n1 "$TAG")"
+
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              test "$EXISTING" = "$VALIDATED" || {
+                echo "Published release $TAG points to $EXISTING, not validated main $VALIDATED; refusing to move an immutable release tag." >&2
+                exit 1
+              }
+              echo "Published tag $TAG already points to validated main."
+              exit 0
+            fi
+
+            if [ "$EXISTING" != "$VALIDATED" ]; then
+              echo "Unpublished tag $TAG points to $EXISTING; moving it to validated main $VALIDATED."
+              git push origin ":refs/tags/$TAG"
+              git tag -d "$TAG"
+              git tag -a "$TAG" "$VALIDATED" -m "Stremio Server WebAdmin $VERSION"
+              git push origin "$TAG"
+            else
+              echo "Unpublished tag $TAG already points to validated main."
+            fi
+          else
+            git tag -a "$TAG" "$VALIDATED" -m "Stremio Server WebAdmin $VERSION"
+            git push origin "$TAG"
+            echo "Published $TAG from validated main commit."
+          fi
 
       - name: Dispatch 2.x release publication
         shell: bash
