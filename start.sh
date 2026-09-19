@@ -9,7 +9,7 @@
 # is required. Arbitrary Docker Compose commands can still be passed through this launcher.
 #
 # Usage:
-#   sh start.sh                         # direct mode: pull + up -d
+#   sh start.sh                         # unified stack: pull + up -d
 #   sh start.sh config                  # inspect the resolved compose configuration
 #   sh start.sh ps                      # show stack status
 #   sh start.sh up -d --force-recreate  # pass arbitrary compose arguments
@@ -43,21 +43,6 @@ _is_ipv4() {
         END {exit bad ? 1 : 0}'
 }
 
-_container_exists() {
-    docker container inspect "$1" >/dev/null 2>&1
-}
-
-# VPN mode gives Gluetun the internal address and published Stremio ports. Before returning to
-# direct mode, remove only the two transient containers that own/share that network namespace.
-# Named cache/config/VPN volumes are deliberately untouched.
-_leave_vpn_mode() {
-    if _container_exists stremio-gluetun; then
-        echo "[start] switching VPN -> direct mode (persistent volumes are preserved)..."
-        docker rm -f stremio-libtorrent-server >/dev/null 2>&1 || true
-        docker rm -f stremio-gluetun >/dev/null 2>&1 || true
-    fi
-}
-
 if [ -z "${IPADDRESS:-}" ]; then
     IPADDRESS=$(_detect_ip || true)
 fi
@@ -88,7 +73,6 @@ fi
 if [ "$#" -eq 0 ]; then
     echo "[start] pulling published images..."
     docker compose pull
-    _leave_vpn_mode
     exec docker compose up -d --remove-orphans
 fi
 
