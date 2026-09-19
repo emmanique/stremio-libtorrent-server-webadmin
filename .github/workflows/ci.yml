@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q src webadmin docker
+          python -m compileall -q src webadmin docker tools
           sh -n start.sh
           sh -n start-vpn.sh
           sh -n vpn/entrypoint.sh
