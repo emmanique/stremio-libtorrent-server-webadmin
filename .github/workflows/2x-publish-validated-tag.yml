@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: publish-validated-2x-tag
@@ -82,3 +83,19 @@ jobs:
           git tag -a "$TAG" -m "Stremio Server WebAdmin $VERSION"
           git push origin "$TAG"
           echo "Published $TAG from validated main commit."
+
+      - name: Dispatch 2.x release publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; publication is complete."
+            exit 0
+          fi
+
+          echo "Dispatching 2.x Release for $TAG"
+          gh workflow run 2x-release.yml --ref main -f release_tag="$TAG"
