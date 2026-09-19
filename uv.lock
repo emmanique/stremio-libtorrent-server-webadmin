@@ -513,7 +513,7 @@ wheels = [
 
 [[package]]
 name = "stremiosrv"
-version = "1.6.10"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },
