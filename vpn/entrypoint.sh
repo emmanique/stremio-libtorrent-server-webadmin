@@ -221,6 +221,17 @@ echo "[vpn] gateway supervisor ready; initial state: $(vpn_enabled && echo VPN-e
 
 while :; do
     if vpn_enabled; then
+        if [ -n "$VPN_PID" ] && [ -s "$NEXT_FILE" ]; then
+            echo "[vpn] connection change requested; recycling VPN child without restarting gateway container"
+            kill -TERM "$VPN_PID" >/dev/null 2>&1 || true
+            wait "$VPN_PID" 2>/dev/null || true
+            VPN_PID=""
+            stop_dns_proxy
+            rm -f "$READY_FILE"
+            sleep 1
+            continue
+        fi
+
         if [ -z "$VPN_PID" ]; then
             if ! start_vpn_child "$@"; then
                 echo "[vpn] VPN remains enabled but cannot start; keeping direct transition disabled" >&2
