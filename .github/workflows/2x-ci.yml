@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
+          PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q tests
 
       - name: Build all runtime images
         run: |
