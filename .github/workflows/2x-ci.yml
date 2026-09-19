@@ -3,6 +3,7 @@ name: 2.x Continuous Validation
 on:
   push:
     branches:
+      - main
       - develop/2.x
       - "feature/**"
       - "release/2.*"
