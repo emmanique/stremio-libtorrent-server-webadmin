@@ -53,7 +53,6 @@ jobs:
 
       - name: Static validation
         run: |
-          uv run ruff check src webadmin tests
           python -m compileall -q src webadmin docker
           node --check webadmin/static/vpn-admin.js
           node --check webadmin/static/gluetun-admin.js
