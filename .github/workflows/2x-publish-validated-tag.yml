@@ -1,0 +1,84 @@
+name: Publish validated 2.x tag
+
+on:
+  workflow_run:
+    workflows:
+      - "2.x Continuous Validation"
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-validated-2x-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out validated main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Validate release version contract
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < SERVER_VERSION)"
+          FORK="$(tr -d '[:space:]' < FORK_VERSION)"
+          WEBADMIN="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
+          CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+
+          test "$VERSION" = "$FORK"
+          test "$VERSION" = "$WEBADMIN"
+          test "$VERSION" = "$CORE"
+
+          case "$VERSION" in
+            2.*) ;;
+            *) echo "Not a 2.x release version: $VERSION" >&2; exit 1 ;;
+          esac
+
+          test -f "docs/releases/v$VERSION.md"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify commit is current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --prune
+          VALIDATED="${{ github.event.workflow_run.head_sha }}"
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          test "$VALIDATED" = "$CURRENT_MAIN" || {
+            echo "Validated commit $VALIDATED is no longer current main ($CURRENT_MAIN)." >&2
+            exit 1
+          }
+
+      - name: Create release tag when absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Stremio Server WebAdmin $VERSION"
+          git push origin "$TAG"
+          echo "Published $TAG from validated main commit."
