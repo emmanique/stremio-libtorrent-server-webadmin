@@ -48,7 +48,7 @@ jobs:
 
       - name: Regression tests affected by runtime dependencies
         run: |
-          timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q             tests/test_app.py             tests/test_config.py             tests/test_health.py             tests/test_webadmin_config_lifecycle.py             tests/test_single_compose_vpn.py
+          PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q             tests/test_app.py             tests/test_config.py             tests/test_health.py             tests/test_webadmin_config_lifecycle.py             tests/test_single_compose_vpn.py
 
       - name: Build dependency-sensitive images
         run: |
