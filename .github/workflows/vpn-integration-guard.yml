@@ -5,6 +5,7 @@ on:
     branches:
       - future
       - main
+      - feature/single-compose-vpn-state
   pull_request:
     branches:
       - main
