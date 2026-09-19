@@ -6,16 +6,13 @@ The repository uses five permanent GitHub Actions workflows.
 
 Purpose: protect all runtime functionality before code reaches a stable branch.
 
-Runs on:
+Runs automatically on pushes to:
 
-- `main`
-- `develop/2.x`
-- `release/**`
-- `feature/**`
-- `fix/**`
-- `hotfix/**`
-- `upstream-import/**`
-- pull requests to `main` and `develop/2.x`
+- `main`;
+- `develop/2.x`;
+- `release/**`.
+
+Feature, fix, hotfix and upstream-import branches are validated when opened as pull requests to `main` or `develop/2.x`. Documentation-only changes are ignored by CI.
 
 Validation includes:
 
@@ -46,7 +43,7 @@ Checks:
 - dependency-sensitive regression tests;
 - Server/WebAdmin/VPN image builds.
 
-It also runs weekly.
+It also runs weekly. Workflow-only and documentation-only changes do not trigger dependency validation.
 
 ## 3. Version bump — `.github/workflows/version-bump.yml`
 
