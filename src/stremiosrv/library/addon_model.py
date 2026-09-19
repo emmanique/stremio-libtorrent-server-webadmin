@@ -333,6 +333,42 @@ def episode_index(entry: dict, season: int, episode: int) -> int | None:
     return None if pos is None else have[pos]["index"]
 
 
+# A file name that reads as an episode, in either form pins.select_wanted_file reads: S04E05 and
+# 4x05. The digits are bounded so that a resolution such as 1920x1080 does not read as one, and
+# a decimal before the x -- DD5.1x264, an audio and a codec tag -- does not either.
+_EPISODE_NAME_RE = re.compile(
+    r"s\d{1,3}[\s._-]*e\d{1,4}(?!\d)|(?<!\d)(?<!\d\.)\d{1,2}\s*x\s*\d{1,3}(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def _label_alone_names_the_file(entry: dict) -> bool:
+    """Whether an episode label can safely identify a file by itself.
+
+    A label names the episode the torrent was learned from, not an arbitrary file.
+    It is safe when there is no ambiguity: an explicit wanted file, no addressable
+    file, a torrent that contains only one video/file, or one addressable file whose
+    name does not itself identify another episode.
+    """
+    if entry.get("wantedFile"):
+        return True
+
+    addressable = [
+        f for f in (entry.get("files") or [])
+        if isinstance(f.get("index"), int)
+    ]
+    if not addressable:
+        return True
+
+    if entry.get("numVideos") == 1 or entry.get("numFiles") == 1:
+        return True
+
+    return (
+        len(addressable) == 1
+        and not _EPISODE_NAME_RE.search(_basename(addressable[0].get("name") or ""))
+    )
+
+
 def _label_matches(label: dict, base: str, season: int | None, episode: int | None) -> bool:
     if (label.get("metaId") or "") != base:
         return False
@@ -362,45 +398,14 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
         if not label or (label.get("metaId") or "") != base:
             continue
         stream = None
-        resume_resolved = False
         if season is not None:
-            # The pack's own files first: they cover every episode it holds, not only the one the
-            # label happens to name.
+            # Resolve the requested episode from the torrent's own file names first.
             idx = episode_index(e, season, episode)
             if idx is not None:
                 stream = stream_for(e, origin, idx)
 
-            # Resume-derived lists are authoritative about torrent file indices even after the
-            # engine handle is gone. If they can identify the requested episode at all, then a
-            # missing stream means that exact episode is incomplete and we must NOT fall back to a
-            # different complete file. Likewise, if the resume record contains episode-like files
-            # but not the requested episode, guessing from the label can serve the wrong episode.
-            if e.get("filesFrom") == "resume":
-                addressable = [f for f in (e.get("files") or [])
-                               if isinstance(f.get("index"), int)]
-                names = [f.get("name") or "" for f in addressable]
-                match = pinsmod.select_wanted_file(
-                    names, {"season": season, "episode": episode}
-                )
-                if match is not None:
-                    resume_resolved = True
-                elif len(addressable) > 1:
-                    # A multi-file resume record is a pack. If its names do not
-                    # let us prove which file is the requested episode, the
-                    # label is not enough to guess safely.
-                    resume_resolved = True
-                elif names and any(
-                    pinsmod.select_wanted_file(
-                        names, {"season": season, "episode": candidate}
-                    ) is not None
-                    for candidate in range(1, 100)
-                ):
-                    # A lone file that clearly names a different episode must
-                    # not be offered on the labelled episode page.
-                    resume_resolved = True
-
-        if (stream is None and not resume_resolved
-                and _label_matches(label, base, season, episode)):
+        if (stream is None and _label_matches(label, base, season, episode)
+                and (season is None or _label_alone_names_the_file(e))):
             stream = stream_for(e, origin)
         if stream is not None:
             out.append(stream)
