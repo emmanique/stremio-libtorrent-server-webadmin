@@ -29,7 +29,12 @@ def test_alerts_loop_polls_pop_never_wait():
             stop.set()  # end the loop after the first poll
             return []
 
-    fake = types.SimpleNamespace(_ses=FakeSes(), _stop=stop)
+    fake = types.SimpleNamespace(
+        _ses=FakeSes(),
+        _stop=stop,
+        _wanted=set(),
+        _wanted_applied=set(),
+    )
     Engine._alerts_loop(fake)  # unbound method with a minimal fake self
 
     assert seen["wait"] == 0, "wait_for_alert must never be called"
