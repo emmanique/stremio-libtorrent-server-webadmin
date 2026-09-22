@@ -1,24 +1,25 @@
-# Stremio Server WebAdmin 2.0.3
+# Stremio Server WebAdmin 2.0.6
 
-[![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=develop%2F2.x)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
+[![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg)](LICENSE)
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.3** integrates upstream server/core **1.6.14** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.3** release line. It uses one runtime topology and one primary Compose file.
+Version **2.0.6** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.6** release line. It uses one runtime topology and one primary Compose file, with persistent configuration, integrated VPN/DNS services, hardware transcoding and automatic Gluetun namespace lifecycle repair.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.3 at a glance
+## 2.0.6 at a glance
 
 ```text
-Upstream Core  1.6.14
-Upstream Server 1.6.14
-WebAdmin    2.0.3
-VPN Gateway 2.0.3
+Upstream Core   1.6.15
+Upstream Server 1.6.15
+Fork            2.0.6
+WebAdmin        2.0.6
+VPN Gateway     2.0.6
 ```
 
 Version sources:
@@ -31,6 +32,69 @@ webadmin/WEBADMIN_VERSION
 ```
 
 `SERVER_VERSION` and `pyproject.toml` must match the integrated upstream server/core release. `FORK_VERSION` and `webadmin/WEBADMIN_VERSION` must match the 2.x fork release. These version lines are intentionally independent.
+
+## What is implemented today
+
+The current 2.0.6 baseline includes the work completed across the 2.x release line:
+
+- unified `compose.yaml` runtime for Stremio Server, WebAdmin, Pi-hole and the persistent Gluetun gateway;
+- VPN configuration and enable/disable lifecycle from WebAdmin, without a separate `compose.vpn.yaml`;
+- persistent WebAdmin/server configuration in `/config/admin-settings.json`, with atomic save, read-back verification and reliable server restart;
+- persistent Pi-hole DNS chain through the Gluetun private DNS bridge;
+- VPN validation covering container health, control API, tunnel state, public IP, DNS, Pi-hole upstream, Stremio routing and kill switch;
+- automatic VAAPI/GPU overlay detection while keeping the base Compose hardware-agnostic;
+- copy-first transcoding policy: compatible H.264 can remain Direct Stream while incompatible HEVC can be converted to H.264 with VAAPI;
+- full-GPU VAAPI profiles with hardware decode, `scale_vaapi` and hardware encode when the host supports them;
+- automatic repair of a stale Stremio → Gluetun network namespace after Gluetun container recreation;
+- versioned Server, WebAdmin and VPN images published through the validated release workflow;
+- transactional server update metadata and rollback support exposed through WebAdmin.
+
+### 2.0.5 transcoding policy
+
+The explicit transcoding profile now respects the Direct Stream codec allow-list instead of preserving every upstream `-c:v copy` decision unconditionally.
+
+With a typical `vaapi-full-h264` configuration and `h264` as the Direct Stream video codec:
+
+```text
+H.264 source
+  → video=copy preserved; source=h264; direct=yes
+  → no unnecessary video transcode
+
+HEVC/H.265 source
+  → video=copy(hevc)->h264_vaapi
+  → VAAPI hardware decode
+  → scale_vaapi
+  → H.264 VAAPI hardware encode
+```
+
+If codec probing cannot determine the source codec, the wrapper fails safely by preserving the original copy decision.
+
+### 2.0.6 Gluetun namespace lifecycle
+
+Stremio uses the Gluetun network namespace. Docker binds that relationship to a concrete Gluetun container ID when the Stremio container is created. If Gluetun is later recreated, an unchanged Stremio container can otherwise remain attached to the old namespace.
+
+`start.sh` now performs a post-start integrity check:
+
+```text
+Gluetun starts / becomes healthy
+          │
+          ▼
+Compare current Gluetun container ID
+with Stremio NetworkMode
+          │
+     ┌────┴────┐
+     │         │
+   match     stale
+     │         │
+     ▼         ▼
+   no-op   recreate only Stremio
+               │
+               ▼
+         verify repaired namespace
+```
+
+The repair reuses the active Compose configuration and hardware overlay selection. Pi-hole and WebAdmin are not recreated merely to repair this relationship.
+
 
 ---
 
@@ -389,7 +453,7 @@ docker compose ps
 docker compose images
 ```
 
-Upgrade a normal Git-based installation from **2.0.2 or an earlier 2.x release** to the current release:
+Upgrade a normal Git-based installation from an earlier 2.x release to the current release:
 
 ```bash
 cd ~/stremio-libtorrent-server-webadmin
@@ -439,12 +503,12 @@ docker compose -f compose.yaml -f compose.gpu.yaml up -d
 
 ## Rollback after an upgrade
 
-If an upgrade must be rolled back, keep the persistent volumes and return the repository to the previous release tag, for example `v2.0.2`:
+If an upgrade must be rolled back, keep the persistent volumes and return the repository to the previous release tag, for example `v2.0.5`:
 
 ```bash
 cd ~/stremio-libtorrent-server-webadmin
 git fetch --tags origin
-git checkout v2.0.2
+git checkout v2.0.5
 docker compose pull
 sh start.sh
 ```
@@ -467,9 +531,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.3
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.3
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.3
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.6
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.6
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.6
 ```
 
 Stable moving aliases:
@@ -484,9 +548,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.3
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.3
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.3
+edmanique/stremio-libtorrent-server-webadmin:2.0.6
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.6
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.6
 ```
 
 ---
@@ -581,11 +645,7 @@ Updates target `develop/2.x`, not `main`.
 
 `.github/workflows/2x-release.yml`
 
-Triggered by:
-
-```text
-v2.x.y
-```
+Triggered manually with the target release version (for example `2.0.6`). The workflow validates the release contract and creates the corresponding `v2.x.y` tag/release.
 
 The release workflow:
 1. validates version consistency;
@@ -644,9 +704,9 @@ VERSIONING.md
 
 # Release information
 
-Current planned release:
+Current stable release:
 
-[docs/releases/v2.0.3.md](docs/releases/v2.0.3.md)
+[docs/releases/v2.0.6.md](docs/releases/v2.0.6.md)
 
 Versioning:
 
