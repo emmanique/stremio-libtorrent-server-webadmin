@@ -15,8 +15,8 @@ Version **2.0.3** introduces one runtime topology, one Compose file and one rele
 ## 2.0.3 at a glance
 
 ```text
-Core        2.0.3
-Server      2.0.3
+Upstream Core  1.6.14
+Upstream Server 1.6.14
 WebAdmin    2.0.3
 VPN Gateway 2.0.3
 ```
