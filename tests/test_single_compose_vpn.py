@@ -59,3 +59,21 @@ def test_base_compose_does_not_require_vaapi_device():
 
     assert 'devices:' not in compose.split("  stremio-libtorrent-server:", 1)[1].split("  webadmin:", 1)[0]
     assert "${VAAPI_DEVICE:-/dev/dri/renderD128}" in vaapi
+
+
+def test_start_repairs_stale_gluetun_namespace_after_stack_upgrade():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert "_repair_gateway_namespace()" in start
+    assert "stale Gluetun namespace detected" in start
+    assert "--no-deps --force-recreate stremio-libtorrent-server" in start
+    assert "repaired_mode" in start
+    assert 'if [ "$repaired_mode" != "container:$gluetun_id" ]' in start
+
+
+def test_start_does_not_recreate_server_when_gateway_namespace_is_current():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert '"container:$gluetun_id")' in start
+    assert 'echo "[start] gateway namespace: current"' in start
+    assert "return 0" in start
