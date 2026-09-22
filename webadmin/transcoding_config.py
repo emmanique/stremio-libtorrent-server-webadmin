@@ -255,7 +255,7 @@ def _parse_progress(text: str) -> dict[str, object] | None:
 
 def _process_metadata(command: str) -> tuple[str, dict[str, object]]:
     """Split optional ps telemetry from the FFmpeg command line."""
-    match = re.match(r"^\\s*(\\d+)\\s+([0-9.]+)\\s+([0-9.]+)\\s+(\\S+)\\s+(.*ffmpeg-real.*)$", command)
+    match = re.match(r"^\s*(\d+)\s+([0-9.]+)\s+([0-9.]+)\s+(\S+)\s+(.*ffmpeg-real.*)$", command)
     if not match:
         return command, {"pid": None, "cpuPercent": None, "memoryPercent": None, "elapsed": None}
     pid, cpu, memory, elapsed, argv = match.groups()
@@ -268,7 +268,7 @@ def _process_metadata(command: str) -> tuple[str, dict[str, object]]:
 
 
 def _source_codec_from_log(text: str, kind: str) -> str | None:
-    pattern = r"Stream #\\d+:\\d+(?:\\([^)]*\\))?: " + ("Video" if kind == "video" else "Audio") + r":\\s*([^,\\s]+)"
+    pattern = r"Stream #\d+:\d+(?:\([^)]*\))?: " + ("Video" if kind == "video" else "Audio") + r":\s*([^,\s]+)"
     match = re.search(pattern, text, re.IGNORECASE)
     return match.group(1).lower() if match else None
 
