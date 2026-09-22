@@ -17,8 +17,8 @@ The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebA
 Current coordinated release:
 
 ```text
-Core            2.0.3
-Server/Fork     2.0.3
+Upstream Core   1.6.14
+Fork/Platform   2.0.3
 WebAdmin        2.0.3
 VPN Gateway     2.0.3
 ```
