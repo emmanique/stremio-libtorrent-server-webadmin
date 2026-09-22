@@ -6,7 +6,7 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.3** introduces one runtime topology, one Compose file and one release version across the Server, WebAdmin and VPN gateway.
+Version **2.0.3** integrates upstream server/core **1.6.14** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.3** release line. It uses one runtime topology and one primary Compose file.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
@@ -30,7 +30,7 @@ FORK_VERSION
 webadmin/WEBADMIN_VERSION
 ```
 
-All four values must match for an official 2.x release.
+`SERVER_VERSION` and `pyproject.toml` must match the integrated upstream server/core release. `FORK_VERSION` and `webadmin/WEBADMIN_VERSION` must match the 2.x fork release. These version lines are intentionally independent.
 
 ---
 
@@ -377,19 +377,81 @@ for routine upgrades.
 
 ---
 
-# Updating
+# Upgrading from a previous version
 
-Stable installation:
+The normal upgrade path preserves the named Docker volumes and therefore keeps WebAdmin settings, Stremio configuration/cache, Pi-hole data and VPN profile/state.
+
+Before upgrading, confirm the current installation directory and optionally record the running images:
 
 ```bash
 cd ~/stremio-libtorrent-server-webadmin
+docker compose ps
+docker compose images
+```
+
+Upgrade a normal Git-based installation from **2.0.2 or an earlier 2.x release** to the current release:
+
+```bash
+cd ~/stremio-libtorrent-server-webadmin
+
 git fetch --prune origin
 git checkout main
 git pull --ff-only origin main
+
+docker compose pull
 sh start.sh
 ```
 
-Development 2.x installation:
+Do **not** run `docker compose down -v`: the `-v` option deletes the persistent named volumes.
+
+After the upgrade, validate the stack:
+
+```bash
+docker compose ps
+curl -fsS http://127.0.0.1:8090/health
+curl -fsS http://127.0.0.1:11470/health
+```
+
+For a LAN host such as `192.168.1.245`, also verify the WebAdmin and server externally:
+
+```bash
+curl -fsS http://192.168.1.245:8090/health
+curl -fsS http://192.168.1.245:11470/health
+```
+
+Then confirm in WebAdmin that the saved configuration is still present and that the expected VPN state is shown. A server restart from WebAdmin should complete without losing `/config/admin-settings.json`.
+
+If the previous installation used the old `compose.vpn.yaml` topology, do not continue launching that file. Version 2.x uses the unified `compose.yaml`; `start-vpn.sh` is only a compatibility wrapper and VPN enable/disable is controlled from WebAdmin.
+
+For VAAPI installations, start with the hardware overlay after updating:
+
+```bash
+docker compose -f compose.yaml -f compose.vaapi.yaml pull
+docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+```
+
+For NVIDIA installations:
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml pull
+docker compose -f compose.yaml -f compose.gpu.yaml up -d
+```
+
+## Rollback after an upgrade
+
+If an upgrade must be rolled back, keep the persistent volumes and return the repository to the previous release tag, for example `v2.0.2`:
+
+```bash
+cd ~/stremio-libtorrent-server-webadmin
+git fetch --tags origin
+git checkout v2.0.2
+docker compose pull
+sh start.sh
+```
+
+Do not use `down -v` during rollback. After validation, return to the stable branch with `git checkout main`.
+
+## Development 2.x installation
 
 ```bash
 git fetch --prune origin
