@@ -6,64 +6,47 @@ set -e
 CACHE="${STREMIOSRV_CACHE_ROOT:-/root/.stremio-server}"
 CERT="$CACHE/${CERT_FILE:-certificates.pem}"
 
-# In VPN mode the container shares Gluetun's network namespace. Docker rejects
-# the Compose `dns:` option with network_mode: service:gluetun, so set the
-# resolver here before any Stremio/Node/Python process starts. This preserves
-# the intended path Stremio -> Pi-hole -> Gluetun DNS -> VPN without a WAN DNS
-# bypass. Outside VPN mode STREMIOSRV_DNS_SERVER is unset and Docker DNS remains
-# untouched.
-if [ -n "${STREMIOSRV_DNS_SERVER:-}" ]; then
-    case "$STREMIOSRV_DNS_SERVER" in
-        *[!0-9.]*|'')
-            echo "[entrypoint] invalid STREMIOSRV_DNS_SERVER=$STREMIOSRV_DNS_SERVER" >&2
-            exit 1
-            ;;
-    esac
-    printf 'nameserver %s\noptions ndots:0\n' "$STREMIOSRV_DNS_SERVER" > /etc/resolv.conf
-    echo "[entrypoint] DNS resolver -> $STREMIOSRV_DNS_SERVER"
-fi
-
-# 1) TLS cert for HTTPS :12470. TVs require a TRUSTED cert. In VPN mode the
-# trusted stremio.rocks certificate is bootstrapped outside the tunnel by
-# start-vpn.sh and persisted in the shared cache volume. Reuse it first so LAN
-# clients are not coupled to VPN/DNS readiness. If it is missing/expired, a
-# direct-mode runtime may still fetch it here; otherwise we fall back to an
-# existing/self-signed certificate so the service can at least start.
+# 1) TLS cert for HTTPS :12470. TVs require a TRUSTED cert; priority:
+#    a. IPADDRESS set -> fetch/refresh a trusted Let's Encrypt *.stremio.rocks cert (TV-compatible,
+#       zero config; the dashed-IP subdomain resolves to your IP via Stremio's magic DNS).
+#    b. else a cert already at $CERT -> bring-your-own.
+#    c. else -> self-signed (HTTPS still starts, but browsers warn and TVs reject).
 mkdir -p "$CACHE"
-if [ -n "${IPADDRESS:-}" ]; then
+if [ -n "${IPADDRESS}" ]; then
+    SROCKS_ZONE="519b6502d940.stremio.rocks"
     IPD=$(echo "$IPADDRESS" | sed "s/[.]/-/g")
-    SROCKS_DOMAIN="${IPD}.519b6502d940.stremio.rocks"
-    TRUSTED_JSON="$CACHE/httpsCert.json"
-
-    if [ -s "$CERT" ] \
-        && openssl x509 -checkend 86400 -noout -in "$CERT" >/dev/null 2>&1 \
-        && [ -s "$TRUSTED_JSON" ] \
-        && grep -q "$SROCKS_DOMAIN" "$TRUSTED_JSON"; then
-        grep -q "$SROCKS_DOMAIN" /etc/hosts 2>/dev/null || echo "${IPADDRESS} ${SROCKS_DOMAIN}" >> /etc/hosts
-        [ -n "${SERVER_URL:-}" ] || SERVER_URL="https://${SROCKS_DOMAIN}:12470/"
-        echo "[entrypoint] trusted cert reused for $SROCKS_DOMAIN"
+    SROCKS_DOMAIN="${IPD}.${SROCKS_ZONE}"
+    HAVE_SROCKS=""
+    # A trusted cert we already hold and that still has a month to run is kept: the cert service is
+    # not called on every restart, and a box that is briefly offline still comes up trusted.
+    # Anything the check cannot settle falls through to the fetch below, unchanged.
+    if sh /srv/app/docker/cert-reuse.sh "$CERT" "$SROCKS_ZONE"; then
+        echo "[entrypoint] trusted cert on disk is still valid -> keeping it, no fetch"
+        HAVE_SROCKS=1
     else
         echo "[entrypoint] IPADDRESS=$IPADDRESS -> fetching trusted stremio.rocks cert"
-        FETCH_OK=""
+        # Time-box the fetch: on an offline / isolated (LAN-only, static-IP) network it would
+        # otherwise hang on DNS/HTTP timeouts and block uvicorn from ever starting. On timeout we
+        # fall through to the existing/self-signed cert so the server still comes up on the LAN.
         if (cd /srv/stremio-server && timeout 30 node certificate.js --action fetch); then
-            if [ -s /srv/stremio-server/certificates.pem ]; then
-                cp /srv/stremio-server/certificates.pem "$CERT"
-                grep -q "$SROCKS_DOMAIN" /etc/hosts 2>/dev/null || echo "${IPADDRESS} ${SROCKS_DOMAIN}" >> /etc/hosts
-                if (cd /srv/stremio-server && node certificate.js --action load \
-                    --pem-path "$CERT" --domain "$SROCKS_DOMAIN" --json-path "$TRUSTED_JSON"); then
-                    FETCH_OK=yes
-                    [ -n "${SERVER_URL:-}" ] || SERVER_URL="https://${SROCKS_DOMAIN}:12470/"
-                    echo "[entrypoint] trusted cert for $SROCKS_DOMAIN"
-                fi
-            fi
-        fi
-        if [ -z "$FETCH_OK" ]; then
+            cp /srv/stremio-server/certificates.pem "$CERT"
+            HAVE_SROCKS=1
+        else
             echo "[entrypoint] stremio.rocks fetch failed -> falling back to existing/self-signed cert"
         fi
     fi
+    # Both paths still do this: it depends on IPADDRESS, which can change between starts while the
+    # wildcard cert stays valid.
+    if [ -n "$HAVE_SROCKS" ]; then
+        grep -q "$SROCKS_DOMAIN" /etc/hosts 2>/dev/null || echo "${IPADDRESS} ${SROCKS_DOMAIN}" >> /etc/hosts
+        (cd /srv/stremio-server && node certificate.js --action load \
+            --pem-path "$CERT" --domain "$SROCKS_DOMAIN" --json-path "$CACHE/httpsCert.json") || true
+        echo "[entrypoint] trusted cert for $SROCKS_DOMAIN"
+        [ -z "${SERVER_URL}" ] && SERVER_URL="https://${SROCKS_DOMAIN}:12470/"
+    fi
 fi
 if [ -f "$CERT" ]; then
-    [ -n "${IPADDRESS:-}" ] || echo "[entrypoint] using existing cert $CERT (bring-your-own)"
+    [ -n "${IPADDRESS}" ] || echo "[entrypoint] using existing cert $CERT (bring-your-own)"
 else
     echo "[entrypoint] no trusted cert -> self-signed (CN=${DOMAIN:-localhost}); TVs may reject it"
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
@@ -82,7 +65,7 @@ if [ -f "$SEED_SRC" ]; then
     # never shipped -- the HEAD succeeded only because nginx used to answer every unknown path with
     # index.html. Written here so the seed no longer rides on that fallback. Its content is unused.
     : > /srv/stremio-server/build/server_url.env
-    if [ -n "${SERVER_URL:-}" ]; then
+    if [ -n "${SERVER_URL}" ]; then
         case "$SERVER_URL" in */) ;; *) SERVER_URL="$SERVER_URL/" ;; esac
         sed -i "s|http://127.0.0.1:11470/|${SERVER_URL}|g" "$SEED_DST"
         echo "[entrypoint] web player -> $SERVER_URL"

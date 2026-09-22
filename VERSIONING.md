@@ -1,56 +1,42 @@
 # Versioning policy
 
-## 2.x unified versioning
+## Fork release and upstream version
 
-Starting with 2.0.0, the platform uses one release version across all first-party components:
-
-```text
-SERVER_VERSION
-FORK_VERSION
-webadmin/WEBADMIN_VERSION
-pyproject.toml
-```
-
-For an official release, all four values must be identical.
-
-Example:
+Starting with fork 2.x, the project tracks two independent version lines:
 
 ```text
-2.0.0
+FORK_VERSION                 fork/platform release (2.x)
+webadmin/WEBADMIN_VERSION    WebAdmin release (2.x)
+SERVER_VERSION               andrewhack upstream server baseline
+pyproject.toml               upstream stremiosrv package version
 ```
 
-The release tag is:
+For release 2.0.3 the mapping is:
 
 ```text
-v2.0.0
+Fork/Platform   2.0.3
+WebAdmin        2.0.3
+VPN Gateway     2.0.3
+Upstream Server 1.6.14
 ```
 
-Published package tags include:
+The fork release tag remains `v2.0.3`. Container images are tagged with the fork release version. The server/core version shown by component/version reporting must reflect the upstream server version.
 
-```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.0
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.0
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.0
-```
+## Release contract
 
-The moving aliases `:2` and `:latest` are updated only by the validated 2.x release workflow.
+- `FORK_VERSION` must equal `webadmin/WEBADMIN_VERSION` and the requested 2.x release tag.
+- `SERVER_VERSION` must equal the version in `pyproject.toml`.
+- `SERVER_VERSION` follows the integrated andrewhack/stremio-libtorrent-server release and is not rewritten to the fork release number.
+- `.github/UPSTREAM_BASE` records the exact integrated upstream commit.
 
 ## Semantic versioning
 
-2.x follows semantic versioning:
-
-- MAJOR: incompatible deployment, configuration or API changes.
-- MINOR: backwards-compatible functionality.
-- PATCH: backwards-compatible corrections.
+The fork 2.x release line follows semantic versioning independently of upstream.
 
 ## Release source
 
-Production packages must be built from a validated `v2.x.y` tag. Feature and development branches never publish `:latest`.
+Production packages must be built from a validated `v2.x.y` fork tag. Feature and development branches never publish `:latest`.
 
 ## Branch mapping
 
 See `docs/BRANCHING-2X.md`.
-
-## Legacy 1.x
-
-The old split component numbering remains historical. The legacy release workflow is restricted to 1.x tags so it cannot publish a 2.x release.

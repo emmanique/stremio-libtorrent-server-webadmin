@@ -1,4 +1,7 @@
 """The pure half of the Stremio addon: ids, manifest, and the payloads built from library state."""
+import pytest
+
+from stremiosrv import pins as pinsmod
 from stremiosrv.library import addon_model as am
 from stremiosrv.library import state as statemod
 
@@ -178,13 +181,16 @@ def test_without_a_wanted_file_the_biggest_addressable_file_wins():
     assert am.playable_index(e) == 7
 
 
-def test_ranking_with_no_wanted_file_uses_bytes_downloaded_not_declared_size():
-    """Engine-derived state keeps the fork's established behavior: declared size
-    does not prove what is actually present. The complete file with the most
-    downloaded bytes wins when no explicit wanted file exists."""
+def test_without_a_wanted_file_only_the_main_file_plays_and_only_once_complete():
+    """The main file is the largest the torrent lists, by declared size; the bytes on disk decide
+    only WHEN it plays. A smaller file that happens to be complete -- a sample, another episode, a
+    text file -- is never offered in its place: that is how a film's page played its sample once
+    untracked torrents gained their indices."""
     e = _entry(files=[{"index": 1, "name": "a.mkv", "size": 9000, "downloaded": 100},
-                      {"index": 2, "name": "b.mkv", "size": 10, "downloaded": 5000}])
-    assert am.playable_index(e) == 2
+                      {"index": 2, "name": "b.mkv", "size": 10, "downloaded": 10}])
+    assert am.playable_index(e) is None
+    e["files"][0]["downloaded"] = 9000
+    assert am.playable_index(e) == 1
 
 
 def test_a_file_the_engine_can_address_beats_one_it_cannot():
@@ -404,6 +410,22 @@ def test_a_codec_tag_is_not_an_episode_number():
     assert len(am.streams_for_meta_id({"entries": [e]}, "tt0000014:1:2", ORIGIN)) == 1
 
 
+@pytest.mark.parametrize(("name", "season"), [
+    ("The.100.1x05.mkv", 1), ("24.1x05.mkv", 1), ("Station.19.1x05.mkv", 1),
+    ("Babylon.5.1x05.mkv", 1), ("Doctor.Who.2005.1x05.mkv", 1), ("Show.4x05.mkv", 4),
+    ("Show 4x05.mkv", 4), ("Show.S01E05.mkv", 1)])
+def test_a_lone_episode_file_reads_as_the_download_path_reads_it(name, season):
+    """The guard reads an episode name in the forms pins.select_wanted_file reads -- a title ending
+    in a digit and a dot included -- so a lone file of episode 5 is never offered on episode 1's
+    page: the file the label was learned from may simply have no bytes yet."""
+    assert pinsmod.select_wanted_file([name], {"season": season, "episode": 5}) == 0
+    e = _entry(label={"type": "series", "metaId": "tt0000016", "season": season, "episode": 1,
+                      "name": "Pack"}, numFiles=2,
+               files=[{"index": 1, "name": name, "size": 4 * GB, "downloaded": 4 * GB,
+                       "progress": 1.0}])
+    assert am.streams_for_meta_id({"entries": [e]}, f"tt0000016:{season}:1", ORIGIN) == []
+
+
 def test_a_pack_never_answers_for_a_different_show():
     e = _entry(label={"type": "series", "metaId": "tt0000010", "season": 1, "episode": 5},
                files=[{"index": 3, "name": "Show.S01E05.mkv", "size": 4 * GB,
@@ -558,34 +580,206 @@ def test_a_file_still_downloading_gets_no_row_even_when_the_disk_says_it_is_whol
     assert len(am.streams_for_meta_id(state, "tt0000011:1:5", ORIGIN)) == 1
 
 
-def test_resume_file_list_never_substitutes_a_complete_sample_for_the_main_movie():
-    """A resume-derived list has authoritative torrent indices. The largest declared
-    video is the movie; a smaller complete sample must not be offered while the movie
-    itself is still incomplete."""
-    e = _entry(
-        filesFrom="resume",
-        files=[
-            {"index": 1, "name": "movie.mkv", "size": 9000, "downloaded": 100, "progress": 0.01},
-            {"index": 2, "name": "sample.mkv", "size": 10, "downloaded": 10, "progress": 1.0},
-        ],
-    )
-    assert am.playable_index(e) is None
-
-    e["files"][0]["downloaded"] = 9000
-    e["files"][0]["progress"] = 1.0
-    assert am.playable_index(e) == 1
+# --- an episode's file is its largest video, offered only once complete (1.6.14) -------------
 
 
-def test_resume_episode_list_never_falls_back_to_another_complete_episode():
-    """When resume metadata can identify the requested episode, an incomplete match
-    means no local stream yet. The addon must not fall through to another complete
-    episode merely because the torrent label matches the series."""
-    e = _entry(
-        filesFrom="resume",
-        label={"type": "series", "metaId": "tt0000099", "season": 2, "episode": 1, "name": "Pack"},
-        files=[
-            {"index": 0, "name": "Show.S02E01.mkv", "size": 1000, "downloaded": 100, "progress": 0.1},
-            {"index": 1, "name": "Show.S02E02.mkv", "size": 1000, "downloaded": 1000, "progress": 1.0},
-        ],
-    )
-    assert am.streams_for_meta_id({"entries": [e]}, "tt0000099:2:1", ORIGIN) == []
+def test_a_complete_sample_never_stands_in_for_its_episode():
+    """Picked among complete files only, a single-episode release's sample -- complete long before
+    the episode, as in any whole-torrent download -- was offered on the episode's page. The label
+    here is another episode's, so only the episode's own files can answer."""
+    e = _entry(label={"type": "series", "metaId": "tt0000040", "season": 1, "episode": 9,
+                      "name": "Pack"},
+               files=[{"index": 0, "name": "Show.S01E01.1080p.mkv", "size": 3 * GB,
+                       "downloaded": GB, "progress": 0.33},
+                      {"index": 1, "name": "show.s01e01.1080p.sample.mkv", "size": 80 * 1024 ** 2,
+                       "downloaded": 80 * 1024 ** 2, "progress": 1.0}])
+    state = {"entries": [e]}
+    assert am.streams_for_meta_id(state, "tt0000040:1:1", ORIGIN) == []
+    e["files"][0].update(downloaded=3 * GB, progress=1.0)
+    assert [s["url"] for s in am.streams_for_meta_id(state, "tt0000040:1:1", ORIGIN)] == [
+        f"{ORIGIN}/{IH}/0"]
+
+
+def test_a_subtitle_is_never_offered_as_its_episode():
+    """A tracked download's list holds every file with bytes, and a small subtitle can be completed
+    by the pieces it shares with its neighbours: it was offered as the episode."""
+    e = _entry(label={"type": "series", "metaId": "tt0000041", "season": 1, "episode": 2,
+                      "name": "Pack"},
+               files=[{"index": 4, "name": "Show.S01E01.srt", "size": 50_000,
+                       "downloaded": 50_000, "progress": 1.0},
+                      {"index": 6, "name": "Show.S01E02.mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0}])
+    assert am.streams_for_meta_id({"entries": [e]}, "tt0000041:1:1", ORIGIN) == []
+
+
+def test_of_two_files_named_as_one_episode_the_larger_decides():
+    """Two qualities of one episode in one pack: the larger is the episode's file, and it is waited
+    for rather than stood in for -- the rule that keeps a sample off the page."""
+    e = _entry(label={"type": "series", "metaId": "tt0000042", "season": 1, "episode": 9,
+                      "name": "Pack"},
+               files=[{"index": 0, "name": "Show.S01E01.720p.mkv", "size": 2 * GB,
+                       "downloaded": 2 * GB, "progress": 1.0},
+                      {"index": 1, "name": "Show.S01E01.1080p.mkv", "size": 4 * GB,
+                       "downloaded": GB, "progress": 0.25}])
+    state = {"entries": [e]}
+    assert am.streams_for_meta_id(state, "tt0000042:1:1", ORIGIN) == []
+    e["files"][1].update(downloaded=4 * GB, progress=1.0)
+    assert [s["url"] for s in am.streams_for_meta_id(state, "tt0000042:1:1", ORIGIN)] == [
+        f"{ORIGIN}/{IH}/1"]
+
+
+# --- a title page offers the file its label was learned from (1.6.14) -------------------------
+
+
+def _learned(season, episode, name, size, meta="tt0000050"):
+    """A label learned at playback, which records the file it was learned from."""
+    return {"type": "series", "metaId": meta, "season": season, "episode": episode,
+            "videoId": f"{meta}:{season}:{episode}", "file": {"name": name, "size": size}}
+
+
+def test_a_label_offers_the_file_it_was_learned_from():
+    """Names that carry no episode number, and two episodes complete: without the file the label
+    was learned from nothing can say which one it means -- with it, nothing has to."""
+    e = _entry(label=_learned(1, 1, "[Group] Show - 01 [1080p].mkv", 4 * GB),
+               files=[{"index": 2, "name": "[Group] Show - 02 [1080p].mkv", "size": 5 * GB,
+                       "downloaded": 5 * GB, "progress": 1.0},
+                      {"index": 1, "name": "[Group] Show - 01 [1080p].mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0}])
+    streams = am.streams_for_meta_id({"entries": [e]}, "tt0000050:1:1", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/1"]
+
+
+def test_a_learned_file_with_no_bytes_is_not_answered_with_another_episode():
+    """Learned while its own file had no bytes, which the resume listing leaves out, so the one
+    video listed is episode 2 -- a lone video whose name reads as no episode, offered in its
+    place."""
+    e = _entry(label=_learned(1, 1, "[Group] Show - 01 [1080p].mkv", 4 * GB), numVideos=2,
+               numFiles=2,
+               files=[{"index": 2, "name": "[Group] Show - 02 [1080p].mkv", "size": 5 * GB,
+                       "downloaded": 5 * GB, "progress": 1.0}])
+    assert am.streams_for_meta_id({"entries": [e]}, "tt0000050:1:1", ORIGIN) == []
+
+
+def test_a_learned_film_with_no_bytes_is_not_answered_with_its_sample():
+    """A torrent's main file is its largest LISTED one, and a film with no bytes is not listed,
+    so its complete sample was offered."""
+    e = _entry(label={"type": "movie", "metaId": "tt0000051",
+                      "file": {"name": "The.Film.2024.1080p.mkv", "size": 9 * GB}},
+               files=[{"index": 0, "name": "the.film.sample.mkv", "size": 90 * 1024 ** 2,
+                       "downloaded": 90 * 1024 ** 2, "progress": 1.0}])
+    assert am.streams_for_meta_id({"entries": [e]}, "tt0000051", ORIGIN) == []
+
+
+def test_a_learned_file_two_files_could_be_is_not_guessed():
+    """The same name and size in two folders of one torrent: either could be the file."""
+    twin = {"name": "Show.S01E01.mkv", "size": 4 * GB, "downloaded": 4 * GB, "progress": 1.0}
+    e = _entry(label=_learned(1, 1, "Show.S01E01.mkv", 4 * GB),
+               files=[{"index": 0, **twin}, {"index": 5, **twin}])
+    assert am.streams_for_meta_id({"entries": [e]}, "tt0000050:1:1", ORIGIN) == []
+
+
+def test_a_learned_file_answers_nothing_on_a_listing_with_no_indices():
+    """The walk has no indices and walks only folders, so index 0 there is a guess about the
+    torrent's file order: a folder whose first file is a text file would play the text. A label
+    that records its file waits for the torrent's own record, whichever video the walk lists."""
+    lone = [{"index": None, "name": "Show.S01E02.mkv", "size": 4 * GB, "downloaded": 4 * GB,
+             "progress": 1.0}]
+    other = _entry(label=_learned(1, 1, "Show.S01E01.mkv", 4 * GB), files=lone)
+    assert am.streams_for_meta_id({"entries": [other]}, "tt0000050:1:1", ORIGIN) == []
+    own = _entry(label=_learned(1, 2, "Show.S01E02.mkv", 4 * GB), files=lone)
+    assert am.streams_for_meta_id({"entries": [own]}, "tt0000050:1:2", ORIGIN) == []
+
+
+def test_other_episodes_of_a_learned_pack_still_answer_by_their_names():
+    e = _entry(label=_learned(1, 1, "Show.S01E01.mkv", 4 * GB),
+               files=[{"index": 0, "name": "Show.S01E01.mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0},
+                      {"index": 1, "name": "Show.S01E02.mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0}])
+    streams = am.streams_for_meta_id({"entries": [e]}, "tt0000050:1:2", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/1"]
+
+
+def test_a_malformed_learned_file_reads_as_none():
+    """A hand-edited labels.json: the label answers as one learned before files were recorded."""
+    e = _entry(label={**_learned(2, 4, "x.mkv", 1), "file": {"name": "", "size": -1}},
+               files=[{"index": 0, "name": "some.release.name.mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0}])
+    streams = am.streams_for_meta_id({"entries": [e]}, "tt0000050:2:4", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/0"]
+
+
+def test_the_learned_file_is_offered_once_complete_and_nothing_before():
+    """Nothing stands in for it meanwhile -- here, a complete sample."""
+    e = _entry(label=_learned(1, 1, "Show.S01E01.mkv", 4 * GB),
+               files=[{"index": 0, "name": "Show.S01E01.mkv", "size": 4 * GB,
+                       "downloaded": GB, "progress": 0.25},
+                      {"index": 1, "name": "show.s01e01.sample.mkv", "size": 50 * 1024 ** 2,
+                       "downloaded": 50 * 1024 ** 2, "progress": 1.0}])
+    state = {"entries": [e]}
+    assert am.streams_for_meta_id(state, "tt0000050:1:1", ORIGIN) == []
+    e["files"][0].update(downloaded=4 * GB, progress=1.0)
+    streams = am.streams_for_meta_id(state, "tt0000050:1:1", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/0"]
+
+
+# --- a card's page lists complete videos, and one the card cannot play (1.6.14) ---------------
+
+
+def test_a_packs_one_complete_episode_is_listed_when_the_card_cannot_play_it():
+    """The card's own id plays the torrent's main file -- its largest -- only once complete,
+    and a list needed two complete files. A pack whose one complete episode is smaller than one
+    still arriving played nothing from its card."""
+    e = _entry(files=[{"index": 0, "name": "Show.S01E01.mkv", "size": 4 * GB,
+                       "downloaded": GB, "progress": 0.25},
+                      {"index": 1, "name": "Show.S01E02.mkv", "size": 3 * GB,
+                       "downloaded": 3 * GB, "progress": 1.0}])
+    assert am.stream_for(e, ORIGIN) is None
+    assert [v["id"] for v in am.meta_for(e)["videos"]] == [am.format_id(IH, 1)]
+
+
+def test_a_complete_film_still_plays_straight_from_its_card():
+    """No list, so stremio-core asks for the card's own streams, and the main file answers."""
+    e = _entry(files=[{"index": 0, "name": "Film.mkv", "size": 4 * GB, "downloaded": 4 * GB,
+                       "progress": 1.0},
+                      {"index": 1, "name": "film.sample.mkv", "size": 50 * 1024 ** 2,
+                       "downloaded": 0, "progress": 0.0}])
+    assert "videos" not in am.meta_for(e)
+
+
+def test_a_cards_page_lists_videos_only():
+    """A tracked download's list holds every file with bytes: a complete .nfo was a row to play."""
+    nfo = {"index": 0, "name": "Show.nfo", "size": 2000, "downloaded": 2000, "progress": 1.0}
+    one = _entry(wantedFile="Show.S01E05.mkv",
+                 files=[nfo, {"index": 3, "name": "Show.S01E05.mkv", "size": 4 * GB,
+                              "downloaded": 4 * GB, "progress": 1.0, "wanted": True}])
+    assert "videos" not in am.meta_for(one)  # one video, and the card plays it
+    two = _entry(files=[nfo,
+                        {"index": 3, "name": "Show.S01E05.mkv", "size": 4 * GB,
+                         "downloaded": 4 * GB, "progress": 1.0},
+                        {"index": 4, "name": "Show.S01E06.mkv", "size": 4 * GB,
+                         "downloaded": 4 * GB, "progress": 1.0}])
+    assert [v["id"] for v in am.meta_for(two)["videos"]] == [am.format_id(IH, 3),
+                                                             am.format_id(IH, 4)]
+
+
+def test_a_learned_file_is_its_name_and_its_size():
+    """One episode in two folders at two qualities: the same name, told apart by size."""
+    e = _entry(label=_learned(1, 1, "Show.S01E01.mkv", 2 * GB),
+               files=[{"index": 0, "name": "Show.S01E01.mkv", "size": 4 * GB,
+                       "downloaded": 4 * GB, "progress": 1.0},
+                      {"index": 1, "name": "Show.S01E01.mkv", "size": 2 * GB,
+                       "downloaded": 2 * GB, "progress": 1.0}])
+    streams = am.streams_for_meta_id({"entries": [e]}, "tt0000050:1:1", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/1"]
+
+
+def test_a_card_whose_largest_file_is_no_video_lists_its_video():
+    """A download's own list holds every file with bytes. When its largest complete file is no
+    video -- an archive, a disc image -- the card's own id plays that, so the one complete video
+    gets its row."""
+    e = _entry(files=[{"index": 0, "name": "Extras.rar", "size": 12 * GB, "downloaded": 12 * GB,
+                       "progress": 1.0},
+                      {"index": 1, "name": "Film.mkv", "size": 4 * GB, "downloaded": 4 * GB,
+                       "progress": 1.0}])
+    assert [v["id"] for v in am.meta_for(e)["videos"]] == [am.format_id(IH, 1)]

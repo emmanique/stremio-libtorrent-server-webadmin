@@ -9,6 +9,8 @@ import re
 from urllib.parse import unquote
 
 from stremiosrv import pins as pinsmod
+from stremiosrv.library import labels as labelsmod
+from stremiosrv.stream.fileserver import is_video
 
 ADDON_ID = "org.stremiosrv.library"
 CATALOG_ID = "library"
@@ -99,6 +101,38 @@ def parse_extra(raw: str) -> dict[str, str]:
     return out
 
 
+def _played(type_: str, video_id: str, extra: dict) -> tuple[dict, int, str] | None:
+    """What a subtitles request reports, or None when it cannot teach anything: the label its video
+    would carry, the playing file's size, and its name ("" when the app sent none)."""
+    m = _VIDEO_ID_RE.fullmatch(video_id or "")
+    if m is None or type_ not in ("movie", "series"):
+        return None
+    base, season, episode = m.groups()
+    if (type_ == "series") != (season is not None):
+        return None
+    size = extra.get("videoSize") or ""
+    if not size.isdecimal() or int(size) <= 0:
+        return None
+    label = {"metaId": base, "type": type_}
+    if season is not None:
+        label.update(season=int(season), episode=int(episode), videoId=video_id)
+    return label, int(size), _basename(extra.get("filename") or "")
+
+
+def _matching_files(entry: dict, size: int, name: str) -> list[dict]:
+    """The entry's files a report can mean: of the played size to the byte, and of the played name
+    when the app sent one."""
+    return [f for f in entry.get("files") or []
+            if (f.get("size") or 0) == size
+            and (not name or _basename(f.get("name") or "") == name)]
+
+
+def _file_of(matched: list[dict], size: int) -> dict | None:
+    """The file a label records -- {"name", "size"} -- when the report can mean only one."""
+    name = _basename(matched[0].get("name") or "") if len(matched) == 1 else ""
+    return {"name": name, "size": size} if name else None
+
+
 def learn_labels(state: dict, type_: str, video_id: str, extra: dict) -> list[tuple[str, dict]]:
     """(infohash, label) for each unlabelled cached torrent holding the file a player reports.
 
@@ -111,29 +145,58 @@ def learn_labels(state: dict, type_: str, video_id: str, extra: dict) -> list[tu
     The size must match to the byte. The name must match too when the app sends one; without it,
     the size alone is accepted only when it points at exactly one torrent. A label that is already
     there is never replaced: the page writes one with a name and a poster, and the owner chose it.
+
+    The label records the file it was learned from -- `file`, its name and size -- when only one of
+    the torrent's files matched, and a title page then offers exactly that file for this video (see
+    streams_for_meta_id). Name and size rather than an index: a brand-new torrent's first play is
+    matched against the directory walk, which has no indices, and a torrent's file list never
+    changes, so the two find the same file every time.
     """
-    m = _VIDEO_ID_RE.fullmatch(video_id or "")
-    if m is None or type_ not in ("movie", "series"):
+    played = _played(type_, video_id, extra)
+    if played is None:
         return []
-    base, season, episode = m.groups()
-    if (type_ == "series") != (season is not None):
-        return []
-    size = extra.get("videoSize") or ""
-    if not size.isdecimal() or int(size) <= 0:
-        return []
-    size = int(size)
-    name = _basename(extra.get("filename") or "")
-    label = {"metaId": base, "type": type_}
-    if season is not None:
-        label.update(season=int(season), episode=int(episode), videoId=video_id)
-    hits = [e["infoHash"].lower() for e in state.get("entries", [])
-            if is_title(e) and not e.get("label")
-            and any((f.get("size") or 0) == size
-                    and (not name or _basename(f.get("name") or "") == name)
-                    for f in e.get("files") or [])]
+    label, size, name = played
+    hits = []
+    for e in state.get("entries", []):
+        if not is_title(e) or e.get("label"):
+            continue
+        matched = _matching_files(e, size, name)
+        if not matched:
+            continue
+        found = _file_of(matched, size)
+        hits.append((e["infoHash"].lower(), {**label, "file": found} if found else dict(label)))
     if not name and len(hits) > 1:
         return []
-    return [(ih, dict(label)) for ih in hits]
+    return hits
+
+
+def learn_files(state: dict, type_: str, video_id: str, extra: dict) -> list[tuple[str, dict]]:
+    """(infohash, label with its file) for each torrent whose label is the reported video's and
+    records no file yet, when exactly one of its files matches.
+
+    A label learned before files were recorded, or one the page wrote, names its video but not the
+    file, and its page has to work the file out. The next time that video plays from the torrent,
+    the report says which file it is. Only the label's own video -- the same metaId, season and
+    episode -- because a label records the file it was learned from, not every file played. The
+    size-only rule is learn_labels' own.
+    """
+    played = _played(type_, video_id, extra)
+    if played is None:
+        return []
+    label, size, name = played
+    hits = []
+    for e in state.get("entries", []):
+        own = e.get("label") or {}
+        if (not is_title(e) or not own or labelsmod.file_record(own.get("file")) is not None
+                or not _label_matches(own, label["metaId"], label.get("season"),
+                                      label.get("episode"))):
+            continue
+        found = _file_of(_matching_files(e, size, name), size)
+        if found:
+            hits.append((e["infoHash"].lower(), {**label, "file": found}))
+    if not name and len(hits) > 1:
+        return []
+    return hits
 
 
 def human_size(n: int) -> str:
@@ -241,13 +304,15 @@ def playable_index(entry: dict) -> int | None:
     `<origin>/<infohash>/<fileIdx>` and there is nothing else to put there. `wantedFile` is the
     NAME of the file the download was started for (engine.wanted_path), never an index -- it wins
     by matching basenames against the addressable files, whichever of them it matches, whether or
-    not it has bytes yet, because it is what the download was started for. Otherwise the
-    addressable file with the most bytes DOWNLOADED, not the largest declared size -- size is
-    identical for a file at 0% and one that is finished, so ranking by it can point at a file that
-    is not actually here yet. With at most one file listed (a single-file torrent, or no file list
-    at all) index 0 is the only answer and a safe one. Anything wider with no addressable file --
-    state.py's disk fallback reports every file as index None once the engine handle is gone -- is
-    refused rather than guessed: on a real torrent index 0 was a text file and the video was index 1.
+    not it has bytes yet, because it is what the download was started for. Otherwise the torrent's
+    main file: the largest addressable one by declared size, and only once all of it is here. The
+    size picks WHICH file and the bytes decide WHEN -- a smaller file that happens to be complete (a
+    sample, another episode, a text file) is never offered in its place, which is how a film's page
+    played its sample once untracked torrents gained their indices. With at most one file listed (a
+    single-file torrent, or no file list at all) index 0 is the only answer and a safe one.
+    Anything wider with no addressable file -- state.py's disk fallback reports every file as index
+    None -- is refused rather than guessed: on a real torrent index 0 was a text file and the video
+    was index 1.
     """
     files = entry.get("files") or []
     addressable = [f for f in files if isinstance(f.get("index"), int)]
@@ -257,23 +322,10 @@ def playable_index(entry: dict) -> int | None:
         for f in addressable:
             if _basename(f.get("name") or "") == wanted_base:
                 return f["index"] if is_complete(f) else None
-    # Complete only. Ranking by raw bytes would hand back a neighbour's boundary spill, and
-    # offering a file still arriving cannot keep the promise the row makes.
-    # A resume-derived file list is the torrent's authoritative ordering after the
-    # engine handle is gone. For a film, the main file is the largest declared video;
-    # never substitute a smaller complete sample merely because it finished first.
-    if entry.get("filesFrom") == "resume" and addressable:
-        main_file = max(addressable, key=lambda f: f.get("size") or 0)
-        return main_file["index"] if is_complete(main_file) else None
-
-    complete = [f for f in addressable if is_complete(f)]
-    if complete:
-        # Engine-derived state keeps the fork's established behavior: when no
-        # explicit wanted file exists, use the complete addressable file with
-        # the most bytes actually present.
-        return max(complete, key=lambda f: f.get("downloaded") or 0)["index"]
+    # Complete only: offering a file still arriving cannot keep the promise the row makes.
     if addressable:
-        return None
+        main = max(addressable, key=lambda f: f.get("size") or 0)
+        return main["index"] if is_complete(main) else None
     # No addressable index -- state.py's disk fallback reports every file as index None once the
     # engine handle is gone, which after a restart is most of the cache. A single file there is
     # still index 0, and its completeness is knowable even when its index is not.
@@ -312,61 +364,68 @@ def stream_for(entry: dict, origin: str, file_idx: int | None = None) -> dict | 
 
 
 def episode_index(entry: dict, season: int, episode: int) -> int | None:
-    """The torrent file index holding this episode, or None if the pack does not hold it.
+    """The torrent file index holding this episode, or None if the pack does not hold it here.
 
     There is one label per infohash and a season pack holds many episodes, so matching the label's
     own episode number answered for exactly one of them: on a real box, a pack with six episodes on
     disk offered a stream on one episode page and nothing on the other five. The pack's file names
-    know better, and `pins.select_wanted_file` already reads them -- it is what the download path
-    uses to pick an episode out of a pack, so the same names resolve the same way in both places.
+    know better, read the way the download path reads them (pins.names_episode), so the same names
+    resolve the same way in both places.
 
-    Only files with bytes count. Offering an episode that is not here would start fetching it on
-    play, which is the opposite of what "play the local copy" promises.
+    Of the videos whose names read as the episode, the largest is the episode's file: the size
+    picks WHICH and the bytes decide WHEN, as for a torrent's main file in playable_index. Picking
+    among complete files only let a sample stand in for its episode -- a release whose sample was
+    complete while the episode was at 30%, which any whole-torrent download passes through, offered
+    the sample. Videos only, because a tracked download's list holds every file with bytes, and a
+    subtitle completed by the pieces it shares with its neighbours was offered as the episode.
+
+    Only a complete file is offered. Offering an episode that is not all here would start fetching
+    it on play, which is the opposite of what "play the local copy" promises.
     """
-    have = [f for f in (entry.get("files") or [])
-            if isinstance(f.get("index"), int) and is_complete(f)]
-    if not have:
+    named = [f for f in (entry.get("files") or [])
+             if isinstance(f.get("index"), int) and is_video(f.get("name") or "")
+             and pinsmod.names_episode(f.get("name") or "", season, episode)]
+    if not named:
         return None
-    # select_wanted_file returns a position in the list it was handed, not a torrent file index.
-    pos = pinsmod.select_wanted_file([f.get("name") or "" for f in have],
-                                     {"season": season, "episode": episode})
-    return None if pos is None else have[pos]["index"]
+    main = max(named, key=lambda f: f.get("size") or 0)
+    return main["index"] if is_complete(main) else None
 
 
 # A file name that reads as an episode, in either form pins.select_wanted_file reads: S04E05 and
 # 4x05. The digits are bounded so that a resolution such as 1920x1080 does not read as one, and
-# a decimal before the x -- DD5.1x264, an audio and a codec tag -- does not either.
+# the codec numbers x264, x265 and x266 do not either -- DD5.1x264 is an audio and a codec tag,
+# while The.100.1x05 is an episode.
 _EPISODE_NAME_RE = re.compile(
-    r"s\d{1,3}[\s._-]*e\d{1,4}(?!\d)|(?<!\d)(?<!\d\.)\d{1,2}\s*x\s*\d{1,3}(?!\d)",
-    re.IGNORECASE,
-)
+    r"s\d{1,3}[\s._-]*e\d{1,4}(?!\d)|(?<!\d)\d{1,2}\s*x\s*(?!26[456](?!\d))\d{1,3}(?!\d)",
+    re.IGNORECASE)
 
 
 def _label_alone_names_the_file(entry: dict) -> bool:
-    """Whether an episode label can safely identify a file by itself.
+    """Whether an episode label can say by itself which of this entry's files it means.
 
-    A label names the episode the torrent was learned from, not an arbitrary file.
-    It is safe when there is no ambiguity: an explicit wanted file, no addressable
-    file, a torrent that contains only one video/file, or one addressable file whose
-    name does not itself identify another episode.
+    A label names the episode its torrent was learned from, not a file. Where the files carry the
+    torrent's own indices, `playable_index` would pick one by itself -- and on a pack that was
+    another episode: one played part-way and left for the next stays partial, and its page offered
+    the next one's file. So the label decides alone only where there is nothing to confuse: a
+    download that recorded its file (`wantedFile`); no addressable file at all (the disk walk's
+    listing, where `playable_index` plays a lone file as 0 and refuses a pack); a torrent that
+    holds a single video, which is the file the label was learned from whatever its name says --
+    numbering unlike the app's (anime, split seasons, specials) is what the label is for; or
+    exactly one addressable file whose name reads as no episode. Otherwise a name that reads as
+    an episode is `episode_index`'s to answer, and it already has.
+
+    Only a label with no recorded file gets here: one learned before files were recorded, or one
+    the page wrote. A label that records its file needs none of this (see streams_for_meta_id).
     """
     if entry.get("wantedFile"):
         return True
-
-    addressable = [
-        f for f in (entry.get("files") or [])
-        if isinstance(f.get("index"), int)
-    ]
+    addressable = [f for f in entry.get("files") or [] if isinstance(f.get("index"), int)]
     if not addressable:
         return True
-
     if entry.get("numVideos") == 1 or entry.get("numFiles") == 1:
         return True
-
-    return (
-        len(addressable) == 1
-        and not _EPISODE_NAME_RE.search(_basename(addressable[0].get("name") or ""))
-    )
+    return (len(addressable) == 1
+            and not _EPISODE_NAME_RE.search(_basename(addressable[0].get("name") or "")))
 
 
 def _label_matches(label: dict, base: str, season: int | None, episode: int | None) -> bool:
@@ -377,6 +436,21 @@ def _label_matches(label: dict, base: str, season: int | None, episode: int | No
     return label.get("season") == season and label.get("episode") == episode
 
 
+def _recorded_index(entry: dict, recorded: dict) -> int | None:
+    """Where the file a label recorded is in this entry's listing, if it is here and complete.
+
+    Found the way it was learned (_matching_files: by name and size) among the files that carry an
+    index: one match is the file, none or several is nothing -- not here yet, or no way to tell
+    which. A listing with no index at all answers nothing. It is the directory walk's, which walks
+    only folders and cannot know the torrent's own order, so index 0 there would be a guess -- a
+    folder whose first file is a text file would play the text. The torrent's resume record, which
+    the engine saves every 30 s by default, gives the file its index.
+    """
+    found = [f for f in _matching_files(entry, recorded["size"], recorded["name"])
+             if isinstance(f.get("index"), int)]
+    return found[0]["index"] if len(found) == 1 and is_complete(found[0]) else None
+
+
 def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
     """Streams for a Stremio meta id (`tt…` or `tt…:S:E`).
 
@@ -385,6 +459,10 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
     put the wrong film behind a right-looking row. A matched entry that `stream_for` refuses (no
     addressable file) is dropped rather than included: the list this returns is what the app can
     actually play, not a row of everything that matched by name.
+
+    A label learned at playback records the file it was learned from, and for the label's own video
+    that file is the answer -- once complete, and nothing in its place. Anything else is worked out
+    from the torrent's files: an episode by its name, and a label with no file by the fallback.
     """
     parts = meta_id.split(":")
     base = parts[0]
@@ -397,16 +475,26 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
         label = e.get("label") or {}
         if not label or (label.get("metaId") or "") != base:
             continue
+        own = _label_matches(label, base, season, episode)
+        recorded = labelsmod.file_record(label.get("file"))
         stream = None
-        if season is not None:
-            # Resolve the requested episode from the torrent's own file names first.
-            idx = episode_index(e, season, episode)
+        if own and recorded is not None:
+            # Neither a name that reads as this episode nor the torrent's main file: a guess could
+            # only ever be right where the recorded file already is.
+            idx = _recorded_index(e, recorded)
             if idx is not None:
                 stream = stream_for(e, origin, idx)
-
-        if (stream is None and _label_matches(label, base, season, episode)
-                and (season is None or _label_alone_names_the_file(e))):
-            stream = stream_for(e, origin)
+        else:
+            if season is not None:
+                # The pack's own files first: they cover every episode it holds, not only the one
+                # the label happens to name. The label match stays below as the fallback for a
+                # torrent whose file names carry no readable episode number -- there, the label is
+                # all we have -- and only where the label alone can say which file it means.
+                idx = episode_index(e, season, episode)
+                if idx is not None:
+                    stream = stream_for(e, origin, idx)
+            if stream is None and own and (season is None or _label_alone_names_the_file(e)):
+                stream = stream_for(e, origin)
         if stream is not None:
             out.append(stream)
     return out
@@ -423,8 +511,15 @@ def find_entry(state: dict, info_hash: str) -> dict | None:
 def meta_for(entry: dict) -> dict:
     """The detail page for one of our ids.
 
-    `videos` is emitted only for a pack, and only for files with bytes on disk: offering an episode
-    that is not there produces a row that cannot play, which is worse than not listing it.
+    `videos` lists what a viewer can pick, and only complete videos: offering an episode that is
+    not there produces a row that cannot play, which is worse than not listing it, and a complete
+    `.nfo` or subtitle in a tracked download's list is nothing to play at all. They are listed when
+    there are two or more, and when there is one the card does not play by itself: a pack's only
+    complete episode that is not its largest file, or a download's own file still arriving, left
+    the card playing nothing, and a download whose largest complete file is no video -- an
+    archive, a disc image -- left it playing that. Without a list, stremio-core asks for the
+    card's own streams (a meta with no videos plays its own id), and `playable_index` answers
+    them.
     """
     label = entry.get("label") or {}
     ih = entry["infoHash"].lower()
@@ -442,8 +537,10 @@ def meta_for(entry: dict) -> dict:
     # arrives and identical for a file at 0% and one that is finished, so it is not evidence that
     # anything of it is actually on disk -- `downloaded` is.
     on_disk = [f for f in (entry.get("files") or [])
-               if is_complete(f) and isinstance(f.get("index"), int)]
-    if len(on_disk) > 1:
+               if is_complete(f) and isinstance(f.get("index"), int)
+               and is_video(f.get("name") or "")]
+    plays = playable_index(entry) if on_disk else None
+    if len(on_disk) > 1 or (on_disk and plays not in {f["index"] for f in on_disk}):
         meta["videos"] = [
             {"id": format_id(ih, f["index"]), "title": f.get("name") or f"file {f['index']}",
              "released": None}

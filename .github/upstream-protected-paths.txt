@@ -53,3 +53,6 @@ src/stremiosrv/library/api.py
 src/stremiosrv/library/metadata.py
 src/stremiosrv/library/static/index.html
 src/stremiosrv/metrics.py
+
+docker/entrypoint.sh
+src/stremiosrv/transcode/converter.py

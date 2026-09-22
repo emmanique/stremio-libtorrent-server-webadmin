@@ -11,10 +11,10 @@ FORK="$(tr -d '[:space:]' < FORK_VERSION)"
 WEBADMIN="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
 CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
 
-test "$SERVER" = "$FORK"
-test "$SERVER" = "$WEBADMIN"
+test "$FORK" = "$WEBADMIN"
 test "$SERVER" = "$CORE"
-case "$SERVER" in 2.*) ;; *) echo "Main 2.x line requires a 2.x version" >&2; exit 1;; esac
+case "$FORK" in 2.*) ;; *) echo "Fork release line requires a 2.x version" >&2; exit 1;; esac
+case "$SERVER" in 1.*) ;; *) echo "SERVER_VERSION must reflect the integrated upstream 1.x release" >&2; exit 1;; esac
 
 grep -q '^  gluetun:' compose.yaml
 grep -q 'network_mode: "service:gluetun"' compose.yaml

@@ -8,27 +8,18 @@ from __future__ import annotations
 
 import json
 import subprocess
-from urllib.parse import urlsplit, urlunsplit
 
 _HDR_TRANSFERS = {"smpte2084", "arib-std-b67"}  # PQ (HDR10/HDR10+) and HLG
 _DOVI_TAGS = {"dvhe", "dvh1", "dav1", "dvav"}
-_TRUSTED_SELF_SUFFIX = ".519b6502d940.stremio.rocks"
 
 
-class ProbeTimeoutError(TimeoutError):
-    """Raised when ffprobe cannot obtain enough media data before its deadline."""
+class ProbeTimeoutError(Exception):
+    """ffprobe did not answer within its timeout.
 
-
-def _internal_media_url(media_url: str) -> str:
-    """Bypass the public HTTPS/Nginx hairpin when probing this same server."""
-    try:
-        parsed = urlsplit(media_url)
-    except ValueError:
-        return media_url
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme == "https" and parsed.port == 12470 and host.endswith(_TRUSTED_SELF_SUFFIX):
-        return urlunsplit(("http", "127.0.0.1:11470", parsed.path, parsed.query, parsed.fragment))
-    return media_url
+    Named so each caller can decide what to do about it: playback cannot proceed without a probe,
+    subtitles can. Carries no URL -- these messages reach the log, and the URL names what someone
+    is watching.
+    """
 
 
 def _fps(rate: str | None) -> float | None:
@@ -92,14 +83,11 @@ def map_probe(ffprobe_json: dict) -> dict:
 
 
 def probe_media(media_url: str, ffprobe: str = "ffprobe", timeout: int = 30) -> dict:
-    effective_url = _internal_media_url(media_url)
     argv = [ffprobe, "-v", "quiet", "-print_format", "json",
-            "-show_format", "-show_streams", effective_url]
+            "-show_format", "-show_streams", media_url]
     try:
         proc = subprocess.run(argv, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise ProbeTimeoutError(
-            f"media probe timed out after {timeout}s waiting for stream data"
-        ) from exc
+    except subprocess.TimeoutExpired as e:
+        raise ProbeTimeoutError(f"ffprobe did not answer within {timeout}s") from e
     data = json.loads(proc.stdout or b"{}")
     return map_probe(data)

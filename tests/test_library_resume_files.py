@@ -483,3 +483,74 @@ def test_a_brand_new_single_file_plays_on_its_label_before_its_record_is_saved(t
     state = statemod.build(str(tmp_path), _Eng({name: FILE_IH}, {FILE_IH: live}))
     assert [s["url"] for s in model.streams_for_meta_id(state, "tt0000007:1:2", "http://o")] == [
         f"http://o/{FILE_IH}/0"]
+
+
+# --- every type the server streams as video is listed (1.6.14) --------------------------------
+
+
+@pytest.mark.parametrize("name", ["The.Film.1999.wmv", "The.Film.1999.mpg", "The.Film.1999.mpeg",
+                                  "The.Film.1999.flv", "The.Film.1999.ogv", "The.Film.1999.MKV"])
+def test_every_type_the_server_streams_as_video_is_listed_learned_and_offered(tmp_path, name):
+    """The listing asked the download path's shorter list, so a video the server streams -- a
+    .wmv, a .mpg, a .flv -- was never listed: never learned at its first play, never offered."""
+    _record(tmp_path, FILE_IH, {"name": name, "length": 6000})
+    (tmp_path / name).write_bytes(b"x" * 6000)
+    _index(tmp_path, **{name: FILE_IH})
+    state = statemod.build(str(tmp_path), None)
+    [e] = [e for e in state["entries"] if e.get("infoHash")]
+    assert [(f["index"], f["name"]) for f in e["files"]] == [(0, name)]
+    hits = model.learn_labels(state, "movie", "tt0000008",
+                              {"videoSize": "6000", "filename": name})
+    assert [ih for ih, _ in hits] == [FILE_IH]
+    labels.put(str(tmp_path), FILE_IH, {"metaId": "tt0000008", "type": "movie"})
+    state = statemod.build(str(tmp_path), None)
+    assert [s["url"] for s in model.streams_for_meta_id(state, "tt0000008", "http://o")] == [
+        f"http://o/{FILE_IH}/0"]
+
+
+def test_the_walk_lists_those_types_too(tmp_path):
+    """A torrent whose resume record is not saved yet is listed by walking its folder."""
+    name = "Home.Movies"
+    (tmp_path / name).mkdir()
+    (tmp_path / name / "tape.mpg").write_bytes(b"x" * 10)
+    (tmp_path / name / "notes.txt").write_bytes(b"x" * 10)
+    _index(tmp_path, **{name: DIR_IH})
+    assert [f["name"] for f in _entry(tmp_path)["files"]] == ["tape.mpg"]
+
+
+def test_a_brand_new_root_file_of_such_a_type_is_listed_from_its_handle(tmp_path):
+    name, size = "The.Film.1999.flv", 6000
+    (tmp_path / name).write_bytes(b"x" * size)
+    live = [{"index": 0, "name": name, "size": size, "downloaded": 600, "progress": 0.1,
+             "wanted": True}]
+    e = _entry(tmp_path, _Eng({name: FILE_IH}, {FILE_IH: live}))
+    assert [f["name"] for f in e["files"]] == [name]
+
+
+# --- a label records the file it was learned from (1.6.14) ------------------------------------
+
+
+def test_a_label_learned_from_the_walk_answers_at_the_torrents_own_index(tmp_path):
+    """A brand-new torrent's first play comes before its resume record is saved, so the report is
+    matched against the walk, which has no indices. The label records the file by name and size,
+    and once the record is saved that file answers at the torrent's own index -- in a pack whose
+    names carry no episode number, where nothing else could say which file it is."""
+    name = "[Group] The Show"
+    files = [("[Group] The Show - 02 [1080p].mkv", 6000),
+             ("[Group] The Show - 01 [1080p].mkv", 5000)]
+    d = tmp_path / name
+    d.mkdir()
+    for fname, size in files:
+        (d / fname).write_bytes(b"x" * size)
+    _index(tmp_path, **{name: PACK_IH})
+    state = statemod.build(str(tmp_path), None)  # no record yet: the walk
+    [(ih, label)] = model.learn_labels(state, "series", "tt0000004:1:1",
+                                       {"videoSize": "5000", "filename": files[1][0]})
+    assert labels.learn(str(tmp_path), ih, label)
+    state = statemod.build(str(tmp_path), None)  # still the walk: no index to offer yet
+    assert model.streams_for_meta_id(state, "tt0000004:1:1", "http://o") == []
+    _record(tmp_path, PACK_IH, {"name": name, "files": [
+        {"length": size, "path": [fname]} for fname, size in files]})
+    state = statemod.build(str(tmp_path), None)
+    streams = model.streams_for_meta_id(state, "tt0000004:1:1", "http://o")
+    assert [s["url"] for s in streams] == [f"http://o/{PACK_IH}/1"]
