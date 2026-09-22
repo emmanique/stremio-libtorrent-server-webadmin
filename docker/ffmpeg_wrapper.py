@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 REAL_FFMPEG = os.getenv("FFMPEG_REAL", "/usr/local/libexec/stremio/ffmpeg-real")
+REAL_FFPROBE = os.getenv("FFPROBE_REAL", "/usr/local/libexec/stremio/ffprobe-real")
 CONFIG_FILE = os.getenv("STREMIOSRV_EXTERNAL_CONFIG", "/config/admin-settings.json")
 VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
 
@@ -75,6 +76,84 @@ def _video_codec(args: list[str]) -> tuple[int | None, str | None]:
         if token in {"-c:v", "-codec:v"}:
             return index, args[index + 1]
     return None, None
+
+
+def _input_url(args: list[str]) -> str | None:
+    """Return the first FFmpeg input following -i."""
+    try:
+        index = args.index("-i")
+    except ValueError:
+        return None
+    if index + 1 >= len(args):
+        return None
+    return args[index + 1]
+
+
+def _direct_video_codecs(config: dict[str, object]) -> set[str]:
+    """Return normalized codecs allowed to remain Direct Stream."""
+    value = str(
+        config.get("transcoding_direct_video_codecs")
+        or os.getenv("TRANSCODING_DIRECT_VIDEO_CODECS")
+        or "h264"
+    )
+    aliases = {
+        "avc": "h264",
+        "avc1": "h264",
+        "h265": "hevc",
+        "x265": "hevc",
+        "hev1": "hevc",
+        "hvc1": "hevc",
+    }
+    result: set[str] = set()
+    for item in value.split(","):
+        codec = item.strip().lower()
+        if codec:
+            result.add(aliases.get(codec, codec))
+    return result
+
+
+def _probe_video_codec(args: list[str]) -> str | None:
+    """Probe the first video stream codec without decoding video frames."""
+    source = _input_url(args)
+    if not source:
+        return None
+
+    aliases = {
+        "avc": "h264",
+        "avc1": "h264",
+        "h265": "hevc",
+        "x265": "hevc",
+        "hev1": "hevc",
+        "hvc1": "hevc",
+    }
+
+    try:
+        result = subprocess.run(
+            [
+                REAL_FFPROBE,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                source,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    codec = result.stdout.strip().splitlines()
+    if not codec:
+        return None
+
+    value = codec[0].strip().lower()
+    return aliases.get(value, value)
 
 
 def _remove_option(args: list[str], names: set[str]) -> list[str]:
@@ -176,10 +255,29 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
     if codec_index is None or current is None:
         return args, f"profile={profile_name}; no video codec option found"
 
-    # Stremio's Direct Stream decision remains authoritative. Profiles only
-    # replace an actual transcode encoder, preventing unnecessary re-encoding.
+    # When the core requests stream copy, validate the actual source codec
+    # against the configured Direct Stream allow-list. Compatible codecs stay
+    # untouched; incompatible codecs are passed through the selected execution
+    # profile below.
     if current == "copy":
-        return args, f"profile={profile_name}; video=copy preserved"
+        source_codec = _probe_video_codec(args)
+        direct_codecs = _direct_video_codecs(config)
+
+        if source_codec is None:
+            # Fail safe: never introduce unexpected transcoding when probing
+            # cannot establish the input codec.
+            return args, (
+                f"profile={profile_name}; video=copy preserved; "
+                "source codec probe unavailable"
+            )
+
+        if source_codec in direct_codecs:
+            return args, (
+                f"profile={profile_name}; video=copy preserved; "
+                f"source={source_codec}; direct=yes"
+            )
+
+        current = f"copy({source_codec})"
 
     # Do not rewrite an already explicit hardware pipeline targeting the same
     # encoder. This protects manual diagnostics and upstream commands that have
