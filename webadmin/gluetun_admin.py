@@ -202,6 +202,8 @@ def gluetun_status():
     health = state.get("Health", {}) if isinstance(state.get("Health"), dict) else {}
     attrs_config = (gluetun.attrs.get("Config", {}) if gluetun else {}) or {}
     firewall_on = bool(config["firewallEnabled"])
+    vpn_requested = vpn_admin._vpn_requested()
+    direct_mode = bool(gluetun and gluetun.status == "running" and not vpn_requested)
 
     return {
         "container": {
@@ -217,21 +219,24 @@ def gluetun_status():
             **stats,
         },
         "vpn": {
-            "status": str((control_status or {}).get("status") or "unavailable"),
+            "status": str((control_status or {}).get("status") or ("stopped" if direct_mode else "unavailable")),
             "publicIp": (public_ip or {}).get("public_ip"),
             "controlAvailable": control_status is not None,
-            "controlError": control_error or public_error,
+            "controlError": None if direct_mode else (control_error or public_error),
         },
         "dns": {
-            "status": str((dns_status or {}).get("status") or "unavailable"),
-            "controlError": dns_error,
+            "status": str((dns_status or {}).get("status") or ("direct" if direct_mode else "unavailable")),
+            "controlError": None if direct_mode else dns_error,
         },
         "updater": {
-            "status": str((updater_status or {}).get("status") or "unavailable"),
-            "controlError": updater_error,
+            "status": str((updater_status or {}).get("status") or ("stopped" if direct_mode else "unavailable")),
+            "controlError": None if direct_mode else updater_error,
         },
         "activeProfile": profile,
-        "routing": _routing(gluetun, stremio, firewall_on),
+        "routing": {
+            **_routing(gluetun, stremio, firewall_on),
+            "killSwitchActive": bool(vpn_requested and _routing(gluetun, stremio, firewall_on)["killSwitchActive"]),
+        },
         "pihole": _pihole_state(),
         "config": config,
         "busy": GLUETUN_LOCK.locked(),
