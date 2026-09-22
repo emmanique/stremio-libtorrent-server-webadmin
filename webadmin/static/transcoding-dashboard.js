@@ -21,7 +21,7 @@
     .transcodeSession{padding:12px;border:1px solid rgba(232,207,105,.2);border-radius:9px;background:rgba(12,25,18,.92)}
     .transcodeSessionHead{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
     .transcodeSessionHead strong{font-size:13px}
-    .transcodeSessionGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:9px}
+    .transcodeSessionGrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:9px}
     .transcodeKv{padding:8px;border-radius:7px;background:rgba(28,49,34,.75)}
     .transcodeKv span{display:block;color:var(--muted);font-size:9px;text-transform:uppercase}
     .transcodeKv b{display:block;margin-top:3px;font-size:11px;overflow-wrap:anywhere}
@@ -36,7 +36,7 @@
     .transcodePolicyFlow b{color:#fff7d6}
     .configItem.transcodingPolicy{box-shadow:inset 3px 0 0 rgba(242,201,76,.58)}
     .configItem select{width:100%;min-width:0;background:#24212f;border:1px solid #3a3547;color:var(--text);border-radius:7px;padding:9px}
-    @media(max-width:900px){.transcodeCards,.transcodeSessionGrid{grid-template-columns:1fr 1fr}.transcodeLatest{grid-template-columns:1fr}}
+    @media(max-width:1100px){.transcodeSessionGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}\n    @media(max-width:900px){.transcodeCards,.transcodeSessionGrid{grid-template-columns:1fr 1fr}.transcodeLatest{grid-template-columns:1fr}}
     @media(max-width:540px){.transcodeCards,.transcodeSessionGrid{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
@@ -65,7 +65,7 @@
           <div><small>Latest FFmpeg progress</small><code id="tdProgress">—</code></div>
         </div>
       </div>
-      <div class="foot">Direct Stream vs transcoding, source → target codecs, VAAPI/NVENC/CPU selection and live FFmpeg progress.</div>`;
+      <div class="foot">Live per-session monitor: Direct Stream vs transcoding, source → target codecs, VAAPI/NVENC/CPU engine, PID, CPU/RAM usage and FFmpeg progress.</div>`;
     const settings = stacks[1].querySelector('.panel.settings');
     stacks[1].insertBefore(panel, settings || null);
   }
@@ -81,6 +81,8 @@
     const audio = `${session.sourceAudio || '?'} → ${session.targetAudio || '?'}`;
     const speed = progress.speed || '—';
     const fps = progress.fps == null ? '—' : `${progress.fps.toFixed(1)} fps`;
+    const resources = session.cpuPercent == null ? '—' : `CPU ${Number(session.cpuPercent).toFixed(1)}% · MEM ${Number(session.memoryPercent || 0).toFixed(1)}%`;
+    const process = session.pid == null ? '—' : `PID ${session.pid}${session.elapsed ? ' · ' + session.elapsed : ''}`;
     return `<div class="transcodeSession">
       <div class="transcodeSessionHead"><strong>${session.jobId ? `Job ${esc(session.jobId)}` : `FFmpeg session ${index + 1}`}</strong><span class="badge">${action}</span></div>
       <div class="transcodeSessionGrid">
@@ -88,7 +90,10 @@
         <div class="transcodeKv"><span>Audio</span><b>${esc(audio)}</b></div>
         <div class="transcodeKv"><span>Engine</span><b>${esc((session.engine || 'none').toUpperCase())}</b></div>
         <div class="transcodeKv"><span>Progress</span><b>${esc(fps)} · ${esc(speed)}</b></div>
+        <div class="transcodeKv"><span>Process</span><b>${esc(process)}</b></div>
+        <div class="transcodeKv"><span>Resources</span><b>${esc(resources)}</b></div>
       </div>
+      ${session.policyDecision ? `<div class="transcodeKv" style="margin-top:8px"><span>Policy decision</span><b>${esc(session.policyDecision)}</b></div>` : ''}
     </div>`;
   }
 
