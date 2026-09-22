@@ -173,7 +173,7 @@ def _action(video_target: str | None, audio_target: str | None) -> str:
 def _process_commands(container) -> list[str]:
     """Return active ffmpeg-real command lines without depending on host PID layout."""
     try:
-        data = container.top(ps_args="-eo args")
+        data = container.top(ps_args="-eo pid,pcpu,pmem,etime,args")
         rows = data.get("Processes", []) if isinstance(data, dict) else []
         commands = [" ".join(str(x) for x in row) for row in rows]
     except Exception:
@@ -253,20 +253,42 @@ def _parse_progress(text: str) -> dict[str, object] | None:
     return progress
 
 
+def _process_metadata(command: str) -> tuple[str, dict[str, object]]:
+    """Split optional ps telemetry from the FFmpeg command line."""
+    match = re.match(r"^\\s*(\\d+)\\s+([0-9.]+)\\s+([0-9.]+)\\s+(\\S+)\\s+(.*ffmpeg-real.*)$", command)
+    if not match:
+        return command, {"pid": None, "cpuPercent": None, "memoryPercent": None, "elapsed": None}
+    pid, cpu, memory, elapsed, argv = match.groups()
+    return argv, {
+        "pid": int(pid),
+        "cpuPercent": float(cpu),
+        "memoryPercent": float(memory),
+        "elapsed": elapsed,
+    }
+
+
+def _source_codec_from_log(text: str, kind: str) -> str | None:
+    pattern = r"Stream #\\d+:\\d+(?:\\([^)]*\\))?: " + ("Video" if kind == "video" else "Audio") + r":\\s*([^,\\s]+)"
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
 def _session_from_command(container, cache_root: str, command: str) -> dict[str, object]:
-    tokens = _tokens(command)
+    argv, process = _process_metadata(command)
+    tokens = _tokens(argv)
     video_target = _option(tokens, "-c:v", "-codec:v")
     audio_target = _option(tokens, "-c:a", "-codec:a")
-    job_id = _job_id(command)
+    job_id = _job_id(argv)
     log_text = _read_job_log(container, cache_root, job_id)
     decision = _parse_policy_log(log_text)
     progress = _parse_progress(log_text)
     source_video = decision.get("sourceVideo") if decision else None
     source_audio = decision.get("sourceAudio") if decision else None
-    # The policy log is authoritative for wrapper decisions. The active command
-    # is authoritative for the encoder actually running after fallback.
+    source_video = source_video or _source_codec_from_log(log_text, "video")
+    source_audio = source_audio or _source_codec_from_log(log_text, "audio")
     return {
         "jobId": job_id,
+        **process,
         "action": _action(video_target, audio_target),
         "engine": _engine(video_target),
         "sourceVideo": source_video,
