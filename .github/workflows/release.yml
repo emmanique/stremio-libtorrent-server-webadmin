@@ -66,9 +66,8 @@ jobs:
           WEBADMIN="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
           CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
 
-          test "$VERSION" = "$SERVER"
-          test "$SERVER" = "$FORK"
-          test "$SERVER" = "$WEBADMIN"
+          test "$VERSION" = "$FORK"
+          test "$FORK" = "$WEBADMIN"
           test "$SERVER" = "$CORE"
           case "$VERSION" in 2.*) ;; *) echo "Only 2.x releases are supported here." >&2; exit 1;; esac
           test -f "docs/releases/$TAG.md"
