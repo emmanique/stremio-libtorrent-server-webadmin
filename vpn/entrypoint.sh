@@ -200,6 +200,9 @@ prepare_profile() {
 start_vpn_child() {
     prepare_profile || return 1
     stop_dns_proxy
+    # DIRECT mode owns 127.0.0.1:53. Release it before Gluetun starts its
+    # encrypted resolver on the same address/port.
+    stop_local_dns_proxy
     echo "[vpn] enabling VPN profile: $PROFILE_ID"
     echo "[vpn] allowed outbound LAN subnets: $FIREWALL_OUTBOUND_SUBNETS"
     /gluetun-entrypoint "$@" &
