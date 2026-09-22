@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.6
+# Stremio Server WebAdmin 2.0.7
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,20 +6,20 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.6** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.6** release line. It uses one runtime topology and one primary Compose file, with persistent configuration, integrated VPN/DNS services, hardware transcoding and automatic Gluetun namespace lifecycle repair.
+Version **2.0.7** integrates upstream server/core **1.6.15** while keeping the fork platform and WebAdmin on the independent **2.0.7** release line. It retains the validated 2.0.6 runtime topology, VPN/DNS behavior, hardware transcoding and Gluetun namespace lifecycle repair, and adds a live per-session transcoding monitor in WebAdmin.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.6 at a glance
+## 2.0.7 at a glance
 
 ```text
 Upstream Core   1.6.15
 Upstream Server 1.6.15
-Fork            2.0.6
-WebAdmin        2.0.6
-VPN Gateway     2.0.6
+Fork            2.0.7
+WebAdmin        2.0.7
+VPN Gateway     2.0.7
 ```
 
 Version sources:
@@ -35,7 +35,7 @@ webadmin/WEBADMIN_VERSION
 
 ## What is implemented today
 
-The current 2.0.6 baseline includes the work completed across the 2.x release line:
+The current 2.0.7 baseline includes the work completed across the 2.x release line:
 
 - unified `compose.yaml` runtime for Stremio Server, WebAdmin, Pi-hole and the persistent Gluetun gateway;
 - VPN configuration and enable/disable lifecycle from WebAdmin, without a separate `compose.vpn.yaml`;
@@ -47,7 +47,8 @@ The current 2.0.6 baseline includes the work completed across the 2.x release li
 - full-GPU VAAPI profiles with hardware decode, `scale_vaapi` and hardware encode when the host supports them;
 - automatic repair of a stale Stremio → Gluetun network namespace after Gluetun container recreation;
 - versioned Server, WebAdmin and VPN images published through the validated release workflow;
-- transactional server update metadata and rollback support exposed through WebAdmin.
+- transactional server update metadata and rollback support exposed through WebAdmin;
+- live per-session transcoding monitoring in WebAdmin, correlating each active FFmpeg process with its own job log and exposing Direct Stream/Transcoding state, source → target video/audio codecs, execution engine, PID, elapsed time, CPU/RAM, FFmpeg progress and the applied policy decision.
 
 ### 2.0.5 transcoding policy
 
@@ -94,6 +95,27 @@ with Stremio NetworkMode
 ```
 
 The repair reuses the active Compose configuration and hardware overlay selection. Pi-hole and WebAdmin are not recreated merely to repair this relationship.
+
+### 2.0.7 live transcoding monitor
+
+WebAdmin now provides a live per-session view of active FFmpeg work instead of relying only on the most recently modified transcoding log. Each active process is correlated with its own job log, which makes simultaneous Direct Stream and transcoding sessions distinguishable.
+
+The monitor exposes, when available:
+
+```text
+Session action      Direct Stream / Transcoding
+Video               source codec → target codec
+Audio               source codec → target codec
+Engine              copy / VAAPI / CPU / other active engine
+Process             PID and elapsed time
+Resources           CPU % and memory %
+Progress            FPS and processing speed
+Policy              active ffmpeg-policy decision
+```
+
+If the policy line does not expose the source codec, WebAdmin can recover it from the corresponding FFmpeg stream metadata in that session's log. Process telemetry is read-only and does not change the transcoding decision.
+
+This feature does **not** yet claim automatic client-capability detection. Unknown client playback capability continues to use the validated safe transcoding policy: compatible H.264 can remain Direct Stream while incompatible HEVC can be converted to H.264 using the selected hardware profile such as VAAPI.
 
 
 ---
@@ -531,9 +553,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.6
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.6
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.6
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.7
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.7
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.7
 ```
 
 Stable moving aliases:
@@ -548,9 +570,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.6
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.6
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.6
+edmanique/stremio-libtorrent-server-webadmin:2.0.7
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.7
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.7
 ```
 
 ---
@@ -645,7 +667,7 @@ Updates target `develop/2.x`, not `main`.
 
 `.github/workflows/2x-release.yml`
 
-Triggered manually with the target release version (for example `2.0.6`). The workflow validates the release contract and creates the corresponding `v2.x.y` tag/release.
+Triggered manually with the target release version (for example `2.0.7`). The workflow validates the release contract and creates the corresponding `v2.x.y` tag/release.
 
 The release workflow:
 1. validates version consistency;
@@ -706,7 +728,7 @@ VERSIONING.md
 
 Current stable release:
 
-[docs/releases/v2.0.6.md](docs/releases/v2.0.6.md)
+[docs/releases/v2.0.7.md](docs/releases/v2.0.7.md)
 
 Versioning:
 
