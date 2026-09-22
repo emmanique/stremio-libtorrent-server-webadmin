@@ -94,12 +94,52 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
+_repair_gateway_namespace() {
+    gluetun_id=$(docker inspect -f '{{.Id}}' stremio-gluetun 2>/dev/null || true)
+    stremio_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' stremio-libtorrent-server 2>/dev/null || true)
+
+    if [ -z "$gluetun_id" ] || [ -z "$stremio_mode" ]; then
+        echo "[start] gateway namespace check skipped: containers are not available yet"
+        return 0
+    fi
+
+    case "$stremio_mode" in
+        "container:$gluetun_id")
+            echo "[start] gateway namespace: current"
+            return 0
+            ;;
+        container:*)
+            echo "[start] stale Gluetun namespace detected; recreating only Stremio..."
+            # Gluetun is already healthy because the normal Compose start above
+            # honors the service_healthy dependency. Recreate only the dependent
+            # service so Docker resolves network_mode: service:gluetun to the
+            # current gateway container ID.
+            # shellcheck disable=SC2086
+            docker compose $COMPOSE_ARGS up -d --no-deps --force-recreate stremio-libtorrent-server
+
+            repaired_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' stremio-libtorrent-server 2>/dev/null || true)
+            if [ "$repaired_mode" != "container:$gluetun_id" ]; then
+                echo "[start] ERROR: Stremio did not attach to the current Gluetun namespace." >&2
+                return 1
+            fi
+            echo "[start] gateway namespace repaired"
+            ;;
+        *)
+            echo "[start] ERROR: unexpected Stremio network mode: $stremio_mode" >&2
+            return 1
+            ;;
+    esac
+}
+
 if [ "$#" -eq 0 ]; then
     echo "[start] pulling published images..."
     # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
     docker compose $COMPOSE_ARGS pull
+    # Do not exec here: v2.0.6 performs a post-start namespace integrity check.
     # shellcheck disable=SC2086
-    exec docker compose $COMPOSE_ARGS up -d --remove-orphans
+    docker compose $COMPOSE_ARGS up -d --remove-orphans
+    _repair_gateway_namespace
+    exit 0
 fi
 
 # shellcheck disable=SC2086
