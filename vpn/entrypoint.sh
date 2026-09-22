@@ -9,11 +9,15 @@ NEXT_FILE="$CONFIG_DIR/next_profile"
 ENABLED_FILE="${STREMIO_VPN_ENABLED_FILE:-$CONFIG_DIR/enabled}"
 READY_FILE="/tmp/stremio-vpn-supervisor.ready"
 DNS_PORT="${STREMIO_DNS_PROXY_PORT:-1053}"
+LOCAL_DNS_PORT="${STREMIO_LOCAL_DNS_PORT:-53}"
+PIHOLE_DNS="${STREMIO_PIHOLE_DNS:-172.30.0.53}"
 DIRECT_DNS="${STREMIO_DIRECT_DNS_UPSTREAM:-1.1.1.1}"
 
 VPN_PID=""
 DNS_TCP_PID=""
 DNS_UDP_PID=""
+LOCAL_DNS_TCP_PID=""
+LOCAL_DNS_UDP_PID=""
 DIRECT_DEFAULT=""
 
 read_id() {
@@ -85,6 +89,25 @@ stop_dns_proxy() {
     done
     DNS_TCP_PID=""
     DNS_UDP_PID=""
+}
+
+stop_local_dns_proxy() {
+    for pid in "$LOCAL_DNS_TCP_PID" "$LOCAL_DNS_UDP_PID"; do
+        [ -n "$pid" ] || continue
+        kill "$pid" >/dev/null 2>&1 || true
+        wait "$pid" 2>/dev/null || true
+    done
+    LOCAL_DNS_TCP_PID=""
+    LOCAL_DNS_UDP_PID=""
+}
+
+start_local_dns_proxy() {
+    stop_local_dns_proxy
+    socat TCP4-LISTEN:"$LOCAL_DNS_PORT",bind=127.0.0.1,reuseaddr,fork TCP4:"$PIHOLE_DNS":53 &
+    LOCAL_DNS_TCP_PID=$!
+    socat UDP4-LISTEN:"$LOCAL_DNS_PORT",bind=127.0.0.1,reuseaddr,fork UDP4:"$PIHOLE_DNS":53 &
+    LOCAL_DNS_UDP_PID=$!
+    echo "[vpn] local DNS 127.0.0.1:$LOCAL_DNS_PORT -> Pi-hole $PIHOLE_DNS:53"
 }
 
 start_dns_proxy() {
@@ -217,11 +240,13 @@ stop_vpn_child_for_direct() {
     fi
     restore_direct_network
     start_dns_proxy "$DIRECT_DNS"
+    start_local_dns_proxy
 }
 
 cleanup() {
     rm -f "$READY_FILE"
     stop_dns_proxy
+    stop_local_dns_proxy
     if [ -n "$VPN_PID" ]; then
         kill -TERM "$VPN_PID" >/dev/null 2>&1 || true
         wait "$VPN_PID" 2>/dev/null || true
@@ -238,6 +263,7 @@ DIRECT_DEFAULT=$(ip route show default 2>/dev/null | sed -n '1p' || true)
 # so Stremio configuration saves/restarts never depend on VPN availability.
 restore_direct_network
 start_dns_proxy "$DIRECT_DNS"
+start_local_dns_proxy
 touch "$READY_FILE"
 echo "[vpn] gateway supervisor ready; initial state: $(vpn_enabled && echo VPN-enabled || echo DIRECT)"
 
@@ -281,6 +307,9 @@ while :; do
         # Recover a direct DNS proxy if it died unexpectedly.
         if [ -n "$DNS_TCP_PID" ] && ! kill -0 "$DNS_TCP_PID" >/dev/null 2>&1; then
             start_dns_proxy "$DIRECT_DNS"
+        fi
+        if [ -z "$LOCAL_DNS_TCP_PID" ] || ! kill -0 "$LOCAL_DNS_TCP_PID" >/dev/null 2>&1; then
+            start_local_dns_proxy
         fi
     fi
     sleep 1
