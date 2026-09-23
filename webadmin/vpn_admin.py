@@ -366,6 +366,73 @@ def _wait_for_vpn_running(timeout: float = 60.0) -> tuple[bool, str | None]:
     return False, last_error
 
 
+def _dns_proxy_ready() -> tuple[bool, str | None]:
+    """Prove Pi-hole can resolve DNS through the Gluetun :1053 proxy."""
+    container = _container("stremio-pihole")
+    if container is None:
+        return False, "Pi-hole container is not available"
+
+    try:
+        result = container.exec_run(
+            [
+                "dig",
+                "@172.30.0.10",
+                "-p",
+                "1053",
+                "google.com",
+                "+time=2",
+                "+tries=1",
+                "+short",
+            ]
+        )
+
+        output = result.output.decode("utf-8", errors="replace").strip()
+
+        if result.exit_code == 0 and output:
+            return True, None
+
+        return False, output or f"DNS proxy query exited with code {result.exit_code}"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _wait_for_vpn_ready(timeout: float = 60.0) -> tuple[bool, str | None]:
+    """Wait until the VPN, Gluetun DNS and Pi-hole DNS path are usable."""
+    deadline = time.monotonic() + timeout
+    last_error: str | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            vpn = _control("GET", "/v1/vpn/status", timeout=3)
+            dns = _control("GET", "/v1/dns/status", timeout=3)
+
+            vpn_status = str(vpn.get("status") or "")
+            dns_status = str(dns.get("status") or "")
+
+            if vpn_status == "running" and dns_status == "running":
+                proxy_ok, proxy_detail = _dns_proxy_ready()
+
+                if proxy_ok:
+                    return True, None
+
+                last_error = (
+                    "VPN status=running, DNS status=running, "
+                    f"DNS proxy not ready: {proxy_detail or 'query failed'}"
+                )
+            else:
+                last_error = (
+                    f"VPN status={vpn_status or 'unknown'}, "
+                    f"DNS status={dns_status or 'unknown'}"
+                )
+
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+
+        time.sleep(1)
+
+    return False, last_error
+
+
 def apply_vpn_config():
     if _container(GLUETUN_CONTAINER) is None:
         raise HTTPException(409, "VPN gateway container is not available")
@@ -389,15 +456,26 @@ def connect_vpn():
     try:
         _set_vpn_requested(True)
         _audit("vpn.enable", f"profile={active}")
-        running, detail = _wait_for_vpn_running()
+        ready, detail = _wait_for_vpn_ready()
+        if not ready:
+            _audit("vpn.enable.failed", f"readiness={detail}")
+            raise HTTPException(
+                503,
+                f"VPN tunnel did not become fully ready: {detail}",
+            )
+
         local_ok, local_detail = _wait_for_stremio_local()
         if not local_ok:
             _audit("vpn.enable.failed", f"stremio-health={local_detail}")
-            raise HTTPException(503, f"VPN changed state but Stremio local health failed: {local_detail}")
+            raise HTTPException(
+                503,
+                f"VPN is ready but Stremio local health failed: {local_detail}",
+            )
+
         return {
             "ok": True,
-            "message": "VPN is running." if running else "VPN enable requested; connection is still converging.",
-            "detail": detail,
+            "message": "VPN is running and DNS is ready.",
+            "detail": None,
             "status": vpn_status(),
         }
     finally:
@@ -446,15 +524,26 @@ def reconnect_vpn():
             # enable request and let it converge without restarting the container.
             pass
         _audit("vpn.reconnect")
-        running, detail = _wait_for_vpn_running(timeout=45)
+        ready, detail = _wait_for_vpn_ready(timeout=60)
+        if not ready:
+            _audit("vpn.reconnect.failed", f"readiness={detail}")
+            raise HTTPException(
+                503,
+                f"VPN tunnel did not become fully ready: {detail}",
+            )
+
         local_ok, local_detail = _wait_for_stremio_local()
         if not local_ok:
             _audit("vpn.reconnect.failed", f"stremio-health={local_detail}")
-            raise HTTPException(503, f"VPN reconnected but Stremio local health failed: {local_detail}")
+            raise HTTPException(
+                503,
+                f"VPN is ready but Stremio local health failed: {local_detail}",
+            )
+
         return {
             "ok": True,
-            "message": "VPN reconnected." if running else "VPN restart requested; connection is still converging.",
-            "detail": detail,
+            "message": "VPN reconnected and DNS is ready.",
+            "detail": None,
             "status": vpn_status(),
         }
     finally:
