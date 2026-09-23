@@ -19,7 +19,20 @@ def write(path: str, value: str) -> None:
 
 def main() -> None:
     requested = os.environ.get("REQUESTED_VERSION", "").strip()
-    current = read("SERVER_VERSION").strip()
+    current = read("FORK_VERSION").strip()
+    server = read("SERVER_VERSION").strip()
+    core_match = re.search(
+        r'(?m)^version\s*=\s*"([^"]+)"\s*$',
+        read("pyproject.toml"),
+    )
+    if not core_match:
+        raise SystemExit("Could not read pyproject.toml version")
+    core = core_match.group(1)
+
+    if server != core:
+        raise SystemExit(
+            f"Core version mismatch: SERVER_VERSION={server}, pyproject.toml={core}"
+        )
 
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", requested):
         raise SystemExit(f"Invalid semantic version: {requested!r}")
@@ -34,21 +47,11 @@ def main() -> None:
     if requested_tuple[0] != 2:
         raise SystemExit("This release workflow manages the 2.x line only.")
 
-    write("SERVER_VERSION", requested + "\n")
+    # The 2.x platform release is independent from the integrated
+    # upstream/core 1.x version. Do not modify SERVER_VERSION or
+    # pyproject.toml here.
     write("FORK_VERSION", requested + "\n")
     write("webadmin/WEBADMIN_VERSION", requested + "\n")
-
-    pyproject = ROOT / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
-    updated, count = re.subn(
-        r'(?m)^version\s*=\s*"[^"]+"\s*$',
-        f'version = "{requested}"',
-        text,
-        count=1,
-    )
-    if count != 1:
-        raise SystemExit("Could not update pyproject.toml version")
-    pyproject.write_text(updated, encoding="utf-8")
 
     for filename in ("README.md", "QUICKSTART.md"):
         path = ROOT / filename
@@ -70,9 +73,10 @@ Describe the user-visible changes in this release.
 
 ## Components
 
-- Fork platform/server: {requested}
+- Fork platform: {requested}
 - WebAdmin: {requested}
 - VPN gateway: {requested}
+- Integrated server/core: {server}
 
 ## Validation
 
@@ -90,7 +94,10 @@ Preserve persistent Docker volumes. Do not use `docker compose down -v` during u
         )
 
     subprocess.run(["uv", "lock"], cwd=ROOT, check=True)
-    print(f"Prepared coordinated version {current} -> {requested}")
+    print(
+        f"Prepared platform version {current} -> {requested} "
+        f"(integrated core remains {server})"
+    )
 
 
 if __name__ == "__main__":

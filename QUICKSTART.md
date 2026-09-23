@@ -14,13 +14,13 @@ GHCR remains the default registry used by the project. The same validated Server
 
 The current server release is tracked by `SERVER_VERSION` / `FORK_VERSION`, WebAdmin by `webadmin/WEBADMIN_VERSION`, and the core package version by `pyproject.toml`.
 
-Current coordinated release:
+Current platform release:
 
 ```text
-Upstream Core   1.6.14
-Fork/Platform   2.0.3
-WebAdmin        2.0.3
-VPN Gateway     2.0.3
+Upstream Core   1.6.15
+Fork/Platform   2.0.8
+WebAdmin        2.0.8
+VPN Gateway     2.0.8
 ```
 
 ## 1. Obtain the deployment files
@@ -62,9 +62,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.3
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.3
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.3
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.8
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.8
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.8
 ```
 
 ### Docker Hub — alternative mirror
