@@ -114,7 +114,7 @@ def test_restart_reloads_saved_configuration_and_waits_for_health(tmp_path, monk
     app = _load_module("webadmin_app_restart_test", WEBADMIN_APP)
     config = tmp_path / "admin-settings.json"
     config.write_text('{"cache_size": 85899345920}\n', encoding="utf-8")
-    container = _FakeContainer()
+    container = _FakeContainer(config={"cache_size": 85899345920})
 
     monkeypatch.setattr(app, "CONFIG", config)
     monkeypatch.setattr(app, "client", lambda: _FakeDocker(container))

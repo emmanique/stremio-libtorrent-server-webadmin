@@ -101,3 +101,76 @@ def test_runtime_fix_preserves_pid_telemetry_from_container_ps():
         "memoryPercent": 0.2,
         "elapsed": "00:10",
     }
+
+
+def test_latest_job_log_preserves_policy_outside_last_80_lines():
+    from webadmin import transcoding_config as tc
+
+    policy = (
+        "[ffmpeg-policy] profile=vaapi-full-h264; "
+        "video=copy(hevc)->h264_vaapi; "
+        "decode=vaapi; engine=vaapi"
+    )
+
+    tail_lines = [f"frame={n} fps=100 speed=4.0x" for n in range(1, 81)]
+    returned_log = policy + "\n" + "\n".join(tail_lines) + "\n"
+
+    class Result:
+        exit_code = 0
+        output = returned_log.encode()
+
+    class Container:
+        def __init__(self):
+            self.command = None
+
+        def exec_run(self, command):
+            self.command = command
+            return Result()
+
+    container = Container()
+
+    text = tc._latest_job_log(container, "/root/.stremio-server")
+
+    assert container.command[0:2] == ["sh", "-c"]
+    assert 'grep "\\[ffmpeg-policy\\]"' in container.command[2]
+    assert 'tail -n 80 "$latest"' in container.command[2]
+
+    decision = tc._parse_policy_log(text)
+
+    assert decision is not None
+    assert decision["profile"] == "vaapi-full-h264"
+    assert decision["upstreamVideoTarget"] == "copy(hevc)"
+    assert decision["targetVideo"] == "h264_vaapi"
+    assert "decode=vaapi" in decision["decision"]
+    assert "engine=vaapi" in decision["decision"]
+
+
+def test_read_job_log_preserves_policy_and_progress():
+    from webadmin import transcoding_config as tc
+
+    policy = "[ffmpeg-policy] profile=vaapi-full-h264; video=copy(hevc)->h264_vaapi; decode=vaapi; engine=vaapi"
+    returned_log = policy + "\n" + "\n".join(f"frame={n} fps=100 speed=4.0x" for n in range(1, 81)) + "\n"
+
+    class Result:
+        exit_code = 0
+        output = returned_log.encode()
+
+    class Container:
+        def __init__(self):
+            self.command = None
+
+        def exec_run(self, command):
+            self.command = command
+            return Result()
+
+    container = Container()
+    text = tc._read_job_log(container, "/root/.stremio-server", "job123")
+
+    assert container.command[0:2] == ["sh", "-c"]
+    assert "ffmpeg-policy" in container.command[2]
+    assert "tail -n 80" in container.command[2]
+
+    decision = tc._parse_policy_log(text)
+    assert decision is not None
+    assert decision["profile"] == "vaapi-full-h264"
+    assert decision["targetVideo"] == "h264_vaapi"

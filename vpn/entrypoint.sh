@@ -101,12 +101,21 @@ stop_local_dns_proxy() {
     LOCAL_DNS_UDP_PID=""
 }
 
+configure_local_resolver() {
+    cat > /etc/resolv.conf <<EOF
+nameserver 127.0.0.1
+options ndots:0
+EOF
+    echo "[vpn] namespace resolver -> 127.0.0.1:$LOCAL_DNS_PORT"
+}
+
 start_local_dns_proxy() {
     stop_local_dns_proxy
     socat TCP4-LISTEN:"$LOCAL_DNS_PORT",bind=127.0.0.1,reuseaddr,fork TCP4:"$PIHOLE_DNS":53 &
     LOCAL_DNS_TCP_PID=$!
     socat UDP4-LISTEN:"$LOCAL_DNS_PORT",bind=127.0.0.1,reuseaddr,fork UDP4:"$PIHOLE_DNS":53 &
     LOCAL_DNS_UDP_PID=$!
+    configure_local_resolver
     echo "[vpn] local DNS 127.0.0.1:$LOCAL_DNS_PORT -> Pi-hole $PIHOLE_DNS:53"
 }
 
