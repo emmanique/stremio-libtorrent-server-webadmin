@@ -101,6 +101,24 @@ stop_local_dns_proxy() {
     LOCAL_DNS_UDP_PID=""
 }
 
+# Remove stale DNS proxies left behind by an earlier supervisor lifecycle.
+# Only processes matching the exact Stremio-managed socat listeners are killed.
+cleanup_stale_dns_proxies() {
+    for pid in $(pidof socat 2>/dev/null || true); do
+        [ -r "/proc/$pid/cmdline" ] || continue
+        cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+
+        case "$cmd" in
+            *"LISTEN:$DNS_PORT"*|*"LISTEN:$LOCAL_DNS_PORT,bind=127.0.0.1"*)
+                echo "[vpn] removing stale managed DNS proxy pid=$pid"
+                kill "$pid" >/dev/null 2>&1 || true
+                ;;
+        esac
+    done
+
+    sleep 1
+}
+
 configure_local_resolver() {
     cat > /etc/resolv.conf <<EOF
 nameserver 127.0.0.1
@@ -209,9 +227,11 @@ prepare_profile() {
 start_vpn_child() {
     prepare_profile || return 1
     stop_dns_proxy
-    # DIRECT mode owns 127.0.0.1:53. Release it before Gluetun starts its
-    # encrypted resolver on the same address/port.
     stop_local_dns_proxy
+    cleanup_stale_dns_proxies
+
+    # VPN mode gives exclusive ownership of DNS :53 to Gluetun.
+    # Never start the DIRECT local Pi-hole proxy while Gluetun is active.
     echo "[vpn] enabling VPN profile: $PROFILE_ID"
     echo "[vpn] allowed outbound LAN subnets: $FIREWALL_OUTBOUND_SUBNETS"
     /gluetun-entrypoint "$@" &
@@ -251,6 +271,7 @@ stop_vpn_child_for_direct() {
         VPN_PID=""
     fi
     restore_direct_network
+    cleanup_stale_dns_proxies
     start_dns_proxy "$DIRECT_DNS"
     start_local_dns_proxy
 }
@@ -274,6 +295,7 @@ DIRECT_DEFAULT=$(ip route show default 2>/dev/null | sed -n '1p' || true)
 # DIRECT is a normal supported state. The container and namespace remain alive
 # so Stremio configuration saves/restarts never depend on VPN availability.
 restore_direct_network
+cleanup_stale_dns_proxies
 start_dns_proxy "$DIRECT_DNS"
 start_local_dns_proxy
 touch "$READY_FILE"
