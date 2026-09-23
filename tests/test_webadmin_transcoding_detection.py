@@ -86,3 +86,18 @@ Input #0, matroska,webm, from 'input.mkv':
     telemetry = profiles.base.base
     assert telemetry._source_codec_from_log(log, "video") == "hevc"
     assert telemetry._source_codec_from_log(log, "audio") == "ac3"
+
+
+def test_runtime_fix_preserves_pid_telemetry_from_container_ps():
+    import transcoding_runtime_fix as runtime
+
+    command = "741 94.0 0.2 00:10 /usr/local/libexec/stremio/ffmpeg-real -i input.mkv -c:v copy out.m3u8"
+    argv, process = runtime._process_metadata(command)
+
+    assert argv.startswith("/usr/local/libexec/stremio/ffmpeg-real")
+    assert process == {
+        "pid": 741,
+        "cpuPercent": 94.0,
+        "memoryPercent": 0.2,
+        "elapsed": "00:10",
+    }
