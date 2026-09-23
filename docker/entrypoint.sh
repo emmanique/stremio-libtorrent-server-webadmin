@@ -28,11 +28,15 @@ if [ -n "${IPADDRESS}" ]; then
         # Time-box the fetch: on an offline / isolated (LAN-only, static-IP) network it would
         # otherwise hang on DNS/HTTP timeouts and block uvicorn from ever starting. On timeout we
         # fall through to the existing/self-signed cert so the server still comes up on the LAN.
-        if (cd /srv/stremio-server && timeout 30 node certificate.js --action fetch); then
-            cp /srv/stremio-server/certificates.pem "$CERT"
+        FETCHED_CERT="/srv/stremio-server/certificates.pem"
+        rm -f "$FETCHED_CERT"
+
+        if (cd /srv/stremio-server && timeout 30 node certificate.js --action fetch) \
+           && [ -s "$FETCHED_CERT" ]; then
+            cp "$FETCHED_CERT" "$CERT"
             HAVE_SROCKS=1
         else
-            echo "[entrypoint] stremio.rocks fetch failed -> falling back to existing/self-signed cert"
+            echo "[entrypoint] stremio.rocks fetch failed or produced no certificate -> falling back to existing/self-signed cert"
         fi
     fi
     # Both paths still do this: it depends on IPADDRESS, which can change between starts while the

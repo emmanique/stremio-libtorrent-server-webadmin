@@ -601,6 +601,19 @@ def restart():
             audit("server.restart.failed", detail)
             raise HTTPException(503, f"server restarted but health validation failed: {detail}")
 
+        # A successful Docker restart is not enough: prove that the new
+        # process sees the exact persistent configuration before reporting OK.
+        saved = read_config()
+        if saved:
+            try:
+                _verify_server_config(saved)
+            except OSError as exc:
+                audit("server.restart.failed", f"configuration verification: {exc}")
+                raise HTTPException(
+                    500,
+                    f"server is healthy but did not reload the persisted configuration: {exc}",
+                ) from exc
+
         audit("server.restart", f"startedAt={after}")
         return {
             "ok": True,
@@ -608,6 +621,7 @@ def restart():
             "startedAtBefore": before,
             "startedAtAfter": after,
             "configurationFile": str(CONFIG),
+            "configurationVerified": True,
         }
     except HTTPException:
         raise

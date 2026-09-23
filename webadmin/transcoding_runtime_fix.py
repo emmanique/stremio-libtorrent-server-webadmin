@@ -110,19 +110,47 @@ def _normalise_process_command(command: str) -> str | None:
 
 
 def _process_commands(container) -> list[str]:
-    try:
-        data = container.top(ps_args="-eo args")
-        rows = data.get("Processes", []) if isinstance(data, dict) else []
-        raw = [" ".join(str(x) for x in row) for row in rows]
-    except Exception:
+    """Discover FFmpeg inside the container and preserve process telemetry.
+
+    Docker top output varies between daemon/ps versions and, with shared network
+    namespaces, has proved too optimistic as the only source. Prefer an exec
+    inside the Stremio container; fall back to Docker top only when ps is absent.
+    """
+    raw: list[str] = []
+    result = _exec(container, ["sh", "-lc", "ps -eo pid=,pcpu=,pmem=,etime=,args= 2>/dev/null || true"])
+    if result is not None and result.exit_code == 0:
+        raw = result.output.decode("utf-8", errors="replace").splitlines()
+    if not raw:
         try:
-            data = container.top()
+            data = container.top(ps_args="-eo pid,pcpu,pmem,etime,args")
             rows = data.get("Processes", []) if isinstance(data, dict) else []
             raw = [" ".join(str(x) for x in row) for row in rows]
         except Exception:
-            return []
-    commands = [_normalise_process_command(command) for command in raw]
-    return [command for command in commands if command]
+            try:
+                data = container.top()
+                rows = data.get("Processes", []) if isinstance(data, dict) else []
+                raw = [" ".join(str(x) for x in row) for row in rows]
+            except Exception:
+                return []
+    return [command for command in raw if _normalise_process_command(command)]
+
+
+def _process_metadata(command: str) -> tuple[str, dict[str, object]]:
+    match = re.match(
+        r"^\s*(\d+)\s+([0-9.]+)\s+([0-9.]+)\s+(\S+)\s+(.*)$",
+        command,
+    )
+    if not match:
+        argv = _normalise_process_command(command) or command
+        return argv, {"pid": None, "cpuPercent": None, "memoryPercent": None, "elapsed": None}
+    pid, cpu, memory, elapsed, raw_argv = match.groups()
+    argv = _normalise_process_command(raw_argv) or raw_argv
+    return argv, {
+        "pid": int(pid),
+        "cpuPercent": float(cpu),
+        "memoryPercent": float(memory),
+        "elapsed": elapsed,
+    }
 
 
 def _engine(video_target: str | None, audio_target: str | None = None) -> str:
@@ -159,10 +187,11 @@ def _source_codecs_from_log(text: str) -> tuple[str | None, str | None]:
 
 
 def _session_from_command(container, cache_root: str, command: str) -> dict[str, object]:
-    tokens = base._tokens(command)
+    argv, process = _process_metadata(command)
+    tokens = base._tokens(argv)
     video_target = base._option(tokens, "-c:v", "-codec:v")
     audio_target = base._option(tokens, "-c:a", "-codec:a")
-    job_id = base._job_id(command)
+    job_id = base._job_id(argv)
     log_text = base._read_job_log(container, cache_root, job_id)
     decision = base._parse_policy_log(log_text)
     progress = base._parse_progress(log_text)
@@ -171,6 +200,7 @@ def _session_from_command(container, cache_root: str, command: str) -> dict[str,
     source_audio = decision.get("sourceAudio") if decision else log_audio
     return {
         "jobId": job_id,
+        **process,
         "action": base._action(video_target, audio_target),
         "engine": _engine(video_target, audio_target),
         "sourceVideo": source_video,
@@ -313,6 +343,48 @@ def transcoding_status():
                 "or the GPU overlay that exposes /dev/dri."
             )
         data["warnings"] = warnings
+        sessions = (
+            data.get("active", {}).get("sessions", [])
+            if isinstance(data.get("active"), dict)
+            else []
+        )
+        requested = {
+            "mode": policy.get("transcoding_mode"),
+            "hwaccel": policy.get("transcoding_hwaccel"),
+            "videoCodec": policy.get("transcoding_video_codec"),
+            "audioCodec": policy.get("transcoding_audio_codec"),
+            "fallbackCodec": policy.get("transcoding_fallback_codec"),
+        }
+        effective = {
+            **requested,
+            "runtimeReady": bool(runtime.get("ready")),
+            "vaapiReady": bool(
+                hardware.get("vaapiDevicePresent")
+                and (hardware.get("h264Vaapi") or hardware.get("hevcVaapi"))
+            ),
+        }
+        actual = {
+            "state": "active" if sessions else "idle",
+            "engines": data.get("active", {}).get("engines", [])
+            if isinstance(data.get("active"), dict)
+            else [],
+            "sessions": [
+                {
+                    "pid": session.get("pid"),
+                    "jobId": session.get("jobId"),
+                    "action": session.get("action"),
+                    "engine": session.get("engine"),
+                    "videoCodec": session.get("targetVideo"),
+                    "audioCodec": session.get("targetAudio"),
+                }
+                for session in sessions
+            ],
+        }
+        data["state"] = {
+            "requested": requested,
+            "effective": effective,
+            "actual": actual,
+        }
     except Exception as exc:
         data["runtime"] = {"ready": False, "message": str(exc)}
         data["warnings"] = [str(exc)]

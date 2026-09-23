@@ -114,7 +114,7 @@ def test_restart_reloads_saved_configuration_and_waits_for_health(tmp_path, monk
     app = _load_module("webadmin_app_restart_test", WEBADMIN_APP)
     config = tmp_path / "admin-settings.json"
     config.write_text('{"cache_size": 85899345920}\n', encoding="utf-8")
-    container = _FakeContainer()
+    container = _FakeContainer(config={"cache_size": 85899345920})
 
     monkeypatch.setattr(app, "CONFIG", config)
     monkeypatch.setattr(app, "client", lambda: _FakeDocker(container))
@@ -167,3 +167,22 @@ def test_restart_refuses_corrupt_saved_configuration(tmp_path, monkeypatch):
 
     assert exc.value.status_code == 500
     assert "unreadable" in str(exc.value.detail)
+
+
+def test_restart_verifies_persisted_configuration_after_health(tmp_path, monkeypatch):
+    app = _load_module("webadmin_app_restart_verify_test", WEBADMIN_APP)
+    config = tmp_path / "admin-settings.json"
+    expected = {"cache_size": 85_899_345_920, "max_streams": 3}
+    config.write_text(json.dumps(expected), encoding="utf-8")
+    container = _FakeContainer(config=expected)
+
+    monkeypatch.setattr(app, "CONFIG", config)
+    monkeypatch.setattr(app, "client", lambda: _FakeDocker(container))
+    monkeypatch.setattr(app, "_wait_for_server", lambda container=None, timeout=60.0: (True, ""))
+    monkeypatch.setattr(app, "audit", lambda *args, **kwargs: None)
+
+    result = app.restart()
+
+    assert result["ok"] is True
+    assert result["configurationVerified"] is True
+    assert container.restarts == 1

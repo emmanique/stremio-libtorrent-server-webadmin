@@ -58,6 +58,10 @@
           <div class="transcodeCard"><span>Encoder load</span><b id="tdEncoderLoad">—</b></div>
         </div>
         <div class="transcodeSummary" id="tdSummary">Loading effective transcoding policy…</div>
+        <div class="transcodeLatest">
+          <div><small>Requested → effective</small><code id="tdRequestedEffective">—</code></div>
+          <div><small>Actual runtime</small><code id="tdActualRuntime">—</code></div>
+        </div>
         <div class="transcodeHw" id="tdHardware"></div>
         <div class="transcodeSessions" id="tdSessions"><div class="empty">No active FFmpeg sessions</div></div>
         <div class="transcodeLatest">
@@ -124,6 +128,17 @@
       document.getElementById('tdEncoderLoad').textContent = 'Idle';
     }
     document.getElementById('tdSummary').textContent = data.policySummary || '—';
+    const state = data.state || {};
+    const requested = state.requested || {};
+    const effective = state.effective || {};
+    const actual = state.actual || {};
+    const requestedEffective = document.getElementById('tdRequestedEffective');
+    const actualRuntime = document.getElementById('tdActualRuntime');
+    if (requestedEffective) requestedEffective.textContent =
+      `${String(requested.mode || 'auto').toUpperCase()} / ${String(requested.hwaccel || 'auto').toUpperCase()} / ${requested.videoCodec || '—'} → ${effective.runtimeReady ? 'READY' : 'NOT READY'}`;
+    if (actualRuntime) actualRuntime.textContent = actual.state === 'active'
+      ? `${(actual.engines || []).map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${(actual.sessions || []).length} session(s)`
+      : 'IDLE · no FFmpeg process';
     document.getElementById('tdHardware').innerHTML = [
       chip(`VAAPI ${hw.vaapiDevice || ''}`, Boolean(hw.vaapiDevicePresent && (hw.h264Vaapi || hw.hevcVaapi)), !hw.vaapiDevicePresent),
       chip('H.264 VAAPI', Boolean(hw.h264Vaapi)),

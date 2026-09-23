@@ -77,6 +77,7 @@ legacy.DEFAULTS.update(TRANSCODING_DEFAULTS)
 # Import only after patching the shared legacy module. version_lifecycle ->
 # fork_update -> app reuses this same module object from sys.modules.
 import version_lifecycle as lifecycle  # noqa: E402
+from transcoding_policy_parser import parse_policy_log
 
 app = lifecycle.app
 STATIC = Path(__file__).with_name("static")
@@ -196,7 +197,8 @@ def _read_job_log(container, cache_root: str, job_id: str | None) -> str:
         return ""
     path = f"{cache_root}/transcode/{job_id}/ffmpeg.log"
     try:
-        result = container.exec_run(["tail", "-n", "80", path])
+        script = 'grep "\\[ffmpeg-policy\\]" "$1" 2>/dev/null | tail -n 1; tail -n 80 "$1"'
+        result = container.exec_run(["sh", "-c", script, "sh", path])
         if result.exit_code == 0:
             return result.output.decode("utf-8", errors="replace")
     except Exception:
@@ -207,7 +209,10 @@ def _read_job_log(container, cache_root: str, job_id: str | None) -> str:
 def _latest_job_log(container, cache_root: str) -> str:
     script = (
         'latest=$(ls -1t "$1"/transcode/*/ffmpeg.log 2>/dev/null | head -n 1); '
-        '[ -n "$latest" ] && tail -n 80 "$latest" || true'
+        'if [ -n "$latest" ]; then '
+        'grep "\\[ffmpeg-policy\\]" "$latest" 2>/dev/null | tail -n 1; '
+        'tail -n 80 "$latest"; '
+        'fi'
     )
     try:
         result = container.exec_run(["sh", "-c", script, "sh", cache_root])
@@ -217,21 +222,8 @@ def _latest_job_log(container, cache_root: str) -> str:
 
 
 def _parse_policy_log(text: str) -> dict[str, object] | None:
-    policy_lines = [line for line in text.replace("\r", "\n").splitlines() if "[ffmpeg-policy]" in line]
-    if not policy_lines:
-        return None
-    line = policy_lines[-1]
-    match = re.search(r"\[ffmpeg-policy\]\s+mode=(\S+)\s+(.*)$", line)
-    if not match:
-        return {"raw": line}
-    mode, decision = match.groups()
-    result: dict[str, object] = {"mode": mode, "decision": decision}
-    for kind in ("video", "audio"):
-        item = re.search(rf"{kind}=([^,\s]+)->([^,\s]+)", decision)
-        if item:
-            result[f"source{kind.title()}"] = item.group(1)
-            result[f"target{kind.title()}"] = item.group(2)
-    return result
+    """Parse FFmpeg policy telemetry using the canonical profile-aware parser."""
+    return parse_policy_log(text)
 
 
 def _parse_progress(text: str) -> dict[str, object] | None:

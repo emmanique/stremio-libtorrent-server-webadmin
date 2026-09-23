@@ -334,6 +334,24 @@ def _missing_credentials() -> list[str]:
     return [label for key, label in required.items() if not config.get(key)]
 
 
+def _wait_for_stremio_local(timeout: float = 30.0) -> tuple[bool, str | None]:
+    """Prove the server remains reachable inside the shared gateway namespace."""
+    deadline = time.monotonic() + timeout
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        container = _container(STREMIO_CONTAINER)
+        if container is not None:
+            try:
+                result = container.exec_run(["curl", "-fsS", "--max-time", "3", "http://127.0.0.1:11470/health"])
+                if result.exit_code == 0:
+                    return True, None
+                last_error = result.output.decode("utf-8", errors="replace").strip()
+            except Exception as exc:
+                last_error = str(exc)
+        time.sleep(1)
+    return False, last_error
+
+
 def _wait_for_vpn_running(timeout: float = 60.0) -> tuple[bool, str | None]:
     deadline = time.monotonic() + timeout
     last_error: str | None = None
@@ -372,6 +390,10 @@ def connect_vpn():
         _set_vpn_requested(True)
         _audit("vpn.enable", f"profile={active}")
         running, detail = _wait_for_vpn_running()
+        local_ok, local_detail = _wait_for_stremio_local()
+        if not local_ok:
+            _audit("vpn.enable.failed", f"stremio-health={local_detail}")
+            raise HTTPException(503, f"VPN changed state but Stremio local health failed: {local_detail}")
         return {
             "ok": True,
             "message": "VPN is running." if running else "VPN enable requested; connection is still converging.",
@@ -396,6 +418,10 @@ def disconnect_vpn():
         _set_vpn_requested(False)
         _audit("vpn.disable")
         time.sleep(2)
+        local_ok, local_detail = _wait_for_stremio_local()
+        if not local_ok:
+            _audit("vpn.disable.failed", f"stremio-health={local_detail}")
+            raise HTTPException(503, f"VPN disabled but Stremio local health failed: {local_detail}")
         return {
             "ok": True,
             "message": "VPN disabled. Gateway remains running in direct mode.",
@@ -421,6 +447,10 @@ def reconnect_vpn():
             pass
         _audit("vpn.reconnect")
         running, detail = _wait_for_vpn_running(timeout=45)
+        local_ok, local_detail = _wait_for_stremio_local()
+        if not local_ok:
+            _audit("vpn.reconnect.failed", f"stremio-health={local_detail}")
+            raise HTTPException(503, f"VPN reconnected but Stremio local health failed: {local_detail}")
         return {
             "ok": True,
             "message": "VPN reconnected." if running else "VPN restart requested; connection is still converging.",

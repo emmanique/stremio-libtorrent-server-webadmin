@@ -38,3 +38,39 @@ def test_legacy_mode_record_still_parses():
 
 def test_no_policy_record():
     assert parse_policy_log("ordinary ffmpeg output\n") is None
+
+
+def test_vaapi_full_h264_real_policy_record():
+    result = parse_policy_log(
+        "[ffmpeg-policy] profile=vaapi-full-h264; "
+        "video=copy(hevc)->h264_vaapi; "
+        "decode=vaapi; engine=vaapi\n"
+    )
+
+    assert result is not None
+    assert result["profile"] == "vaapi-full-h264"
+    assert result["upstreamVideoTarget"] == "copy(hevc)"
+    assert result["targetVideo"] == "h264_vaapi"
+    assert result["decision"] == (
+        "profile=vaapi-full-h264; "
+        "video=copy(hevc)->h264_vaapi; "
+        "decode=vaapi; engine=vaapi"
+    )
+
+
+def test_latest_policy_record_wins():
+    text = (
+        "[ffmpeg-policy] profile=cpu-h264; video=copy(hevc)->libx264; "
+        "decode=software; engine=cpu\n"
+        "ordinary ffmpeg output\n"
+        "[ffmpeg-policy] profile=vaapi-full-h264; "
+        "video=copy(hevc)->h264_vaapi; "
+        "decode=vaapi; engine=vaapi\n"
+    )
+
+    result = parse_policy_log(text)
+
+    assert result is not None
+    assert result["profile"] == "vaapi-full-h264"
+    assert result["targetVideo"] == "h264_vaapi"
+    assert "engine=vaapi" in result["decision"]

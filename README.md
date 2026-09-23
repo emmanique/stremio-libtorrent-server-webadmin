@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.7
+# Stremio Server WebAdmin 2.0.8
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,20 +6,20 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.7** integrates upstream server/core **1.6.15** while keeping the fork platform and WebAdmin on the independent **2.0.7** release line. It retains the validated 2.0.6 runtime topology, VPN/DNS behavior, hardware transcoding and Gluetun namespace lifecycle repair, and adds a live per-session transcoding monitor in WebAdmin.
+Version **2.0.8** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.8** release line. It stabilizes configuration persistence/restart verification, VPN/DNS transitions, trusted certificate handling, automatic VAAPI capability verification and live FFmpeg runtime/policy telemetry.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.7 at a glance
+## 2.0.8 at a glance
 
 ```text
 Upstream Core   1.6.15
 Upstream Server 1.6.15
-Fork            2.0.7
-WebAdmin        2.0.7
-VPN Gateway     2.0.7
+Fork            2.0.8
+WebAdmin        2.0.8
+VPN Gateway     2.0.8
 ```
 
 Version sources:
@@ -35,7 +35,7 @@ webadmin/WEBADMIN_VERSION
 
 ## What is implemented today
 
-The current 2.0.7 baseline includes the work completed across the 2.x release line:
+The current 2.0.8 baseline includes the work completed across the 2.x release line:
 
 - unified `compose.yaml` runtime for Stremio Server, WebAdmin, Pi-hole and the persistent Gluetun gateway;
 - VPN configuration and enable/disable lifecycle from WebAdmin, without a separate `compose.vpn.yaml`;
@@ -116,6 +116,26 @@ Policy              active ffmpeg-policy decision
 If the policy line does not expose the source codec, WebAdmin can recover it from the corresponding FFmpeg stream metadata in that session's log. Process telemetry is read-only and does not change the transcoding decision.
 
 This feature does **not** yet claim automatic client-capability detection. Unknown client playback capability continues to use the validated safe transcoding policy: compatible H.264 can remain Direct Stream while incompatible HEVC can be converted to H.264 using the selected hardware profile such as VAAPI.
+
+
+
+### 2.0.8 runtime stability and verified telemetry
+
+Version 2.0.8 hardens the 2.0.7 observability and runtime lifecycle without changing the integrated upstream core version.
+
+Key improvements include:
+
+- configuration save/read-back verification and restart validation;
+- explicit Requested, Effective and Actual transcoding state;
+- FFmpeg PID, CPU, memory, elapsed-time and per-session progress telemetry;
+- reliable parsing and preservation of the active `ffmpeg-policy` decision;
+- automatic VAAPI profile verification on a fresh WebAdmin process;
+- verified `vaapi-full-h264` hardware decode/encode execution when supported;
+- Stremio health validation across VPN enable/disable transitions;
+- hardened DIRECT-mode DNS forwarding through Pi-hole and the gateway resolver;
+- safer trusted-certificate refresh with validation before replacement.
+
+The integrated server/core remains **1.6.15**. Platform, WebAdmin and VPN gateway are released as **2.0.8**.
 
 
 ---

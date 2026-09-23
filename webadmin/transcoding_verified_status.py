@@ -17,14 +17,9 @@ import gluetun_admin
 import transcoding_profiles as base
 import vpn_admin
 import vpn_profiles
-from transcoding_policy_parser import parse_policy_log
 
 app = base.app
 _original_status = base.transcoding_status
-
-# Patch the parser in transcoding_config. runtime_fix and profiles ultimately use
-# this module object for active-session and latest-decision telemetry.
-base.base.base._parse_policy_log = parse_policy_log
 
 
 def _available(items: dict[str, dict[str, object]], *profile_ids: str) -> bool:
@@ -36,9 +31,28 @@ def transcoding_status():
     if not isinstance(data, dict):
         return data
 
+    # A fresh WebAdmin process starts with an empty in-memory profile cache.
+    # Populate it on the first status request so the dashboard reports
+    # runtime-verified capabilities instead of presenting supported encoders
+    # as unavailable until the operator manually presses Re-test hardware.
     cached = base.PROFILE_CACHE.get("value")
+    if not isinstance(cached, dict):
+        try:
+            cached = base._profiles()
+        except Exception:
+            # Capability probing must never make /api/transcoding/status fail.
+            # The existing not-tested state below remains the safe fallback.
+            cached = None
+
     if isinstance(cached, dict):
         profiles = cached.get("profiles") if isinstance(cached.get("profiles"), list) else []
+
+        # _original_status() may have been built before the first runtime
+        # profile probe populated PROFILE_CACHE. Keep this same response
+        # internally consistent with the capabilities established below.
+        data["verifiedProfiles"] = profiles
+        data["profilesCheckedAt"] = cached.get("checkedAt")
+
         items = {str(item.get("id")): item for item in profiles if isinstance(item, dict)}
         hardware = data.get("hardware") if isinstance(data.get("hardware"), dict) else {}
         hardware["h264Vaapi"] = _available(items, "vaapi-h264", "vaapi-full-h264")
