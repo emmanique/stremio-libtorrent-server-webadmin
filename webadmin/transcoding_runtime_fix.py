@@ -343,6 +343,48 @@ def transcoding_status():
                 "or the GPU overlay that exposes /dev/dri."
             )
         data["warnings"] = warnings
+        sessions = (
+            data.get("active", {}).get("sessions", [])
+            if isinstance(data.get("active"), dict)
+            else []
+        )
+        requested = {
+            "mode": policy.get("transcoding_mode"),
+            "hwaccel": policy.get("transcoding_hwaccel"),
+            "videoCodec": policy.get("transcoding_video_codec"),
+            "audioCodec": policy.get("transcoding_audio_codec"),
+            "fallbackCodec": policy.get("transcoding_fallback_codec"),
+        }
+        effective = {
+            **requested,
+            "runtimeReady": bool(runtime.get("ready")),
+            "vaapiReady": bool(
+                hardware.get("vaapiDevicePresent")
+                and (hardware.get("h264Vaapi") or hardware.get("hevcVaapi"))
+            ),
+        }
+        actual = {
+            "state": "active" if sessions else "idle",
+            "engines": data.get("active", {}).get("engines", [])
+            if isinstance(data.get("active"), dict)
+            else [],
+            "sessions": [
+                {
+                    "pid": session.get("pid"),
+                    "jobId": session.get("jobId"),
+                    "action": session.get("action"),
+                    "engine": session.get("engine"),
+                    "videoCodec": session.get("targetVideo"),
+                    "audioCodec": session.get("targetAudio"),
+                }
+                for session in sessions
+            ],
+        }
+        data["state"] = {
+            "requested": requested,
+            "effective": effective,
+            "actual": actual,
+        }
     except Exception as exc:
         data["runtime"] = {"ready": False, "message": str(exc)}
         data["warnings"] = [str(exc)]
