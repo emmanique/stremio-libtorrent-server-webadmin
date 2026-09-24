@@ -71,6 +71,7 @@ def test_hevc_copy_is_transcoded_to_h264_vaapi_when_not_direct(monkeypatch):
     args = ["-hide_banner", "-i", "https://example.invalid/video", "-map", "0:v:0", "-c:v", "copy", "-c:a", "aac", "-f", "hls", "index.m3u8"]
     monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: "hevc")
     monkeypatch.setattr(wrapper, "_available_encoders", lambda: {"h264_vaapi"})
+    monkeypatch.setattr(wrapper, "_probe_video_format", lambda args: {"codec_name": "hevc", "profile": "Main", "pix_fmt": "yuv420p"})
     monkeypatch.setattr(wrapper.os.path, "exists", lambda path: True)
     transformed, decision = wrapper._apply_profile(args, "vaapi-full-h264", {"transcoding_direct_video_codecs": "h264", "transcoding_vaapi_device": "/dev/dri/renderD128", "transcoding_video_quality": 22})
     assert transformed != args
@@ -107,3 +108,38 @@ def test_legacy_copy_mode_without_explicit_profile_is_passthrough():
     transformed, decision = wrapper._legacy_passthrough(args, {"transcoding_mode": "copy"})
     assert transformed == args
     assert "legacy settings detected (copy)" in decision
+
+
+
+def test_full_vaapi_falls_back_to_software_decode_for_hevc_main10(monkeypatch):
+    args = [
+        "-hide_banner", "-i", "https://example.invalid/video",
+        "-map", "0:v:0", "-c:v", "copy", "-c:a", "aac",
+        "-f", "hls", "index.m3u8",
+    ]
+    monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: "hevc")
+    monkeypatch.setattr(
+        wrapper,
+        "_probe_video_format",
+        lambda args: {"codec_name": "hevc", "profile": "Main 10", "pix_fmt": "yuv420p10le"},
+    )
+    monkeypatch.setattr(wrapper, "_available_encoders", lambda: {"h264_vaapi"})
+    monkeypatch.setattr(wrapper.os.path, "exists", lambda path: True)
+
+    transformed, decision = wrapper._apply_profile(
+        args,
+        "vaapi-full-h264",
+        {
+            "transcoding_direct_video_codecs": "h264",
+            "transcoding_vaapi_device": "/dev/dri/renderD128",
+            "transcoding_video_quality": 22,
+        },
+    )
+
+    assert transformed[transformed.index("-c:v") + 1] == "h264_vaapi"
+    assert "-hwaccel" not in transformed
+    assert transformed[transformed.index("-vaapi_device") + 1] == "/dev/dri/renderD128"
+    assert "format=nv12,hwupload" in transformed[transformed.index("-vf") + 1]
+    assert "decode=software" in decision
+    assert "decode fallback=software" in decision
+    assert "pix_fmt=yuv420p10le" in decision
