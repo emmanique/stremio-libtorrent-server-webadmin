@@ -186,3 +186,26 @@ def test_restart_verifies_persisted_configuration_after_health(tmp_path, monkeyp
     assert result["ok"] is True
     assert result["configurationVerified"] is True
     assert container.restarts == 1
+
+
+
+def test_clear_all_logs_resets_file_logs_and_sets_docker_cursors(tmp_path, monkeypatch):
+    app = _load_module("webadmin_app_log_clear_test", WEBADMIN_APP)
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "admin.log").write_text("old admin\n", encoding="utf-8")
+    (state / "update-result.json").write_text('{"status":"old"}\n', encoding="utf-8")
+
+    monkeypatch.setattr(app, "STATE", state)
+    monkeypatch.setattr(app, "LOG_CURSOR_FILE", state / "log-cursors.json")
+    monkeypatch.setattr(app, "audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app.time, "time", lambda: 1234567890.0)
+
+    result = app.clear_logs(app.LogBody(source=None))
+
+    assert set(result["cleared"]) == {"application", "container", "admin", "updater"}
+    assert (state / "admin.log").read_text(encoding="utf-8") == ""
+    assert (state / "update-result.json").read_text(encoding="utf-8") == ""
+    cursors = json.loads((state / "log-cursors.json").read_text(encoding="utf-8"))
+    assert cursors["application"] == 1234567890.0
+    assert cursors["container"] == 1234567890.0
