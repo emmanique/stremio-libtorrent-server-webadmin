@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import zlib
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
