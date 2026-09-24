@@ -11,11 +11,14 @@ use for one.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
+import zlib
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -65,6 +68,13 @@ class DownloadBody(BaseModel):
 
 class RemoveBody(BaseModel):
     infoHash: str
+
+
+class PlayerLinkBody(BaseModel):
+    infoHash: str
+    fileIdx: int | None = None
+    name: str | None = None
+    filename: str | None = None
 
 
 def _settings(request: Request):
@@ -247,6 +257,40 @@ def destroy_session(request: Request, response: Response) -> dict:
 def state(request: Request) -> dict:
     s = _settings(request)
     return statemod.build(s.cache_root, request.app.state.engine, budget=int(s.cache_size))
+
+
+def _player_link(body: PlayerLinkBody) -> str:
+    """Build the canonical Stremio Web player deep-link for one cached torrent file.
+
+    My Library deliberately hands playback to the bundled Stremio player instead of growing a
+    second media player. That preserves the player's native audio/subtitle selectors, torrent
+    statistics/traffic panel, casting controls and its existing direct-stream/transcode policy.
+    Stremio encodes a Stream as JSON -> zlib level 0 -> standard base64 -> URI component.
+    """
+    info_hash = (body.infoHash or "").lower()
+    if not _INFOHASH_RE.match(info_hash):
+        raise HTTPException(status_code=400, detail="invalid infohash")
+    if body.fileIdx is not None and body.fileIdx < 0:
+        raise HTTPException(status_code=400, detail="invalid file index")
+
+    stream: dict = {
+        "infoHash": info_hash,
+        "fileIdx": body.fileIdx,
+        "announce": [],
+    }
+    if body.name:
+        stream["name"] = body.name
+    if body.filename:
+        stream["behaviorHints"] = {"filename": body.filename}
+
+    raw = json.dumps(stream, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    token = base64.b64encode(zlib.compress(raw, level=0)).decode("ascii")
+    return "/#/player/" + quote(token, safe="")
+
+
+@router.post("/api/player-link", dependencies=[Depends(require_session)])
+def player_link(body: PlayerLinkBody) -> dict:
+    return {"url": _player_link(body)}
 
 
 def _engine_or_503(request: Request):
