@@ -116,9 +116,7 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
             item = f"s:{index},sgroup:subs,default:{'yes' if index == 0 else 'no'}"
             lang = _hls_lang(track)
             if lang:
-                item += f",language:{lang},sname:{lang}"
-            else:
-                item += f",sname:Subtitle_{index + 1}"
+                item += f",language:{lang}"
             variants.append(item)
         video = "v:0"
         if audio_tracks:
