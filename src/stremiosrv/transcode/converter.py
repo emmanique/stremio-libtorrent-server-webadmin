@@ -18,6 +18,34 @@ from stremiosrv import metrics
 
 logger = logging.getLogger("stremiosrv.transcode")
 
+# Text subtitle codecs FFmpeg can losslessly/meaningfully convert to WebVTT. Bitmap subtitle
+# formats (PGS/DVD/DVB) are intentionally omitted: feeding one to the webvtt encoder aborts the
+# entire HLS job and would turn a working video/audio transcode into a playback failure.
+_TEXT_SUBTITLE_CODECS = {
+    "ass", "ssa", "subrip", "srt", "text", "mov_text", "webvtt", "microdvd", "mpl2", "jacosub",
+}
+
+
+def _hls_tracks(decision: dict) -> tuple[list[dict], list[dict]]:
+    streams = decision.get("_streams") or []
+    audio = [s for s in streams if s.get("track") == "audio" and s.get("index") is not None]
+    subtitles = [
+        s for s in streams
+        if s.get("track") == "subtitle"
+        and s.get("index") is not None
+        and str(s.get("codec") or "").lower() in _TEXT_SUBTITLE_CODECS
+    ]
+    return audio[:10], subtitles[:10]
+
+
+def _hls_lang(track: dict) -> str | None:
+    value = str(track.get("lang") or "").strip()
+    if not value:
+        return None
+    # var_stream_map is a comma/space-delimited mini-language. Keep metadata from becoming syntax.
+    cleaned = "".join(ch for ch in value if ch.isalnum() or ch in "_-")
+    return cleaned[:24] or None
+
 
 def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: str | Path) -> list[str]:
     out_dir = str(out_dir)
@@ -31,8 +59,16 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
         elif profile and profile.startswith("vaapi"):
             argv += ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
 
+    audio_tracks, subtitle_tracks = _hls_tracks(decision)
+    multitrack = len(audio_tracks) > 1 or bool(subtitle_tracks)
+
     argv += ["-i", media_url, "-map", "0:v:0"]
-    if a is not None:
+    if multitrack:
+        for track in audio_tracks:
+            argv += ["-map", f"0:{track['index']}?"]
+        for track in subtitle_tracks:
+            argv += ["-map", f"0:{track['index']}?"]
+    elif a is not None:
         argv += ["-map", "0:a:0?"]
 
     # Video
@@ -54,20 +90,62 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
                 argv += ["-vf", f"scale={w}:-2:flags=lanczos"]
             argv += ["-c:v", "libx264", "-preset", "veryfast"]
 
-    # Audio
-    if a is not None:
+    # Audio. A multi-track HLS presentation normalises every rendition to AAC stereo so the
+    # browser can switch tracks reliably even when the source mixes E-AC3/DTS/TrueHD/etc. The old
+    # single-track path keeps its copy/transcode decision unchanged.
+    if multitrack and audio_tracks:
+        argv += ["-c:a", "aac", "-ac", "2", "-b:a", "384k"]
+    elif a is not None:
         if a.get("action") == "copy":
             argv += ["-c:a", "copy"]
         else:
             argv += ["-c:a", "aac", "-ac", "2", "-ab", "384000"]
 
-    argv += [
-        "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "event",
-        "-hls_segment_type", "fmp4", "-hls_flags", "independent_segments",
-        "-hls_fmp4_init_filename", "init.mp4",
-        "-hls_segment_filename", f"{out_dir}/seg%d.m4s",
-        "-master_pl_name", "master.m3u8", f"{out_dir}/index.m3u8",
-    ]
+    if subtitle_tracks:
+        argv += ["-c:s", "webvtt"]
+
+    if multitrack:
+        variants: list[str] = []
+        for index, track in enumerate(audio_tracks):
+            item = f"a:{index},agroup:audio,default:{'yes' if index == 0 else 'no'}"
+            lang = _hls_lang(track)
+            if lang:
+                item += f",language:{lang}"
+            variants.append(item)
+        for index, track in enumerate(subtitle_tracks):
+            item = f"s:{index},sgroup:subs,default:{'yes' if index == 0 else 'no'}"
+            lang = _hls_lang(track)
+            if lang:
+                item += f",language:{lang},sname:{lang}"
+            else:
+                item += f",sname:Subtitle_{index + 1}"
+            variants.append(item)
+        video = "v:0"
+        if audio_tracks:
+            video += ",agroup:audio"
+        if subtitle_tracks:
+            video += ",sgroup:subs"
+        variants.append(video)
+
+        # FFmpeg's HLS muxer emits EXT-X-MEDIA renditions for audio and WebVTT subtitles when
+        # var_stream_map contains agroup/sgroup entries. MPEG-TS is deliberately used on this path:
+        # subtitle renditions are WebVTT side playlists, while H.264/AAC remain broadly supported.
+        argv += [
+            "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "event",
+            "-hls_segment_type", "mpegts", "-hls_flags", "independent_segments",
+            "-hls_segment_filename", f"{out_dir}/seg_%v_%d.ts",
+            "-hls_subtitle_path", f"{out_dir}/sub_%v.m3u8",
+            "-var_stream_map", " ".join(variants),
+            "-master_pl_name", "master.m3u8", f"{out_dir}/stream_%v.m3u8",
+        ]
+    else:
+        argv += [
+            "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "event",
+            "-hls_segment_type", "fmp4", "-hls_flags", "independent_segments",
+            "-hls_fmp4_init_filename", "init.mp4",
+            "-hls_segment_filename", f"{out_dir}/seg%d.m4s",
+            "-master_pl_name", "master.m3u8", f"{out_dir}/index.m3u8",
+        ]
     return argv
 
 

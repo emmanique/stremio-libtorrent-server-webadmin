@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.12
+# Stremio Server WebAdmin 2.0.13
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,13 +6,22 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.12** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.12** release line. It is a runtime-reliability hotfix for VAAPI transcoding, WebAdmin log clearing, configuration/restart feedback and My Library playback controls.
+Version **2.0.13** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.13** release line. It extends the validated 2.0.12 runtime baseline with multi-audio and text-subtitle HLS renditions for the native Stremio player.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.12 at a glance
+## 2.0.13 at a glance
+
+- **Multi-audio HLS:** transcoded playback exposes every probed audio track as an HLS audio rendition instead of keeping only the first track.
+- **Selectable subtitles:** supported text subtitle tracks are converted to WebVTT and published as HLS subtitle renditions, enabling the native player selector.
+- **Safe subtitle filtering:** bitmap subtitle codecs such as PGS/DVD/DVB are not sent to the WebVTT encoder, preventing a subtitle incompatibility from killing playback.
+- **Browser-compatible audio:** multi-track presentations normalise alternate tracks to AAC stereo; the established single-track HLS path stays unchanged.
+- **VAAPI baseline preserved:** the 2.0.12 HEVC Main 10 software-decode + VAAPI-encode path is not changed by this release.
+
+### 2.0.12 runtime reliability baseline
+
 
 ```text
 Upstream Core   1.6.15
@@ -597,9 +606,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.12
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.12
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.12
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.13
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.13
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.13
 ```
 
 Stable moving aliases:
@@ -614,9 +623,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.12
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.12
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.12
+edmanique/stremio-libtorrent-server-webadmin:2.0.13
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.13
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.13
 ```
 
 ---

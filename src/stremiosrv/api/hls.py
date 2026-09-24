@@ -72,6 +72,10 @@ def master(
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
+    # The fingerprint decision historically carried only the selected primary audio action. Preserve
+    # the full probed stream inventory as private converter metadata so HLS can expose alternate
+    # audio and text-subtitle renditions without changing the public fingerprint contract.
+    dec["_streams"] = list(pr.get("streams") or [])
     try:
         d = conv.ensure_job(job_id, mediaURL, dec)
     except ValueError as e:
@@ -112,5 +116,12 @@ def serve_file(job_id: str, filename: str, request: Request):
         raise HTTPException(status_code=404, detail="segment not found")
     if is_playlist:
         return FileResponse(path, media_type=_M3U8)
-    media_type = "video/mp4" if filename.endswith(".mp4") else "video/iso.segment"
+    if filename.endswith(".vtt"):
+        media_type = "text/vtt"
+    elif filename.endswith(".ts"):
+        media_type = "video/mp2t"
+    elif filename.endswith(".mp4"):
+        media_type = "video/mp4"
+    else:
+        media_type = "video/iso.segment"
     return FileResponse(path, media_type=media_type)
