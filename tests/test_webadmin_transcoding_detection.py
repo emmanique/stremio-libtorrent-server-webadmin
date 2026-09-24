@@ -14,14 +14,14 @@ def _item(profile_id: str, available: bool) -> dict[str, object]:
     return {"id": profile_id, "available": available}
 
 
-def test_recommends_full_vaapi_h264_before_encode_only_and_cpu():
+def test_recommends_encode_only_vaapi_h264_before_full_pipeline_and_cpu():
     items = [
         _item("preserve", True),
         _item("vaapi-h264", True),
         _item("vaapi-full-h264", True),
         _item("cpu-h264", True),
     ]
-    assert profiles._recommended_profile(items) == "vaapi-full-h264"
+    assert profiles._recommended_profile(items) == "vaapi-h264"
 
 
 def test_recommends_encode_only_vaapi_when_full_pipeline_is_unavailable():
