@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.8
+# Stremio Server WebAdmin 2.0.11
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,20 +6,20 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.8** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.8** release line. It stabilizes configuration persistence/restart verification, VPN/DNS transitions, trusted certificate handling, automatic VAAPI capability verification and live FFmpeg runtime/policy telemetry.
+Version **2.0.11** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.11** release line. It stabilizes configuration persistence/restart verification, VPN/DNS transitions, trusted certificate handling, automatic VAAPI capability verification and live FFmpeg runtime/policy telemetry.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.8 at a glance
+## 2.0.11 at a glance
 
 ```text
 Upstream Core   1.6.15
 Upstream Server 1.6.15
-Fork            2.0.8
-WebAdmin        2.0.8
-VPN Gateway     2.0.8
+Fork            2.0.11
+WebAdmin        2.0.11
+VPN Gateway     2.0.11
 ```
 
 Version sources:
@@ -34,6 +34,19 @@ webadmin/WEBADMIN_VERSION
 `SERVER_VERSION` and `pyproject.toml` must match the integrated upstream server/core release. `FORK_VERSION` and `webadmin/WEBADMIN_VERSION` must match the 2.x fork release. These version lines are intentionally independent.
 
 ## What is implemented today
+
+### 2.0.11 My Library native player hand-off
+
+My Library can now launch cached/downloaded media directly into the bundled Stremio Web player instead of maintaining a second playback implementation.
+
+- **Watch** is available on playable cached/downloaded titles.
+- Multi-file season packs expose per-file/episode play controls when the torrent file index is known.
+- The hand-off uses Stremio's canonical encoded torrent Stream deep-link, so playback keeps the standard **audio-track selector**, **subtitle selector**, **torrent traffic/statistics panel**, casting controls and the existing direct-stream/transcoding policy.
+- When a single file index is not known, My Library can leave `fileIdx` unset and let the streaming server perform its normal media-file selection.
+- Orphaned part files are never exposed as playable media.
+
+This keeps My Library focused on catalog/download/cache management while the established Stremio player remains the single playback surface.
+
 
 The current 2.0.8 baseline includes the work completed across the 2.x release line:
 
