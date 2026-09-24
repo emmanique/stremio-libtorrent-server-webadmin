@@ -76,6 +76,11 @@
   .rel2 { color:#6f6a95; font-size:11px; text-align:center; margin-top:2px;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .dl { display:block; width:100%; margin-top:6px; }
+  button.watch { background:var(--accent2); }
+  .kid { display:flex; align-items:center; gap:6px; text-align:left; }
+  .kid > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  button.kidwatch { flex:0 0 auto; width:27px; height:27px; padding:0; border-radius:50%;
+                    background:var(--accent2); line-height:27px; }
 
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:7px 12px; cursor:pointer; font:inherit; font-size:13px; }
@@ -405,13 +410,21 @@ const LIB = (() => {
     const kids = e.children || [];
     if (!kids.length) return '';
     const scrapsHtml = e.scraps && e.scraps.count
-      ? `<div class="kid dim">${esc('+' + e.scraps.count + ' partial file'
-          + (e.scraps.count === 1 ? '' : 's') + ' \u00b7 ' + fmt(e.scraps.size))}</div>`
+      ? `<div class="kid dim"><span>${esc('+' + e.scraps.count + ' partial file'
+          + (e.scraps.count === 1 ? '' : 's') + ' \u00b7 ' + fmt(e.scraps.size))}</span></div>`
       : '';
-    return `<div class="kids">${scrapsHtml}${kids.map(k => `<div class="kid${
-        k.wanted ? '' : ' dim'}" title="${esc(k.name)}">${esc(shortFile(k.name))} ${esc(fmt(k.size))
-      }${k.progress < 1 ? esc(' \u00b7 ' + Math.round(k.progress * 100) + '%') : ''}</div>`
-    ).join('')}</div>`;
+    return `<div class="kids">${scrapsHtml}${kids.map(k => {
+      const text = shortFile(k.name) + ' ' + fmt(k.size)
+        + (k.progress < 1 ? ' \u00b7 ' + Math.round(k.progress * 100) + '%' : '');
+      const watch = k.infoHash && Number.isInteger(k.fileIdx)
+        ? `<button class="kidwatch" data-watch="${esc(k.infoHash)}"
+             data-fileidx="${k.fileIdx}" data-filename="${esc(k.name || '')}"
+             data-watchname="${esc(shortFile(k.name) || k.name || '')}"
+             title="Watch in Stremio player">&#9654;</button>`
+        : '';
+      return `<div class="kid${k.wanted ? '' : ' dim'}" title="${esc(k.name)}"><span>${
+        esc(text)}</span>${watch}</div>`;
+    }).join('')}</div>`;
   };
 
   const releaseHtml = (e, title) => {
@@ -420,6 +433,33 @@ const LIB = (() => {
     const rel = e.wantedFile || e.name || '';
     if (!rel || norm(rel) === norm(title)) return '';
     return `<div class="rel2" title="${esc(rel)}">${esc(rel)}</div>`;
+  };
+
+  // A cached title should play through the same bundled Stremio player as an online stream. That
+  // player already owns audio/subtitle selection, torrent statistics and traffic, casting and
+  // transcoding decisions. My Library therefore generates a normal Stream deep-link instead of
+  // maintaining a second, inevitably-divergent player.
+  const primaryFile = e => {
+    const files = (e.files || []).filter(f => Number.isInteger(f.index));
+    const wanted = files.filter(f => f.wanted);
+    if (wanted.length === 1) return wanted[0];
+    if (files.length === 1) return files[0];
+    return null;
+  };
+
+  const watchHtml = (e, title) => {
+    if (!e.infoHash || e.kind === 'orphan') return '';
+    const kids = e.children || [];
+    // A pack with multiple visible episodes must be explicit: each child has its own play button.
+    // Guessing from the parent can silently open the wrong episode.
+    if (kids.length > 1) return '';
+    const file = primaryFile(e) || (kids.length === 1 ? kids[0] : null);
+    const idx = file && Number.isInteger(file.index) ? file.index
+              : file && Number.isInteger(file.fileIdx) ? file.fileIdx : null;
+    const filename = (file && file.name) || e.wantedFile || e.name || '';
+    return `<button class="dl watch" data-watch="${esc(e.infoHash)}"${
+      idx == null ? '' : ` data-fileidx="${idx}"`
+    } data-filename="${esc(filename)}" data-watchname="${esc(title)}">Watch</button>`;
   };
 
   const cardHtml = e => {
@@ -450,6 +490,7 @@ const LIB = (() => {
           e.pinned ? 'Kept: the evictor may not reclaim this. Click to stop keeping it.'
                    : 'Cached: the evictor may reclaim this. Click to keep it.'
         }">${e.pinned ? 'Kept' : 'Keep'}</button>` : ''}
+      ${watchHtml(e, title)}
       <div class="sub">${esc(downloading ? busyLine(e) : subLine(e))}</div>
       ${releaseHtml(e, title)}
       ${childrenHtml(e)}
@@ -548,6 +589,29 @@ const LIB = (() => {
         await api('/library/api/remove', { method: 'POST',
           body: JSON.stringify({ infoHash: btn.dataset.remove }) });
         await loadState();
+      };
+    });
+    document.querySelectorAll('[data-watch]').forEach(btn => {
+      btn.onclick = async ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        btn.disabled = true;
+        $('status').textContent = '';
+        try {
+          const raw = btn.dataset.fileidx;
+          const parsed = raw === undefined || raw === '' ? null : Number(raw);
+          const out = await api('/library/api/player-link', { method: 'POST',
+            body: JSON.stringify({
+              infoHash: btn.dataset.watch,
+              fileIdx: Number.isInteger(parsed) ? parsed : null,
+              name: btn.dataset.watchname || btn.dataset.filename || null,
+              filename: btn.dataset.filename || null,
+            }) });
+          window.location.assign(out.url);
+        } catch (e) {
+          btn.disabled = false;
+          $('status').textContent = 'Could not open the player.';
+        }
       };
     });
     // Only the offline markers, never a rebuild: renderBoard re-fetches every catalog, and doing
