@@ -297,7 +297,12 @@ def health():
 
 @app.get("/")
 def home():
-    return FileResponse(STATIC / "index.html")
+    # The WebAdmin JavaScript is embedded in index.html. Never let a browser keep an older action
+    # handler across an image upgrade: stale UI code can make a healthy backend look broken.
+    return FileResponse(
+        STATIC / "index.html",
+        headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @app.get("/theme-background.jpg")

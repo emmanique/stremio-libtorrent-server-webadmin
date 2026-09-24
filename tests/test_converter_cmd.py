@@ -46,7 +46,7 @@ def test_no_audio_stream():
     assert "0:a:0?" not in cmd
 
 
-def test_multitrack_hls_exposes_audio_group_and_webvtt_subtitles():
+def test_multitrack_hls_exposes_audio_group_and_keeps_subtitles_native():
     decision = {
         "video": {"action": "transcode", "scale_width": 1920},
         "audio": {"action": "transcode"},
@@ -55,24 +55,24 @@ def test_multitrack_hls_exposes_audio_group_and_webvtt_subtitles():
             {"track": "audio", "index": 1, "codec": "eac3", "lang": "eng"},
             {"track": "audio", "index": 2, "codec": "aac", "lang": "por"},
             {"track": "subtitle", "index": 3, "codec": "subrip", "lang": "eng"},
-            {"track": "subtitle", "index": 4, "codec": "ass", "lang": "por"},
         ],
     }
     cmd = build_hls_cmd("http://x/0", decision, "vaapi-renderD128", "/tmp/j")
     stream_map = cmd[cmd.index("-var_stream_map") + 1]
     assert "a:0,agroup:audio,default:yes,language:eng" in stream_map
     assert "a:1,agroup:audio,default:no,language:por" in stream_map
-    assert "s:0,sgroup:subs,default:yes,language:eng,sname:eng" in stream_map
-    assert "s:1,sgroup:subs,default:no,language:por,sname:por" in stream_map
-    assert "v:0,agroup:audio,sgroup:subs" in stream_map
-    assert "-c:s" in cmd and "webvtt" in cmd
-    assert "-hls_subtitle_path" in cmd
+    assert "v:0,agroup:audio" in stream_map
+    assert "sgroup:" not in stream_map
+    assert "sname:" not in stream_map
+    assert "-c:s" not in cmd
+    assert "0:3?" not in cmd
+    assert "-hls_subtitle_path" not in cmd
     assert "mpegts" in cmd
     assert "/tmp/j/stream_%v.m3u8" in cmd
-    assert cmd.count("-map") == 5
+    assert cmd.count("-map") == 3
 
 
-def test_bitmap_subtitles_do_not_break_multitrack_hls():
+def test_bitmap_subtitles_are_not_mapped_into_hls_audio_renditions():
     decision = {
         "video": {"action": "copy"},
         "audio": {"action": "copy"},

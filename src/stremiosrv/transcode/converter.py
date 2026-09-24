@@ -18,24 +18,9 @@ from stremiosrv import metrics
 
 logger = logging.getLogger("stremiosrv.transcode")
 
-# Text subtitle codecs FFmpeg can losslessly/meaningfully convert to WebVTT. Bitmap subtitle
-# formats (PGS/DVD/DVB) are intentionally omitted: feeding one to the webvtt encoder aborts the
-# entire HLS job and would turn a working video/audio transcode into a playback failure.
-_TEXT_SUBTITLE_CODECS = {
-    "ass", "ssa", "subrip", "srt", "text", "mov_text", "webvtt", "microdvd", "mpl2", "jacosub",
-}
-
-
-def _hls_tracks(decision: dict) -> tuple[list[dict], list[dict]]:
+def _hls_audio_tracks(decision: dict) -> list[dict]:
     streams = decision.get("_streams") or []
-    audio = [s for s in streams if s.get("track") == "audio" and s.get("index") is not None]
-    subtitles = [
-        s for s in streams
-        if s.get("track") == "subtitle"
-        and s.get("index") is not None
-        and str(s.get("codec") or "").lower() in _TEXT_SUBTITLE_CODECS
-    ]
-    return audio[:10], subtitles[:10]
+    return [s for s in streams if s.get("track") == "audio" and s.get("index") is not None][:10]
 
 
 def _hls_lang(track: dict) -> str | None:
@@ -59,14 +44,12 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
         elif profile and profile.startswith("vaapi"):
             argv += ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
 
-    audio_tracks, subtitle_tracks = _hls_tracks(decision)
-    multitrack = len(audio_tracks) > 1 or bool(subtitle_tracks)
+    audio_tracks = _hls_audio_tracks(decision)
+    multitrack = len(audio_tracks) > 1
 
     argv += ["-i", media_url, "-map", "0:v:0"]
     if multitrack:
         for track in audio_tracks:
-            argv += ["-map", f"0:{track['index']}?"]
-        for track in subtitle_tracks:
             argv += ["-map", f"0:{track['index']}?"]
     elif a is not None:
         argv += ["-map", "0:a:0?"]
@@ -101,9 +84,6 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
         else:
             argv += ["-c:a", "aac", "-ac", "2", "-ab", "384000"]
 
-    if subtitle_tracks:
-        argv += ["-c:s", "webvtt"]
-
     if multitrack:
         variants: list[str] = []
         for index, track in enumerate(audio_tracks):
@@ -112,29 +92,18 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
             if lang:
                 item += f",language:{lang}"
             variants.append(item)
-        for index, track in enumerate(subtitle_tracks):
-            item = f"s:{index},sgroup:subs,default:{'yes' if index == 0 else 'no'}"
-            lang = _hls_lang(track)
-            if lang:
-                item += f",language:{lang},sname:{lang}"
-            else:
-                item += f",sname:Subtitle_{index + 1}"
-            variants.append(item)
-        video = "v:0"
-        if audio_tracks:
-            video += ",agroup:audio"
-        if subtitle_tracks:
-            video += ",sgroup:subs"
+        video = "v:0,agroup:audio"
         variants.append(video)
 
-        # FFmpeg's HLS muxer emits EXT-X-MEDIA renditions for audio and WebVTT subtitles when
-        # var_stream_map contains agroup/sgroup entries. MPEG-TS is deliberately used on this path:
-        # subtitle renditions are WebVTT side playlists, while H.264/AAC remain broadly supported.
+        # FFmpeg reliably supports alternate audio as separate HLS renditions. Embedded subtitles
+        # deliberately stay on Stremio's native /subtitles.json + /subtitles.vtt path: FFmpeg HLS
+        # cannot represent subtitle-only variants, and doing so caused 2.0.13 to abort before
+        # writing master.m3u8. Keeping subtitle delivery separate also preserves the player's
+        # existing language/track discovery contract.
         argv += [
             "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "event",
             "-hls_segment_type", "mpegts", "-hls_flags", "independent_segments",
             "-hls_segment_filename", f"{out_dir}/seg_%v_%d.ts",
-            "-hls_subtitle_path", f"{out_dir}/sub_%v.m3u8",
             "-var_stream_map", " ".join(variants),
             "-master_pl_name", "master.m3u8", f"{out_dir}/stream_%v.m3u8",
         ]
