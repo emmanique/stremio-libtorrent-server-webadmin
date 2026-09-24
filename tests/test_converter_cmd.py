@@ -62,8 +62,9 @@ def test_multitrack_hls_exposes_audio_group_and_webvtt_subtitles():
     stream_map = cmd[cmd.index("-var_stream_map") + 1]
     assert "a:0,agroup:audio,default:yes,language:eng" in stream_map
     assert "a:1,agroup:audio,default:no,language:por" in stream_map
-    assert "s:0,sgroup:subs,default:yes,language:eng,sname:eng" in stream_map
-    assert "s:1,sgroup:subs,default:no,language:por,sname:por" in stream_map
+    assert "s:0,sgroup:subs,default:yes,language:eng" in stream_map
+    assert "s:1,sgroup:subs,default:no,language:por" in stream_map
+    assert "sname:" not in stream_map
     assert "v:0,agroup:audio,sgroup:subs" in stream_map
     assert "-c:s" in cmd and "webvtt" in cmd
     assert "-hls_subtitle_path" in cmd
