@@ -156,6 +156,62 @@ def _probe_video_codec(args: list[str]) -> str | None:
     return aliases.get(value, value)
 
 
+
+def _probe_video_format(args: list[str]) -> dict[str, str]:
+    """Return source video characteristics used to decide safe VAAPI decode.
+
+    The runtime self-test proves the GPU can decode representative H.264/HEVC,
+    but real files can use profiles the iGPU decoder does not support. HEVC
+    Main 10 was observed failing as "No support for codec hevc profile 2".
+    """
+    source = _input_url(args)
+    if not source:
+        return {}
+    try:
+        result = subprocess.run(
+            [
+                REAL_FFPROBE,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name,profile,pix_fmt",
+                "-of", "json",
+                source,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            return {}
+        payload = json.loads(result.stdout or "{}")
+        streams = payload.get("streams") or []
+        if not streams or not isinstance(streams[0], dict):
+            return {}
+        return {
+            str(key): str(value)
+            for key, value in streams[0].items()
+            if value is not None
+        }
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return {}
+
+
+def _unsafe_full_vaapi_decode(details: dict[str, str]) -> bool:
+    """Conservatively avoid full-GPU decode for high-bit-depth sources.
+
+    Encode still stays on VAAPI; only decode falls back to software. This is
+    intentionally narrow and based on a real failing HEVC Main 10 stream.
+    """
+    codec = details.get("codec_name", "").lower()
+    pix_fmt = details.get("pix_fmt", "").lower()
+    profile = details.get("profile", "").lower()
+    high_bit_depth = any(token in pix_fmt for token in ("10", "12", "p010"))
+    return codec in {"hevc", "h264"} and (
+        high_bit_depth or "main 10" in profile or "high 10" in profile
+    )
+
+
 def _remove_option(args: list[str], names: set[str]) -> list[str]:
     out: list[str] = []
     index = 0
@@ -301,7 +357,20 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
     result, scale_width = _normalise_filter(result)
     result = _replace_option(result, {"-c:v", "-codec:v"}, str(target))
 
-    if profile["engine"] == "vaapi" and profile["decode"] == "vaapi":
+    effective_decode = str(profile["decode"])
+    fallback_reason = ""
+    if profile["engine"] == "vaapi" and effective_decode == "vaapi":
+        details = _probe_video_format(args)
+        if _unsafe_full_vaapi_decode(details):
+            effective_decode = "software"
+            fallback_reason = (
+                f"; decode fallback=software"
+                f" source={details.get('codec_name', 'unknown')}"
+                f" profile={details.get('profile', 'unknown')}"
+                f" pix_fmt={details.get('pix_fmt', 'unknown')}"
+            )
+
+    if profile["engine"] == "vaapi" and effective_decode == "vaapi":
         # Full VAAPI pipeline: decode directly to VAAPI surfaces and keep the
         # frames on the GPU through scale/format conversion and encode.
         result = _insert_before_input(
@@ -316,7 +385,8 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
         result = _insert_before_output_codec_options(result, ["-vf", vf, "-qp", str(quality)])
     elif profile["engine"] == "vaapi":
         # Encode-only VAAPI: software decode, explicit upload to VAAPI for
-        # hardware encode. Useful when a source decoder is not supported.
+        # hardware encode. Used explicitly by encode-only profiles and also as
+        # a safe fallback when the real source profile is not decodable by VAAPI.
         result = _insert_before_input(result, ["-vaapi_device", device])
         software_filter = f"scale={scale_width}:-2:flags=lanczos" if scale_width else None
         vf = f"{software_filter},format=nv12,hwupload" if software_filter else "format=nv12,hwupload"
@@ -332,7 +402,7 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
 
     return result, (
         f"profile={profile_name}; video={current}->{target}; "
-        f"decode={profile['decode']}; engine={profile['engine']}"
+        f"decode={effective_decode}; engine={profile['engine']}{fallback_reason}"
     )
 
 

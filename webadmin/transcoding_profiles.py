@@ -202,8 +202,8 @@ def _recommended_profile(items: list[dict[str, object]]) -> str:
     available = {str(item.get("id")) for item in items if item.get("available")}
     for profile_id in (
         "nvenc-h264",
-        "vaapi-full-h264",
         "vaapi-h264",
+        "vaapi-full-h264",
         "cpu-h264",
         "preserve",
     ):
@@ -334,11 +334,38 @@ def transcoding_status():
     policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
     if selected in PROFILE_META:
         meta = PROFILE_META[selected]
-        policy["transcoding_mode"] = meta["codec"] if selected != "preserve" else "preserve"
+        mode = meta["codec"] if selected != "preserve" else "preserve"
+        policy["transcoding_mode"] = mode
         policy["transcoding_hwaccel"] = meta["engine"]
         policy["transcoding_video_codec"] = meta["encoder"] or "core"
         policy["transcoding_decode"] = meta["decode"]
         data["policy"] = policy
+
+        # The legacy status layer reports the old auto/hwaccel fields under
+        # state.requested/effective. Once an explicit execution profile is
+        # selected those values are no longer authoritative and made the UI
+        # contradict itself. Keep every status surface aligned with the profile.
+        state = data.get("state") if isinstance(data.get("state"), dict) else {}
+        requested = state.get("requested") if isinstance(state.get("requested"), dict) else {}
+        effective = state.get("effective") if isinstance(state.get("effective"), dict) else {}
+        requested.update({
+            "profile": selected,
+            "mode": mode,
+            "hwaccel": meta["engine"],
+            "videoCodec": meta["encoder"] or "core",
+            "decode": meta["decode"],
+        })
+        effective.update({
+            "profile": selected,
+            "mode": mode,
+            "hwaccel": meta["engine"],
+            "videoCodec": meta["encoder"] or "core",
+            "decode": meta["decode"],
+        })
+        state["requested"] = requested
+        state["effective"] = effective
+        data["state"] = state
+
         if meta["engine"] in {"vaapi", "nvenc"}:
             active = data.get("active") if isinstance(data.get("active"), dict) else {}
             sessions = active.get("sessions") if isinstance(active.get("sessions"), list) else []

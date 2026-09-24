@@ -79,8 +79,8 @@
   button.watch { background:var(--accent2); }
   .kid { display:flex; align-items:center; gap:6px; text-align:left; }
   .kid > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  button.kidwatch { flex:0 0 auto; width:27px; height:27px; padding:0; border-radius:50%;
-                    background:var(--accent2); line-height:27px; }
+  button.kidwatch { flex:0 0 auto; min-width:72px; height:29px; padding:0 10px; border-radius:7px;
+                    background:var(--accent2); line-height:29px; font-size:11px; font-weight:600; }
 
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:7px 12px; cursor:pointer; font:inherit; font-size:13px; }
@@ -420,7 +420,7 @@ const LIB = (() => {
         ? `<button class="kidwatch" data-watch="${esc(k.infoHash)}"
              data-fileidx="${k.fileIdx}" data-filename="${esc(k.name || '')}"
              data-watchname="${esc(shortFile(k.name) || k.name || '')}"
-             title="Watch in Stremio player">&#9654;</button>`
+             title="Watch in Stremio player">Watch</button>`
         : '';
       return `<div class="kid${k.wanted ? '' : ' dim'}" title="${esc(k.name)}"><span>${
         esc(text)}</span>${watch}</div>`;

@@ -682,6 +682,37 @@ def update():
     return {"ok": True, "message": "Source update started; Web Admin and settings remain unchanged"}
 
 
+LOG_CURSOR_FILE = STATE / "log-cursors.json"
+LOG_SOURCE_IDS = {"application", "container", "updater", "admin"}
+
+
+def _read_log_cursors() -> dict[str, float]:
+    try:
+        data = json.loads(LOG_CURSOR_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(key): float(value)
+            for key, value in data.items()
+            if key in LOG_SOURCE_IDS and isinstance(value, (int, float))
+        }
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _write_log_cursors(values: dict[str, float]) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = LOG_CURSOR_FILE.with_name(f".{LOG_CURSOR_FILE.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, LOG_CURSOR_FILE)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
 @app.get("/api/logs")
 def logs(source: str = "application", lines: int = 300):
     available = [
@@ -690,21 +721,26 @@ def logs(source: str = "application", lines: int = 300):
         {"id": "updater", "label": "Software updates"},
         {"id": "admin", "label": "Web Admin actions"},
     ]
+    if source not in LOG_SOURCE_IDS:
+        raise HTTPException(400, "unknown log source")
+    cursors = _read_log_cursors()
     try:
         if source in {"application", "container"}:
+            kwargs = {"tail": min(lines, 1000), "timestamps": True}
+            since = cursors.get(source)
+            if since is not None:
+                kwargs["since"] = int(since)
             content = (
                 client()
                 .containers.get(CONTAINER)
-                .logs(tail=min(lines, 1000))
+                .logs(**kwargs)
                 .decode(errors="replace")
                 .splitlines()
             )
         elif source == "admin":
             content = (STATE / "admin.log").read_text(errors="replace").splitlines()[-lines:]
-        elif source == "updater":
-            content = json.dumps(read_update_result() or {}, indent=2).splitlines()
         else:
-            raise HTTPException(400, "unknown log source")
+            content = json.dumps(read_update_result() or {}, indent=2).splitlines()
     except HTTPException:
         raise
     except Exception:
@@ -716,6 +752,10 @@ def logs(source: str = "application", lines: int = 300):
         "lines": content,
         "lineCount": len(content),
         "debug": False,
+        "clearedAt": (
+            datetime.fromtimestamp(cursors[source], tz=UTC).isoformat()
+            if source in cursors else None
+        ),
         "updatedAt": datetime.now(UTC).isoformat(),
         "availableSources": available,
     }
@@ -723,13 +763,29 @@ def logs(source: str = "application", lines: int = 300):
 
 @app.post("/api/logs/clear")
 def clear_logs(body: LogBody):
-    # Docker's logging driver cannot be safely truncated from inside a container.
-    targets = [body.source] if body.source else ["admin", "updater"]
+    if body.source is not None and body.source not in LOG_SOURCE_IDS:
+        raise HTTPException(400, "unknown log source")
+    targets = [body.source] if body.source else sorted(LOG_SOURCE_IDS)
+    cursors = _read_log_cursors()
+    now = time.time()
     for target in targets:
-        path = STATE / ("admin.log" if target == "admin" else "update-result.json")
-        if target in {"admin", "updater"}:
-            path.write_text("")
-    return {"ok": True, "cleared": targets}
+        if target in {"application", "container"}:
+            # Docker owns its logging-driver files. A persistent cursor gives the
+            # operator true "clear from now" semantics without corrupting them.
+            cursors[target] = now
+        elif target == "admin":
+            STATE.mkdir(parents=True, exist_ok=True)
+            (STATE / "admin.log").write_text("", encoding="utf-8")
+        elif target == "updater":
+            STATE.mkdir(parents=True, exist_ok=True)
+            (STATE / "update-result.json").write_text("", encoding="utf-8")
+    _write_log_cursors(cursors)
+    audit("logs.clear", ",".join(targets))
+    return {
+        "ok": True,
+        "cleared": targets,
+        "clearedAt": datetime.fromtimestamp(now, tz=UTC).isoformat(),
+    }
 
 
 @app.get("/api/qr.svg")
