@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.11
+# Stremio Server WebAdmin 2.0.12
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,20 +6,20 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.11** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.11** release line. It stabilizes configuration persistence/restart verification, VPN/DNS transitions, trusted certificate handling, automatic VAAPI capability verification and live FFmpeg runtime/policy telemetry.
+Version **2.0.12** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.12** release line. It is a runtime-reliability hotfix for VAAPI transcoding, WebAdmin log clearing, configuration/restart feedback and My Library playback controls.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.11 at a glance
+## 2.0.12 at a glance
 
 ```text
 Upstream Core   1.6.15
 Upstream Server 1.6.15
-Fork            2.0.11
-WebAdmin        2.0.11
-VPN Gateway     2.0.11
+Fork            2.0.12
+WebAdmin        2.0.12
+VPN Gateway     2.0.12
 ```
 
 Version sources:
@@ -34,6 +34,17 @@ webadmin/WEBADMIN_VERSION
 `SERVER_VERSION` and `pyproject.toml` must match the integrated upstream server/core release. `FORK_VERSION` and `webadmin/WEBADMIN_VERSION` must match the 2.x fork release. These version lines are intentionally independent.
 
 ## What is implemented today
+
+## 2.0.12 runtime reliability hotfix
+
+Version 2.0.12 addresses regressions found during live validation of 2.0.11.
+
+- **VAAPI transcoding:** full-GPU profiles now detect high-bit-depth H.264/HEVC sources that are unsafe for the hardware decode path and fall back to software decode while keeping VAAPI hardware encode. This fixes real HEVC Main 10 failures such as `No support for codec hevc profile 2` without silently falling back to CPU encoding.
+- **Recommended Intel/DRM profile:** the runtime recommender prefers `vaapi-h264` over the full-GPU variant when both pass the synthetic self-test, because encode-only VAAPI proved more robust across real-world source profiles.
+- **Transcoding telemetry:** Requested, Effective and Actual status now reflects the explicit execution profile rather than stale legacy `auto/vaapi/h264_vaapi` values.
+- **Log clearing:** Application and Docker-container logs use persistent clear cursors, while WebAdmin and updater logs are physically reset. **Clean selected** and **Clean all** now cover every exposed source without modifying Docker's logging-driver files.
+- **Configuration/restart feedback:** after a verified save or successful server restart, WebAdmin reloads the configuration from the persistent backend so the UI shows the committed state instead of stale form values.
+- **My Library:** per-file playback actions are now clearly labelled **Watch** instead of a small circular play icon, while playback still hands off to the native Stremio player for audio, subtitles, traffic/statistics and casting.
 
 ### 2.0.11 My Library native player hand-off
 
@@ -586,9 +597,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.7
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.7
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.7
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.12
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.12
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.12
 ```
 
 Stable moving aliases:
@@ -603,9 +614,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.7
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.7
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.7
+edmanique/stremio-libtorrent-server-webadmin:2.0.12
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.12
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.12
 ```
 
 ---
