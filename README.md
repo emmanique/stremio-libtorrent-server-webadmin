@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.13
+# Stremio Server WebAdmin 2.0.14
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,13 +6,22 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.13** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.13** release line. It extends the validated 2.0.12 runtime baseline with multi-audio and text-subtitle HLS renditions for the native Stremio player.
+Version **2.0.14** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.14** release line. It fixes WebAdmin action reliability and the HLS multi-audio regression found in 2.0.14.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.13 at a glance
+## 2.0.14 at a glance
+
+- **WebAdmin actions:** Save configuration and Restart server now use explicit button semantics, robust error handling and visible status feedback.
+- **No stale UI after upgrade:** the WebAdmin page is served with no-store/no-cache headers.
+- **Real HLS release gate:** CI executes FFmpeg and requires a generated multi-audio master playlist, preventing a repeat of the 2.0.14 header-initialization failure.
+- **Multi-audio preserved:** alternate audio renditions remain in the HLS audio group.
+- **Native subtitles preserved:** embedded subtitles stay on the existing Stremio subtitle API instead of unsupported subtitle-only HLS variants.
+
+### 2.0.14 HLS media-track attempt
+
 
 - **Multi-audio HLS:** transcoded playback exposes every probed audio track as an HLS audio rendition instead of keeping only the first track.
 - **Selectable subtitles:** supported text subtitle tracks are converted to WebVTT and published as HLS subtitle renditions, enabling the native player selector.
@@ -606,9 +615,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.13
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.13
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.13
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.14
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.14
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.14
 ```
 
 Stable moving aliases:
@@ -623,9 +632,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.13
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.13
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.13
+edmanique/stremio-libtorrent-server-webadmin:2.0.14
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.14
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.14
 ```
 
 ---
