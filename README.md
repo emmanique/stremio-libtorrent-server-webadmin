@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.14
+# Stremio Server WebAdmin 2.0.15
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,13 +6,21 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.14** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.14** release line. It fixes WebAdmin action reliability and the HLS multi-audio regression found in 2.0.14.
+Version **2.0.15** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.15** release line. It fixes embedded-subtitle extraction timeouts and unifies subtitle track identifiers between listing and extraction.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
 
-## 2.0.14 at a glance
+## 2.0.15 at a glance
+
+- **Subtitle track IDs:** `subtitles.json` and `subtitles.vtt` now use the same FFmpeg global stream index.
+- **Streaming extraction:** embedded WebVTT is streamed from FFmpeg instead of buffering the whole track behind a 60-second timeout.
+- **Controlled failures:** invalid tracks return 404 and subtitle-probe timeouts return 504 instead of HTTP 500.
+- **Process cleanup:** FFmpeg subtitle extractors are reaped if the client disconnects.
+
+### 2.0.14 UI and HLS reliability
+
 
 - **WebAdmin actions:** Save configuration and Restart server now use explicit button semantics, robust error handling and visible status feedback.
 - **No stale UI after upgrade:** the WebAdmin page is served with no-store/no-cache headers.
