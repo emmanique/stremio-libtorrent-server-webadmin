@@ -72,15 +72,157 @@ else
 fi
 
 COMPOSE_ARGS="-f compose.yaml"
-if [ -e "${VAAPI_DEVICE:-/dev/dri/renderD128}" ]; then
-    COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
-    echo "[start] VAAPI render node detected: ${VAAPI_DEVICE:-/dev/dri/renderD128}"
-elif [ -e /dev/nvidia0 ] && command -v nvidia-smi >/dev/null 2>&1; then
-    COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
-    echo "[start] NVIDIA GPU detected: enabling GPU overlay"
-else
-    echo "[start] no supported GPU render node detected: CPU fallback"
+
+GPU_BACKEND=${GPU_BACKEND:-auto}
+GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
+
+_detect_vaapi_device() {
+    # Explicit configured device has priority.
+    if [ -n "${VAAPI_DEVICE:-}" ] && [ -e "$VAAPI_DEVICE" ]; then
+        printf '%s\n' "$VAAPI_DEVICE"
+        return 0
+    fi
+
+    # Prefer Intel DRM render nodes.
+    for dev in /dev/dri/renderD*; do
+        [ -e "$dev" ] || continue
+
+        node=$(basename "$dev")
+        vendor_file="/sys/class/drm/$node/device/vendor"
+
+        if [ -r "$vendor_file" ] && [ "$(cat "$vendor_file" 2>/dev/null)" = "0x8086" ]; then
+            printf '%s\n' "$dev"
+            return 0
+        fi
+    done
+
+    # Generic DRM render-node fallback.
+    for dev in /dev/dri/renderD*; do
+        [ -e "$dev" ] || continue
+        printf '%s\n' "$dev"
+        return 0
+    done
+
+    return 1
+}
+
+_nvidia_available() {
+    [ -e /dev/nvidia0 ] || return 1
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
+    nvidia-smi >/dev/null 2>&1 || return 1
+
+    docker info 2>/dev/null |
+        awk '/Runtimes:/ {
+            for (i=2; i<=NF; i++)
+                if ($i == "nvidia") found=1
+        }
+        END {exit found ? 0 : 1}'
+}
+
+VAAPI_DETECTED_DEVICE=$(_detect_vaapi_device 2>/dev/null || true)
+NVIDIA_DETECTED=false
+
+if _nvidia_available; then
+    NVIDIA_DETECTED=true
 fi
+
+case "$GPU_BACKEND" in
+    auto)
+        if [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+            VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+            export VAAPI_DEVICE
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
+
+            # AUTO exposes every detected accelerator so WebAdmin can perform
+            # real runtime self-tests and offer only the working profiles.
+            if [ "$NVIDIA_DETECTED" = "true" ]; then
+                COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+            fi
+
+            GPU_BACKEND_EFFECTIVE=vaapi
+            TRANSCODING_HWACCEL=vaapi
+            TRANSCODING_VIDEO_CODEC=h264_vaapi
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+            echo "[start] GPU backend AUTO -> VAAPI"
+            echo "[start] VAAPI render node: $VAAPI_DEVICE"
+
+            if [ "$NVIDIA_DETECTED" = "true" ]; then
+                echo "[start] NVIDIA runtime also exposed for capability testing"
+            fi
+
+        elif [ "$NVIDIA_DETECTED" = "true" ]; then
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+            GPU_BACKEND_EFFECTIVE=nvidia
+            TRANSCODING_HWACCEL=nvenc
+            TRANSCODING_VIDEO_CODEC=h264_nvenc
+            LIBVA_DRIVER_NAME=
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            echo "[start] GPU backend AUTO -> NVIDIA"
+
+        else
+            GPU_BACKEND_EFFECTIVE=cpu
+            TRANSCODING_HWACCEL=cpu
+            TRANSCODING_VIDEO_CODEC=libx264
+            LIBVA_DRIVER_NAME=
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            echo "[start] GPU backend AUTO -> CPU fallback"
+        fi
+        ;;
+
+    vaapi|intel|intel-vaapi)
+        if [ -z "$VAAPI_DETECTED_DEVICE" ]; then
+            echo "[start] ERROR: VAAPI requested but no DRM render node was detected." >&2
+            exit 1
+        fi
+
+        VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+        export VAAPI_DEVICE
+        COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
+        GPU_BACKEND_EFFECTIVE=vaapi
+        TRANSCODING_HWACCEL=vaapi
+        TRANSCODING_VIDEO_CODEC=h264_vaapi
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+        echo "[start] GPU backend forced: VAAPI"
+        echo "[start] VAAPI render node: $VAAPI_DEVICE"
+        ;;
+
+    nvidia|nvenc)
+        if [ "$NVIDIA_DETECTED" != "true" ]; then
+            echo "[start] ERROR: NVIDIA requested but GPU/runtime is not available." >&2
+            exit 1
+        fi
+
+        COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+        GPU_BACKEND_EFFECTIVE=nvidia
+        TRANSCODING_HWACCEL=nvenc
+        TRANSCODING_VIDEO_CODEC=h264_nvenc
+        LIBVA_DRIVER_NAME=
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        echo "[start] GPU backend forced: NVIDIA"
+        ;;
+
+    cpu|software|none)
+        GPU_BACKEND_EFFECTIVE=cpu
+        TRANSCODING_HWACCEL=cpu
+        TRANSCODING_VIDEO_CODEC=libx264
+        LIBVA_DRIVER_NAME=
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        echo "[start] GPU backend forced: CPU"
+        ;;
+
+    *)
+        echo "[start] ERROR: invalid GPU_BACKEND='$GPU_BACKEND'." >&2
+        echo "[start] valid values: auto, vaapi, nvidia, cpu" >&2
+        exit 1
+        ;;
+esac
+
+export GPU_BACKEND GPU_BACKEND_EFFECTIVE
+
+echo "[start] GPU requested : $GPU_BACKEND"
+echo "[start] GPU effective : $GPU_BACKEND_EFFECTIVE"
 
 echo "[start] detected host IPv4: $IPADDRESS"
 echo "[start] Web Player : http://$IPADDRESS:8080"

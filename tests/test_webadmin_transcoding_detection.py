@@ -14,14 +14,14 @@ def _item(profile_id: str, available: bool) -> dict[str, object]:
     return {"id": profile_id, "available": available}
 
 
-def test_recommends_encode_only_vaapi_h264_before_full_pipeline_and_cpu():
+def test_recommends_full_vaapi_h264_before_encode_only_and_cpu():
     items = [
         _item("preserve", True),
         _item("vaapi-h264", True),
         _item("vaapi-full-h264", True),
         _item("cpu-h264", True),
     ]
-    assert profiles._recommended_profile(items) == "vaapi-h264"
+    assert profiles._recommended_profile(items) == "vaapi-full-h264"
 
 
 def test_recommends_encode_only_vaapi_when_full_pipeline_is_unavailable():
@@ -174,3 +174,211 @@ def test_read_job_log_preserves_policy_and_progress():
     assert decision is not None
     assert decision["profile"] == "vaapi-full-h264"
     assert decision["targetVideo"] == "h264_vaapi"
+
+
+def test_backend_matrix_keeps_detected_nvidia_separate_from_nvenc_capability(monkeypatch):
+    items = [
+        {"id": "vaapi-h264", "available": True, "reason": "ok"},
+        {"id": "vaapi-hevc", "available": False, "reason": "no"},
+        {"id": "nvenc-h264", "available": False, "reason": "unsupported device"},
+        {"id": "nvenc-hevc", "available": False, "reason": "unsupported device"},
+        {"id": "cpu-h264", "available": True, "reason": "ok"},
+        {"id": "cpu-hevc", "available": True, "reason": "ok"},
+    ]
+
+    monkeypatch.setattr(
+        profiles.base,
+        "_exists",
+        lambda container, path, executable=False: path in {
+            "/dev/dri/renderD129",
+            "/dev/nvidia0",
+        },
+    )
+
+    monkeypatch.setattr(
+        profiles,
+        "_nvidia_runtime_info",
+        lambda container: {
+            "detected": True,
+            "runtime": True,
+            "name": "NVIDIA GeForce 920M",
+            "driver": "470.256.02",
+        },
+    )
+
+    matrix = profiles._backend_matrix(
+        object(),
+        items,
+        "/dev/dri/renderD129",
+    )
+
+    assert matrix["vaapi"]["detected"] is True
+    assert matrix["vaapi"]["selectable"] is True
+
+    assert matrix["nvidia"]["detected"] is True
+    assert matrix["nvidia"]["runtime"] is True
+    assert matrix["nvidia"]["h264"] is False
+    assert matrix["nvidia"]["selectable"] is False
+
+    assert matrix["cpu"]["selectable"] is True
+
+
+def test_backend_matrix_marks_verified_nvenc_selectable(monkeypatch):
+    items = [
+        {"id": "vaapi-h264", "available": False, "reason": "no"},
+        {"id": "vaapi-hevc", "available": False, "reason": "no"},
+        {"id": "nvenc-h264", "available": True, "reason": "ok"},
+        {"id": "nvenc-hevc", "available": False, "reason": "no"},
+        {"id": "cpu-h264", "available": True, "reason": "ok"},
+        {"id": "cpu-hevc", "available": True, "reason": "ok"},
+    ]
+
+    monkeypatch.setattr(
+        profiles.base,
+        "_exists",
+        lambda container, path, executable=False: path == "/dev/nvidia0",
+    )
+
+    monkeypatch.setattr(
+        profiles,
+        "_nvidia_runtime_info",
+        lambda container: {
+            "detected": True,
+            "runtime": True,
+            "name": "Compatible NVIDIA GPU",
+            "driver": "999.0",
+        },
+    )
+
+    matrix = profiles._backend_matrix(
+        object(),
+        items,
+        "/dev/dri/renderD129",
+    )
+
+    assert matrix["nvidia"]["detected"] is True
+    assert matrix["nvidia"]["runtime"] is True
+    assert matrix["nvidia"]["h264"] is True
+    assert matrix["nvidia"]["selectable"] is True
+
+
+def test_profiles_uses_container_vaapi_device_when_not_persisted(monkeypatch):
+    class DummyContainer:
+        pass
+
+    container = DummyContainer()
+
+    class Containers:
+        def get(self, name):
+            return container
+
+    class Client:
+        containers = Containers()
+
+    monkeypatch.setattr(profiles.legacy, "client", lambda: Client())
+    monkeypatch.setattr(profiles.legacy, "read_config", lambda: {})
+    monkeypatch.setattr(
+        profiles.base,
+        "_ffmpeg_binary",
+        lambda c: "/usr/bin/ffmpeg",
+    )
+    monkeypatch.setattr(
+        profiles.base.base,
+        "_container_env",
+        lambda c: {"VAAPI_DEVICE": "/dev/dri/renderD129"},
+    )
+
+    seen = []
+
+    def fake_test_profile(c, profile_id, device, binary):
+        seen.append(device)
+        return profiles._result(
+            profile_id,
+            profile_id == "preserve",
+            "test",
+        )
+
+    monkeypatch.setattr(
+        profiles,
+        "_test_profile",
+        fake_test_profile,
+    )
+    monkeypatch.setattr(
+        profiles,
+        "_backend_matrix",
+        lambda c, items, device: {"device": device},
+    )
+
+    profiles.PROFILE_CACHE["at"] = 0.0
+    profiles.PROFILE_CACHE["value"] = None
+
+    data = profiles._profiles(force=True)
+
+    assert data["device"] == "/dev/dri/renderD129"
+    assert seen
+    assert all(
+        device == "/dev/dri/renderD129"
+        for device in seen
+    )
+
+
+def test_profiles_prefers_valid_container_device_over_stale_persisted_device(monkeypatch):
+    class DummyContainer:
+        pass
+
+    container = DummyContainer()
+
+    class Containers:
+        def get(self, name):
+            return container
+
+    class Client:
+        containers = Containers()
+
+    monkeypatch.setattr(profiles.legacy, "client", lambda: Client())
+    monkeypatch.setattr(
+        profiles.legacy,
+        "read_config",
+        lambda: {"transcoding_vaapi_device": "/dev/dri/renderD128"},
+    )
+    monkeypatch.setattr(
+        profiles.base,
+        "_ffmpeg_binary",
+        lambda c: "/usr/bin/ffmpeg",
+    )
+    monkeypatch.setattr(
+        profiles.base.base,
+        "_container_env",
+        lambda c: {"VAAPI_DEVICE": "/dev/dri/renderD129"},
+    )
+    monkeypatch.setattr(
+        profiles.base,
+        "_exists",
+        lambda c, path, executable=False: path == "/dev/dri/renderD129",
+    )
+
+    seen = []
+
+    def fake_test_profile(c, profile_id, device, binary):
+        seen.append(device)
+        return profiles._result(
+            profile_id,
+            profile_id == "preserve",
+            "test",
+        )
+
+    monkeypatch.setattr(profiles, "_test_profile", fake_test_profile)
+    monkeypatch.setattr(
+        profiles,
+        "_backend_matrix",
+        lambda c, items, device: {"device": device},
+    )
+
+    profiles.PROFILE_CACHE["at"] = 0.0
+    profiles.PROFILE_CACHE["value"] = None
+
+    data = profiles._profiles(force=True)
+
+    assert data["device"] == "/dev/dri/renderD129"
+    assert seen
+    assert all(device == "/dev/dri/renderD129" for device in seen)

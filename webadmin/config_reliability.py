@@ -19,3 +19,26 @@ legacy.DESCRIPTIONS.setdefault(
 )
 
 app = base.app
+
+# The execution profile is persisted by the dedicated transcoding profile API.
+# Register it with the generic configuration model so an already persisted
+# profile is not treated as an unknown setting. Keep it read-only here because
+# profile changes must pass the runtime capability validation.
+legacy.DEFAULTS.setdefault("transcoding_profile", "")
+legacy.DESCRIPTIONS.setdefault(
+    "transcoding_profile",
+    "Perfil de execução FFmpeg selecionado pelo painel Simple transcoding.",
+)
+legacy.READ_ONLY.add("transcoding_profile")
+
+# Transcoding execution parameters are controlled by the verified profile UI.
+# The generic All Configuration page must not overwrite hardware detection or
+# profile-derived execution settings.
+legacy.READ_ONLY.update({
+    "transcoding_profile",
+    "transcoding_mode",
+    "transcoding_hwaccel",
+    "transcoding_vaapi_device",
+    "transcoding_video_codec",
+    "transcoding_hw_decode",
+})
