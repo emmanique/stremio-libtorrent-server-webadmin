@@ -135,3 +135,108 @@ def test_subtitles_list_answers_its_empty_shape_when_the_probe_times_out(monkeyp
     assert r.status_code == 200
     assert r.json() == {"subtitles": []}
     assert "timed out" in caplog.text
+
+
+def test_subtitles_vtt_uses_same_global_track_id_as_subtitles_list(monkeypatch):
+    import io
+    from stremiosrv.api import subs as subs_api
+
+    monkeypatch.setattr(
+        subs_api,
+        "probe_media",
+        lambda url: {
+            "format": {"name": "matroska,webm", "duration": 10},
+            "streams": [
+                {"id": 0, "index": 0, "track": "video", "codec": "hevc"},
+                {"id": 1, "index": 1, "track": "audio", "codec": "aac", "lang": "eng"},
+                {"id": 31, "index": 31, "track": "subtitle", "codec": "subrip", "lang": "por"},
+            ],
+            "samples": {},
+        },
+    )
+
+    calls = []
+
+    class _Proc:
+        def __init__(self, argv, **kwargs):
+            calls.append((argv, kwargs))
+            self.stdout = io.BytesIO(
+                b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOla.\n"
+            )
+            self._returncode = None
+
+        def wait(self, timeout=None):
+            self._returncode = 0
+            return 0
+
+        def poll(self):
+            return self._returncode
+
+        def terminate(self):
+            self._returncode = 0
+
+        def kill(self):
+            self._returncode = -9
+
+    monkeypatch.setattr(subs_api.subprocess, "Popen", _Proc)
+
+    c = TestClient(create_app())
+    listed = c.get("/" + "a" * 40 + "/0/subtitles.json", params={"mediaURL": "http://media"})
+    assert listed.status_code == 200
+    assert listed.json()["subtitles"] == [
+        {"id": 31, "track": 31, "codec": "subrip", "lang": "por"}
+    ]
+
+    extracted = c.get(
+        "/" + "a" * 40 + "/0/subtitles.vtt",
+        params={"mediaURL": "http://media", "track": 31},
+    )
+    assert extracted.status_code == 200
+    assert extracted.text.startswith("WEBVTT")
+    argv, kwargs = calls[0]
+    assert ["-map", "0:31"] == argv[argv.index("-map"):argv.index("-map") + 2]
+    assert "0:s:31" not in argv
+    assert kwargs["bufsize"] == 0
+
+
+def test_subtitles_vtt_invalid_global_track_returns_controlled_404(monkeypatch):
+    from stremiosrv.api import subs as subs_api
+
+    monkeypatch.setattr(
+        subs_api,
+        "probe_media",
+        lambda url: {
+            "format": {},
+            "streams": [
+                {"id": 0, "index": 0, "track": "video", "codec": "h264"},
+                {"id": 2, "index": 2, "track": "subtitle", "codec": "subrip", "lang": "eng"},
+            ],
+            "samples": {},
+        },
+    )
+
+    c = TestClient(create_app())
+    r = c.get(
+        "/" + "a" * 40 + "/0/subtitles.vtt",
+        params={"mediaURL": "http://media", "track": 31},
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "subtitle track not found"
+
+
+def test_subtitles_vtt_probe_timeout_is_controlled_504(monkeypatch):
+    from stremiosrv.api import subs as subs_api
+    from stremiosrv.transcode.probe import ProbeTimeoutError
+
+    def _times_out(url):
+        raise ProbeTimeoutError("slow")
+
+    monkeypatch.setattr(subs_api, "probe_media", _times_out)
+
+    c = TestClient(create_app())
+    r = c.get(
+        "/" + "a" * 40 + "/0/subtitles.vtt",
+        params={"mediaURL": "http://media", "track": 31},
+    )
+    assert r.status_code == 504
+    assert r.json()["detail"] == "subtitle probe timed out"
