@@ -22,7 +22,7 @@ app = base.app
 STATIC = Path(__file__).with_name("static")
 REAL_FFMPEG = "/usr/local/libexec/stremio/ffmpeg-real"
 WRAPPER_FFMPEG = "/usr/local/bin/ffmpeg"
-TARGET_SERVER_VERSION = "1.6.9-server.2"
+TARGET_SERVER_VERSION = "1.6.15"
 _CAP_CACHE: dict[str, Any] = {"at": 0.0, "value": None, "binary": None}
 
 

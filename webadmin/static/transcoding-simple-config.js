@@ -16,6 +16,13 @@
     .simpleTranscodeCheck{padding:9px 11px;border:1px solid #35482f;border-radius:8px;background:rgba(8,24,14,.72);font-size:11px}
     .simpleTranscodeCheck.ok{border-color:#2d9957;color:#71e79c}.simpleTranscodeCheck.no{color:#d0b7a0}.simpleTranscodeCheck b{display:block;color:inherit;margin-bottom:2px}
     .simpleTranscodeStatus{margin-top:10px;color:var(--muted);font-size:11px}
+    .simpleBackendGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+    .simpleBackend{padding:12px;border:1px solid #35482f;border-radius:9px;background:rgba(8,24,14,.72)}
+    .simpleBackend.ready{border-color:#2d9957}
+    .simpleBackend.unavailable{border-color:#7c6331}
+    .simpleBackend strong{display:block;margin-bottom:7px;color:#f5edc6}
+    .simpleBackendLine{font-size:11px;color:var(--muted);margin:3px 0}
+    .simpleBackendLine b{color:var(--text)}
     @media(max-width:760px){.simpleTranscodeGrid{grid-template-columns:1fr}.simpleTranscodeChecks{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
@@ -36,6 +43,7 @@
           <button class="btn" id="simpleTranscodeSave">Apply profile</button>
         </div>
         <div class="simpleTranscodeDetail" id="simpleTranscodeDetail"></div>
+        <div class="simpleBackendGrid" id="simpleBackendGrid"></div>
         <div class="simpleTranscodeChecks" id="simpleTranscodeChecks"></div>
         <div class="simpleTranscodeStatus" id="simpleTranscodeStatus"></div>
       </div>`;
@@ -89,6 +97,38 @@
       options.push(`<option value="${item.id}" ${selected} ${disabled}>${item.label} — ${suffix}</option>`);
     }
     select.innerHTML = options.join('');
+
+    const backends = data.backends || {};
+    const backendOrder = ['vaapi', 'nvidia', 'cpu'];
+
+    $('simpleBackendGrid').innerHTML = backendOrder
+      .map(id => backends[id])
+      .filter(Boolean)
+      .map(item => {
+        const statusClass = item.selectable ? 'ready' : 'unavailable';
+        const detected = item.detected ? 'YES' : 'NO';
+        const runtime = item.runtime ? 'READY' : 'NOT READY';
+        const h264 = item.h264 ? 'VERIFIED' : 'NOT AVAILABLE';
+        const hevc = item.hevc ? 'VERIFIED' : 'NOT AVAILABLE';
+
+        const backendId = item.id || '';
+
+        const extra = backendId => {
+          if (backendId === 'vaapi') return item.device ? ` · ${item.device}` : '';
+          if (backendId === 'nvidia') return item.driver ? ` · driver ${item.driver}` : '';
+          return '';
+        };
+
+        return `<div class="simpleBackend ${statusClass}">
+          <strong>${item.label || backendId.toUpperCase()}</strong>
+          <div class="simpleBackendLine">Detected: <b>${detected}</b>${extra(backendId)}</div>
+          <div class="simpleBackendLine">Runtime: <b>${runtime}</b></div>
+          <div class="simpleBackendLine">H.264: <b>${h264}</b></div>
+          <div class="simpleBackendLine">HEVC: <b>${hevc}</b></div>
+          <div class="simpleBackendLine">Selectable: <b>${item.selectable ? 'YES' : 'NO'}</b></div>
+          ${item.selectable ? '' : `<div class="simpleBackendLine">${item.reason || ''}</div>`}
+        </div>`;
+      }).join('');
 
     $('simpleTranscodeChecks').innerHTML = (data.profiles || []).filter(item => item.id !== 'preserve').map(item =>
       `<div class="simpleTranscodeCheck ${item.available ? 'ok' : 'no'}"><b>${item.label} · ${item.available ? 'VERIFIED' : 'NOT AVAILABLE'}</b>${item.reason || ''}</div>`

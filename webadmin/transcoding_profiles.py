@@ -182,6 +182,39 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
             "-vf", "format=nv12,hwupload", "-frames:v", "1",
             "-c:v", encoder, "-f", "null", "-",
         ]
+
+        result = _exec(container, argv)
+
+        # Some Intel generations, notably Skylake/iHD, expose H.264 encode
+        # through the low-power entrypoint with CQP only. Retry with the
+        # runtime-proven low-power CQP path before marking VAAPI unavailable.
+        if (
+            profile_id == "vaapi-h264"
+            and (result is None or result.exit_code != 0)
+        ):
+            argv = [
+                binary, "-hide_banner", "-loglevel", "error",
+                "-vaapi_device", device,
+                "-f", "lavfi", "-i", "color=c=black:s=128x72:d=0.04",
+                "-vf", "format=nv12,hwupload", "-frames:v", "1",
+                "-c:v", encoder,
+                "-low_power", "1",
+                "-rc_mode", "CQP",
+                "-qp", "23",
+                "-f", "null", "-",
+            ]
+            result = _exec(container, argv)
+
+        ok = bool(result is not None and result.exit_code == 0)
+        if ok:
+            reason = (
+                f"VAAPI {PROFILE_META[profile_id]['codec']} runtime self-test passed. "
+                "Low-power/CQP fallback is supported for H.264 where required."
+            )
+        else:
+            reason = _last_error(result)
+        return _result(profile_id, ok, reason)
+
     else:
         argv = [
             binary, "-hide_banner", "-loglevel", "error",
@@ -202,14 +235,120 @@ def _recommended_profile(items: list[dict[str, object]]) -> str:
     available = {str(item.get("id")) for item in items if item.get("available")}
     for profile_id in (
         "nvenc-h264",
-        "vaapi-h264",
         "vaapi-full-h264",
+        "vaapi-h264",
         "cpu-h264",
         "preserve",
     ):
         if profile_id in available:
             return profile_id
     return "preserve"
+
+
+
+def _nvidia_runtime_info(container) -> dict[str, object]:
+    detected = base._exists(container, "/dev/nvidia0")
+    name = None
+    driver = None
+    runtime = False
+
+    if detected:
+        result = _exec(
+            container,
+            [
+                "sh", "-lc",
+                "command -v nvidia-smi >/dev/null 2>&1 && "
+                "nvidia-smi --query-gpu=name,driver_version "
+                "--format=csv,noheader 2>/dev/null | head -n 1 || true"
+            ],
+        )
+        if result is not None and result.exit_code == 0:
+            line = result.output.decode("utf-8", errors="replace").strip()
+            if line:
+                parts = [item.strip() for item in line.split(",", 1)]
+                name = parts[0] or None
+                driver = parts[1] if len(parts) > 1 else None
+                runtime = True
+
+    return {
+        "detected": detected,
+        "runtime": runtime,
+        "name": name,
+        "driver": driver,
+    }
+
+
+def _backend_matrix(
+    container,
+    items: list[dict[str, object]],
+    device: str,
+) -> dict[str, object]:
+    profiles = {str(item.get("id")): item for item in items}
+
+    def available(profile_id: str) -> bool:
+        item = profiles.get(profile_id) or {}
+        return bool(item.get("available"))
+
+    def reason(profile_id: str) -> str:
+        item = profiles.get(profile_id) or {}
+        return str(item.get("reason") or "")
+
+    vaapi_device = base._exists(container, device)
+    nvidia = _nvidia_runtime_info(container)
+
+    vaapi_h264 = available("vaapi-h264")
+    vaapi_hevc = available("vaapi-hevc")
+    nvenc_h264 = available("nvenc-h264")
+    nvenc_hevc = available("nvenc-hevc")
+    cpu_h264 = available("cpu-h264")
+    cpu_hevc = available("cpu-hevc")
+
+    return {
+        "vaapi": {
+            "id": "vaapi",
+            "label": "Intel / DRM VAAPI",
+            "detected": vaapi_device,
+            "runtime": vaapi_device,
+            "device": device if vaapi_device else None,
+            "h264": vaapi_h264,
+            "hevc": vaapi_hevc,
+            "selectable": vaapi_h264 or vaapi_hevc,
+            "reason": (
+                reason("vaapi-h264")
+                if not vaapi_h264
+                else "Runtime-verified VAAPI encoder available."
+            ),
+        },
+        "nvidia": {
+            "id": "nvidia",
+            "label": nvidia.get("name") or "NVIDIA GPU",
+            "detected": bool(nvidia.get("detected")),
+            "runtime": bool(nvidia.get("runtime")),
+            "driver": nvidia.get("driver"),
+            "h264": nvenc_h264,
+            "hevc": nvenc_hevc,
+            "selectable": nvenc_h264 or nvenc_hevc,
+            "reason": (
+                reason("nvenc-h264")
+                if not nvenc_h264
+                else "Runtime-verified NVENC encoder available."
+            ),
+        },
+        "cpu": {
+            "id": "cpu",
+            "label": "CPU software encoding",
+            "detected": True,
+            "runtime": True,
+            "h264": cpu_h264,
+            "hevc": cpu_hevc,
+            "selectable": cpu_h264 or cpu_hevc,
+            "reason": (
+                reason("cpu-h264")
+                if not cpu_h264
+                else "Runtime-verified software encoder available."
+            ),
+        },
+    }
 
 
 def _hardware_detection(items: list[dict[str, object]], device: str) -> dict[str, object]:
@@ -244,11 +383,40 @@ def _profiles(force: bool = False) -> dict[str, object]:
     container = legacy.client().containers.get(legacy.CONTAINER)
     binary = base._ffmpeg_binary(container)
     config = legacy.read_config()
-    device = str(config.get("transcoding_vaapi_device") or "/dev/dri/renderD128")
+
+    # Resolve the VAAPI device from the running container first.
+    # Runtime/container state is authoritative because render node numbering
+    # can change between hosts (for example renderD129 on Proxmox/LXC).
+    # A persisted device is only accepted when it actually exists.
+    container_env = base.base._container_env(container)
+
+    env_device = str(container_env.get("VAAPI_DEVICE") or "").strip()
+    config_device = str(config.get("transcoding_vaapi_device") or "").strip()
+
+    if env_device and base._exists(container, env_device):
+        device = env_device
+    elif config_device and base._exists(container, config_device):
+        device = config_device
+    else:
+        device = ""
+        for candidate in (
+            "/dev/dri/renderD128",
+            "/dev/dri/renderD129",
+            "/dev/dri/renderD130",
+            "/dev/dri/renderD131",
+        ):
+            if base._exists(container, candidate):
+                device = candidate
+                break
+
+        if not device:
+            device = env_device or config_device or "/dev/dri/renderD128"
+
     items = [_test_profile(container, profile_id, device, binary) for profile_id in PROFILE_META]
     selected, quality = _selected()
     recommended = _recommended_profile(items)
     hardware = _hardware_detection(items, device)
+    backends = _backend_matrix(container, items, device)
     value = {
         "checkedAt": datetime.now(UTC).isoformat(),
         "selected": selected,
@@ -258,6 +426,7 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "profiles": items,
         "recommendedProfile": recommended,
         "hardwareDetection": hardware,
+        "backends": backends,
         "rule": (
             "Direct Stream remains Direct Stream. Hardware is detected from real runtime self-tests. "
             "The recommended profile is preselected when legacy settings are active, but it is only applied after operator confirmation. "

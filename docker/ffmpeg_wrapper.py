@@ -269,7 +269,9 @@ def _strip_encoder_tuning(args: list[str]) -> list[str]:
         args,
         {
             "-preset", "-tune", "-crf", "-cq", "-qp", "-global_quality",
-            "-rc", "-profile:v", "-level:v",
+            "-rc", "-rc_mode", "-low_power",
+            "-b:v", "-maxrate", "-minrate", "-bufsize",
+            "-profile:v", "-level:v",
         },
     )
 
@@ -382,7 +384,19 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
             ],
         )
         vf = f"scale_vaapi=w={scale_width}:h=-2:format=nv12" if scale_width else "scale_vaapi=format=nv12"
-        result = _insert_before_output_codec_options(result, ["-vf", vf, "-qp", str(quality)])
+
+        vaapi_options = ["-vf", vf]
+
+        if str(target) == "h264_vaapi":
+            vaapi_options += [
+                "-low_power", "1",
+                "-rc_mode", "CQP",
+                "-qp", str(quality),
+            ]
+        else:
+            vaapi_options += ["-qp", str(quality)]
+
+        result = _insert_before_output_codec_options(result, vaapi_options)
     elif profile["engine"] == "vaapi":
         # Encode-only VAAPI: software decode, explicit upload to VAAPI for
         # hardware encode. Used explicitly by encode-only profiles and also as
@@ -390,7 +404,22 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
         result = _insert_before_input(result, ["-vaapi_device", device])
         software_filter = f"scale={scale_width}:-2:flags=lanczos" if scale_width else None
         vf = f"{software_filter},format=nv12,hwupload" if software_filter else "format=nv12,hwupload"
-        result = _insert_before_output_codec_options(result, ["-vf", vf, "-qp", str(quality)])
+
+        vaapi_options = ["-vf", vf]
+
+        # Intel Skylake/iHD exposes H.264 encode through the low-power
+        # entrypoint with CQP rate control. This was runtime-verified on
+        # /dev/dri/renderD129. Do not use bitrate control in this mode.
+        if str(target) == "h264_vaapi":
+            vaapi_options += [
+                "-low_power", "1",
+                "-rc_mode", "CQP",
+                "-qp", str(quality),
+            ]
+        else:
+            vaapi_options += ["-qp", str(quality)]
+
+        result = _insert_before_output_codec_options(result, vaapi_options)
     elif profile["engine"] == "nvenc":
         if scale_width:
             result = _insert_before_output_codec_options(result, ["-vf", f"scale={scale_width}:-2:flags=lanczos"])
