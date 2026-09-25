@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.15
+# Stremio Server WebAdmin 2.0.17
 
 [![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
 [![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
@@ -6,11 +6,23 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.15** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.15** release line. It fixes embedded-subtitle extraction timeouts and unifies subtitle track identifiers between listing and extraction.
+Version **2.0.17** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.17** release line. This release adds runtime-verified GPU backend selection, improved Intel VAAPI handling, NVIDIA capability gating, transcoding lifecycle controls and safer hardware/profile detection across hosts.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
+
+## 2.0.17 at a glance
+
+- **GPU backend selection:** `GPU_BACKEND=auto` detects the usable runtime backend and prefers Intel/DRM VAAPI when a valid render node is present.
+- **Render-node discovery:** Intel VAAPI is no longer tied to `/dev/dri/renderD128`; `start.sh` can discover the actual Intel render node on the host and expose the matching overlay.
+- **Runtime verification:** WebAdmin performs real FFmpeg self-tests before marking VAAPI/NVENC profiles selectable. Compiled encoder names alone are not treated as proof that a hardware path works.
+- **NVIDIA capability gating:** an NVIDIA device/runtime can be detected without exposing NVENC profiles when the real encoder test fails.
+- **Intel H.264 compatibility:** H.264 VAAPI includes the low-power/CQP path required by some Intel generations.
+- **Profile safety:** the recommended profile is shown after runtime validation but is not silently applied; the operator explicitly selects it.
+- **Transcoding lifecycle:** idle timeout, GC interval and maximum job age are exposed through Compose while preserving the normal per-job HLS lifecycle.
+- **Persistent configuration:** dedicated transcoding profile fields are protected from being overwritten by generic WebAdmin configuration saves.
+- **Current versions:** upstream server/core **1.6.15**; fork/WebAdmin/VPN **2.0.17**.
 
 ## 2.0.15 at a glance
 
@@ -85,7 +97,7 @@ My Library can now launch cached/downloaded media directly into the bundled Stre
 This keeps My Library focused on catalog/download/cache management while the established Stremio player remains the single playback surface.
 
 
-The current 2.0.8 baseline includes the work completed across the 2.x release line:
+The 2.0.8 milestone introduced the following platform baseline, which remains part of the current 2.x line:
 
 - unified `compose.yaml` runtime for Stremio Server, WebAdmin, Pi-hole and the persistent Gluetun gateway;
 - VPN configuration and enable/disable lifecycle from WebAdmin, without a separate `compose.vpn.yaml`;
@@ -347,6 +359,41 @@ They now start the same unified Compose stack. VPN itself is controlled from Web
 
 ---
 
+# Trusted HTTPS certificates and VPN routing
+
+The streaming container can fetch a trusted `*.519b6502d940.stremio.rocks` certificate and expose the trusted HTTPS endpoint on port `12470`.
+
+For a LAN address such as `192.168.1.244`, the trusted hostname is:
+
+```text
+192-168-1-244.519b6502d940.stremio.rocks
+```
+
+The current certificate fetch path uses the streaming container network namespace. The bundled certificate helper first discovers the public egress IP through `api.ipify.org` and then requests the certificate from `api.strem.io`.
+
+### VPN-on certificate renewal note
+
+When VPN is enabled, the streaming container shares Gluetun's network namespace. The certificate helper therefore sees the **VPN public IP**, not necessarily the normal WAN egress used when the certificate was originally obtained. On some VPN exits, certificate acquisition/renewal can fail even though general Internet access and streaming continue to work.
+
+The runtime does not delete the persistent certificate when a refresh fails. If a valid certificate already exists in the Stremio cache it remains available to nginx. However, when the automatic refresh path fails, an explicit `SERVER_URL` is recommended so the Web Player continues to target the trusted endpoint.
+
+Example:
+
+```bash
+SERVER_URL=https://192-168-1-244.519b6502d940.stremio.rocks:12470/
+```
+
+Operationally, if a trusted certificate is approaching expiry and refresh fails while VPN is ON:
+
+1. temporarily switch VPN to DIRECT/OFF;
+2. restart/recreate the Stremio server so the certificate helper can fetch through the direct egress;
+3. confirm the new certificate expiry;
+4. enable VPN again.
+
+Do not delete a still-valid certificate merely because refresh failed. Certificate persistence is stored with the Stremio cache and survives normal upgrades/recreates.
+
+---
+
 # Configuration persistence and restart reliability
 
 Version 2.x treats configuration persistence as a release-blocking capability.
@@ -475,35 +522,164 @@ docker compose -f compose.yaml -f compose.dns.yaml up -d
 
 # Transcoding
 
-The project keeps the copy-first policy: compatible media is not needlessly transcoded.
+The project keeps a copy-first policy: compatible media remains Direct Stream whenever possible. An explicit execution profile changes how required video transcoding is executed; it does not force every stream to transcode.
 
-Supported execution profiles include:
+Supported execution profiles:
 
 ```text
 Preserve Stremio decision
-H.264 VAAPI
-HEVC VAAPI
-H.264 VAAPI Full GPU
-HEVC VAAPI Full GPU
+H.264 VAAPI — GPU encode only
+HEVC VAAPI — GPU encode only
+H.264 VAAPI — Full GPU
+HEVC VAAPI — Full GPU
 H.264 NVIDIA NVENC
 HEVC NVIDIA NVENC
 H.264 CPU / libx264
 HEVC CPU / libx265
 ```
 
-Hardware profiles are exposed only after runtime verification.
+Hardware profiles are selectable only after real FFmpeg runtime verification.
 
-VAAPI overlay:
+## Automatic backend selection
+
+Use the launcher for normal operation:
+
+```bash
+GPU_BACKEND=auto sh start.sh
+```
+
+or for an explicit pull/recreate:
+
+```bash
+GPU_BACKEND=auto sh start.sh pull
+GPU_BACKEND=auto sh start.sh up -d --force-recreate
+```
+
+AUTO behavior:
+
+```text
+valid Intel/DRM render node
+        │
+        └──► VAAPI overlay + runtime self-tests
+
+no usable VAAPI + NVIDIA runtime
+        │
+        └──► NVIDIA overlay + real NVENC self-tests
+
+no usable hardware backend
+        │
+        └──► CPU fallback
+```
+
+AUTO may expose more than one detected accelerator for capability testing, but WebAdmin only offers profiles whose encoder self-test succeeds.
+
+## VAAPI device discovery
+
+Leave `VAAPI_DEVICE` empty unless a specific render node must be forced:
+
+```bash
+GPU_BACKEND=auto
+VAAPI_DEVICE=
+```
+
+`start.sh` prefers an Intel render node by PCI vendor ID and can therefore handle hosts where the usable device is `renderD128`, `renderD129` or another render node.
+
+Do not copy a render-node value from another server without validating the local host.
+
+## Intel media driver
+
+Modern Intel GPUs such as Tiger Lake / Iris Xe normally use the Intel media driver:
+
+```bash
+LIBVA_DRIVER_NAME=iHD
+```
+
+A typical validation is:
+
+```bash
+docker exec stremio-libtorrent-server \
+  vainfo --display drm --device /dev/dri/renderD128
+```
+
+A healthy iHD initialization includes:
+
+```text
+Trying to open .../iHD_drv_video.so
+va_openDriver() returns 0
+```
+
+If `LIBVA_DRIVER_NAME` is explicitly present but empty in the container, libva can attempt to load `_drv_video.so` and fail. On an affected Intel host, set `LIBVA_DRIVER_NAME=iHD` explicitly.
+
+Older Intel generations may require a different VAAPI driver; verify with `vainfo` rather than assuming `iHD`.
+
+## Runtime profile verification
+
+Refresh the hardware/profile matrix:
+
+```bash
+curl -fsS -X POST \
+  http://<LAN-IP>:8090/api/transcoding/profiles/refresh
+```
+
+Inspect the result:
+
+```bash
+curl -fsS http://<LAN-IP>:8090/api/transcoding/profiles
+```
+
+For a validated Intel full-GPU H.264 path, the expected state is similar to:
+
+```text
+selected    = preserve
+recommended = vaapi-full-h264
+device      = /dev/dri/renderD128
+
+vaapi  detected=true  runtime=true  h264=true  hevc=true  selectable=true
+nvidia detected=false runtime=false h264=false hevc=false selectable=false
+cpu    detected=true  runtime=true  h264=true  hevc=true  selectable=true
+```
+
+`selected=preserve` is not an error. The recommender does not silently change the operator's execution profile.
+
+Apply a verified profile explicitly:
+
+```bash
+curl -fsS -X PUT \
+  http://<LAN-IP>:8090/api/transcoding/profile \
+  -H 'Content-Type: application/json' \
+  -d '{"profile":"vaapi-full-h264","quality":22}'
+```
+
+## Transcoding job lifecycle
+
+Compose exposes:
+
+```text
+STREMIOSRV_TRANSCODE_IDLE_TIMEOUT
+STREMIOSRV_TRANSCODE_GC_INTERVAL
+STREMIOSRV_TRANSCODE_GC_MAX_AGE
+```
+
+The Compose production fallbacks are `300`, `60` and `600` seconds respectively. More aggressive values can be useful for testing abandoned-job cleanup but should be treated as explicit operator overrides, especially a short idle timeout that may affect long pauses.
+
+## Manual overlays
+
+Manual overlay invocation remains available for diagnostics:
+
+VAAPI:
 
 ```bash
 docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 ```
 
-NVIDIA overlay:
+NVIDIA:
 
 ```bash
 docker compose -f compose.yaml -f compose.gpu.yaml up -d
 ```
+
+For normal installs and upgrades, prefer `start.sh` so render-node discovery and backend selection remain consistent.
+
 
 ---
 
@@ -535,63 +711,94 @@ for routine upgrades.
 
 # Upgrading from a previous version
 
-The normal upgrade path preserves the named Docker volumes and therefore keeps WebAdmin settings, Stremio configuration/cache, Pi-hole data and VPN profile/state.
+The normal upgrade path preserves named Docker volumes and therefore keeps WebAdmin settings, Stremio configuration/cache, Pi-hole data and VPN profile/state.
 
-Before upgrading, confirm the current installation directory and optionally record the running images:
+Never use `docker compose down -v` for a routine upgrade.
 
-```bash
-cd ~/stremio-libtorrent-server-webadmin
-docker compose ps
-docker compose images
-```
+## Upgrade using the stable `:latest` images
 
-Upgrade a normal Git-based installation from an earlier 2.x release to the current release:
+The validated release workflow publishes Server, WebAdmin and VPN images with versioned tags plus the moving aliases `:2` and `:latest`.
+
+For a normal Git-based installation:
 
 ```bash
 cd ~/stremio-libtorrent-server-webadmin
 
-git fetch --prune origin
-git checkout main
+git switch main
 git pull --ff-only origin main
-
-docker compose pull
-sh start.sh
 ```
 
-Do **not** run `docker compose down -v`: the `-v` option deletes the persistent named volumes.
+Keep the image variables on `:latest`:
 
-After the upgrade, validate the stack:
+```text
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest
+```
+
+For hardware auto-detection, leave the VAAPI device unset unless the host requires an explicit override:
+
+```text
+GPU_BACKEND=auto
+VAAPI_DEVICE=
+```
+
+Then pull and recreate through the launcher:
 
 ```bash
-docker compose ps
-curl -fsS http://127.0.0.1:8090/health
-curl -fsS http://127.0.0.1:11470/health
+GPU_BACKEND=auto sh start.sh pull
+
+GPU_BACKEND=auto \
+sh start.sh up -d --force-recreate
 ```
 
-For a LAN host such as `192.168.1.245`, also verify the WebAdmin and server externally:
+`start.sh` detects the LAN IPv4, selects the hardware overlay and persists the detected `IPADDRESS` for subsequent Compose/WebAdmin operations.
+
+## Post-upgrade validation
+
+First verify images and container state:
 
 ```bash
-curl -fsS http://192.168.1.245:8090/health
-curl -fsS http://192.168.1.245:11470/health
+docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
+
+docker inspect stremio-libtorrent-server \
+  --format 'SERVER={{.Config.Image}}'
+
+docker inspect stremio-webadmin \
+  --format 'WEBADMIN={{.Config.Image}}'
+
+docker inspect stremio-gluetun \
+  --format 'VPN={{.Config.Image}}'
 ```
 
-Then confirm in WebAdmin that the saved configuration is still present and that the expected VPN state is shown. A server restart from WebAdmin should complete without losing `/config/admin-settings.json`.
-
-If the previous installation used the old `compose.vpn.yaml` topology, do not continue launching that file. Version 2.x uses the unified `compose.yaml`; `start-vpn.sh` is only a compatibility wrapper and VPN enable/disable is controlled from WebAdmin.
-
-For VAAPI installations, start with the hardware overlay after updating:
+Ports are bound to the detected `IPADDRESS`, not necessarily to `127.0.0.1`. Therefore use the actual LAN address for host-side health checks:
 
 ```bash
-docker compose -f compose.yaml -f compose.vaapi.yaml pull
-docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+curl -fsS http://<LAN-IP>:11470/health
+curl -fsS http://<LAN-IP>:8090/health
+curl -fsS http://<LAN-IP>:8090/api/component-versions
 ```
 
-For NVIDIA installations:
+Example for `192.168.1.244`:
 
 ```bash
-docker compose -f compose.yaml -f compose.gpu.yaml pull
-docker compose -f compose.yaml -f compose.gpu.yaml up -d
+curl -fsS http://192.168.1.244:11470/health
+curl -fsS http://192.168.1.244:8090/health
 ```
+
+The Stremio container intentionally has no host port listing of its own because it shares Gluetun's network namespace. Published Stremio ports appear on `stremio-gluetun`.
+
+Then validate the transcoding matrix:
+
+```bash
+curl -fsS -X POST \
+  http://<LAN-IP>:8090/api/transcoding/profiles/refresh
+```
+
+For Intel hosts, also verify the active VAAPI driver and local render node. Do not assume that a device number validated on another server applies to this one.
+
+If the previous installation used the old `compose.vpn.yaml` topology, do not continue launching that file. Version 2.x uses the unified `compose.yaml`; `start-vpn.sh` is retained only as a compatibility wrapper and VPN enable/disable is controlled from WebAdmin.
+
 
 ## Rollback after an upgrade
 
@@ -623,9 +830,9 @@ sh start.sh
 ## GitHub Container Registry
 
 ```text
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.14
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.14
-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.14
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.17
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.17
+ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.17
 ```
 
 Stable moving aliases:
@@ -640,9 +847,9 @@ These aliases are updated only by the validated 2.x release workflow.
 ## Docker Hub
 
 ```text
-edmanique/stremio-libtorrent-server-webadmin:2.0.14
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.14
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.14
+edmanique/stremio-libtorrent-server-webadmin:2.0.17
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.17
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.17
 ```
 
 ---
@@ -791,6 +998,7 @@ VERSIONING.md
 - Keep the VPN kill switch enabled.
 - Do not store passwords, tokens or VPN credentials in tracked `.env` files.
 - Treat Library Addon URLs/tokens as secrets.
+- A trusted `stremio.rocks` certificate is persistent; if renewal fails while VPN is enabled, keep the valid certificate and retry renewal through DIRECT/OFF mode rather than deleting it.
 
 ---
 
@@ -798,7 +1006,7 @@ VERSIONING.md
 
 Current stable release:
 
-[docs/releases/v2.0.7.md](docs/releases/v2.0.7.md)
+[docs/releases/v2.0.17.md](docs/releases/v2.0.17.md)
 
 Versioning:
 
