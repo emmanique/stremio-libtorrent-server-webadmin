@@ -188,3 +188,82 @@ def test_the_master_playlist_answers_504_when_ffprobe_times_out(monkeypatch):
     app.state.converter = _FakeConv()
     r = TestClient(app).get("/hlsv2/job1/master.m3u8", params={"mediaURL": "http://x/y"})
     assert r.status_code == 504
+
+
+def test_master_advertises_embedded_subtitles_without_ffmpeg_subtitle_muxing():
+    from stremiosrv.api.hls import _master_with_subtitles
+
+    master = (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:7\n"
+        '#EXT-X-STREAM-INF:BANDWIDTH=422400,CODECS="avc1.640828,mp4a.40.2"\n'
+        "index.m3u8\n"
+    )
+    probe = {
+        "format": {"duration": 6621.455},
+        "streams": [
+            {"index": 0, "track": "video", "codec": "hevc"},
+            {"index": 1, "track": "audio", "codec": "aac", "lang": "eng"},
+            {"index": 31, "track": "subtitle", "codec": "subrip", "lang": "por"},
+            {"index": 32, "track": "subtitle", "codec": "subrip", "lang": "por"},
+        ],
+    }
+    media = "https://host/" + "a" * 40 + "/0?"
+    out = _master_with_subtitles(master, probe, media)
+
+    assert out.count("#EXT-X-MEDIA:TYPE=SUBTITLES") == 2
+    assert 'GROUP-ID="subs"' in out
+    assert 'LANGUAGE="por"' in out
+    assert 'NAME="por"' in out
+    assert 'NAME="por (2)"' in out
+    assert "subtitles/31.m3u8?" in out
+    assert "subtitles/32.m3u8?" in out
+    assert 'SUBTITLES="subs"' in out
+    # Regression for 2.0.13: no FFmpeg var_stream_map subtitle-only metadata such as sname appears.
+    assert "sname:" not in out
+
+
+def test_subtitle_media_playlist_points_to_global_track_vtt():
+    from stremiosrv.api.hls import _subtitle_media_playlist
+
+    info_hash = "b" * 40
+    media = f"https://host/{info_hash}/0?"
+    out = _subtitle_media_playlist(media, 31, 6621.455)
+
+    assert out.startswith("#EXTM3U")
+    assert "#EXT-X-TARGETDURATION:6622" in out
+    assert "#EXTINF:6621.455," in out
+    assert f"/{info_hash}/0/subtitles.vtt?" in out
+    assert "track=31" in out
+    assert "#EXT-X-ENDLIST" in out
+
+
+def test_subtitle_media_playlist_rejects_non_server_media_url():
+    import pytest
+    from fastapi import HTTPException
+    from stremiosrv.api.hls import _subtitle_media_playlist
+
+    with pytest.raises(HTTPException) as exc:
+        _subtitle_media_playlist("https://example.invalid/movie.mkv", 31, 10)
+    assert exc.value.status_code == 400
+
+
+def test_subtitle_playlist_route_marks_job_active(monkeypatch):
+    from stremiosrv.api import hls
+    from stremiosrv.app import create_app
+
+    info_hash = "c" * 40
+    app = create_app()
+    conv = _FakeConv()
+    app.state.converter = conv
+    c = TestClient(app)
+
+    r = c.get(
+        "/hlsv2/job1/subtitles/31.m3u8",
+        params={"mediaURL": f"https://host/{info_hash}/0?", "duration": 42},
+    )
+    assert r.status_code == 200
+    assert "text" not in r.headers.get("content-type", "")
+    assert "#EXTM3U" in r.text
+    assert "track=31" in r.text
+    assert conv.touched == ["job1"]
