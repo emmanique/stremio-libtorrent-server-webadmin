@@ -12,6 +12,7 @@ import urllib.request
 import zlib
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 
 from stremiosrv import metrics
 from stremiosrv.stream.fileserver import file_disk_path
@@ -250,11 +251,66 @@ def subtitles_list(info_hash: str, idx: int, mediaURL: str) -> dict:
     return {"subtitles": subs}
 
 
+def _subtitle_stream_by_global_index(media_url: str, track: int) -> dict:
+    """Resolve the public `track` identifier returned by subtitles.json.
+
+    probe_media() exposes FFmpeg's global stream index in both `id` and `index`. The old extractor
+    incorrectly fed that value to `0:s:<n>`, where <n> is subtitle-relative. On files with many
+    subtitle tracks this silently selected a different stream. Keep one public identifier contract:
+    the value returned by subtitles.json is the exact value accepted by subtitles.vtt.
+    """
+    try:
+        pr = probe_media(media_url)
+    except ProbeTimeoutError as e:
+        raise HTTPException(status_code=504, detail="subtitle probe timed out") from e
+
+    for stream in pr.get("streams") or []:
+        if stream.get("track") == "subtitle" and stream.get("index") == track:
+            return stream
+    raise HTTPException(status_code=404, detail="subtitle track not found")
+
+
+def _webvtt_stream(proc: subprocess.Popen):
+    """Yield FFmpeg WebVTT incrementally and always reap the child process.
+
+    Full-track subtitle extraction may legitimately take longer than 60 seconds on a remote/torrent
+    media URL. Streaming stdout avoids buffering the whole movie's subtitle track and removes the
+    hard 60-second wall that caused HTTP 500 in 2.0.14.
+    """
+    try:
+        assert proc.stdout is not None
+        while True:
+            chunk = proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+        rc = proc.wait()
+        if rc:
+            logger.warning("embedded subtitle ffmpeg exited with code %s", rc)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+
 @router.get("/{info_hash}/{idx:int}/subtitles.vtt")
-def subtitles_vtt(info_hash: str, idx: int, mediaURL: str, track: int = 0) -> Response:
-    argv = ["ffmpeg", "-hide_banner", "-y", "-i", mediaURL,
-            "-map", f"0:s:{track}", "-f", "webvtt", "pipe:1"]
-    proc = subprocess.run(argv, capture_output=True, timeout=60)
-    if proc.returncode != 0:
-        raise HTTPException(status_code=404, detail="subtitle track not found")
-    return Response(content=proc.stdout, media_type="text/vtt")
+def subtitles_vtt(info_hash: str, idx: int, mediaURL: str, track: int = 0) -> StreamingResponse:
+    _subtitle_stream_by_global_index(mediaURL, track)
+    argv = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", mediaURL,
+        "-map", f"0:{track}", "-c:s", "webvtt", "-f", "webvtt", "pipe:1",
+    ]
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+    except OSError as e:
+        raise HTTPException(status_code=503, detail="subtitle extractor unavailable") from e
+    return StreamingResponse(_webvtt_stream(proc), media_type="text/vtt; charset=utf-8")
