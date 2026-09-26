@@ -14,9 +14,9 @@ pyproject.toml               upstream stremiosrv package version
 Current baseline:
 
 ```text
-Fork/Platform    2.0.17
-WebAdmin         2.0.17
-VPN Gateway      2.0.17
+Fork/Platform    2.0.18
+WebAdmin         2.0.18
+VPN Gateway      2.0.18
 Upstream Server  1.6.15
 ```
 
