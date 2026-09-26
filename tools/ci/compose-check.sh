@@ -14,5 +14,5 @@ test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server
 test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.VAAPI_DEVICE // empty')" = ""
 
 docker compose -f compose.yaml -f compose.dns.yaml config --quiet
-docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
+VAAPI_DEVICE=/dev/dri/renderD129 docker compose -f compose.yaml -f compose.vaapi.yaml config --quiet
 docker compose -f compose.yaml -f compose.gpu.yaml config --quiet
