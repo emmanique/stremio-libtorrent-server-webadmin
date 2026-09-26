@@ -19,6 +19,7 @@ FILES = [
     "start.ps1",
     "start.bat",
     "scripts/backup-before-upgrade.sh",
+    "scripts/check-env-upgrade.sh",
     "README.md",
     "QUICKSTART.md",
     "VPN.md",
@@ -27,6 +28,7 @@ FILES = [
     "FORK_VERSION",
     "SERVER_VERSION",
     "docs/DEPLOYMENT_PACKAGE.md",
+    "docs/CLEAN_INSTALL_TEST.md",
 ]
 
 

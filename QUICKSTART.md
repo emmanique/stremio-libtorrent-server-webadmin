@@ -295,4 +295,4 @@ The legacy `start-vpn.*` files are compatibility wrappers only.
 
 ## Upgrade rule
 
-Before every upgrade run `sh scripts/backup-before-upgrade.sh`, keep the existing `.env`, extract the new deployment package over the installation directory, compare `.env` with the new `.env.example`, run `sh start.sh config`, then start the stack with `sh start.sh`. Never use `docker compose down -v` for a routine upgrade.
+Before every upgrade run `sh scripts/backup-before-upgrade.sh`, keep the existing `.env`, extract the new deployment package over the installation directory, run `sh scripts/check-env-upgrade.sh` to identify newly introduced variables, review any reported changes, run `sh start.sh config`, then start the stack with `sh start.sh`. Never use `docker compose down -v` for a routine upgrade.
