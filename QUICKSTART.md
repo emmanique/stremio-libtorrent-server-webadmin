@@ -241,13 +241,7 @@ librarySubtitlesReports
 libraryLabelsLearned
 ```
 
-For a full platform/performance check, including container health, HTTP latency, DNS, VPN path and transcoding readiness:
-
-```bash
-python3 tools/platform_performance_test.py
-```
-
-See `docs/PERFORMANCE.md` for interpretation and optional synthetic encoding tests.
+For contributors using a full source checkout, the repository also contains `tools/platform_performance_test.py` and `docs/PERFORMANCE.md`. These development diagnostics are intentionally not included in the minimal production deployment package.
 
 ## 8. Pi-hole LAN DNS (optional)
 
