@@ -36,7 +36,7 @@ if printf '%s\n' "$server_block" | grep -q '^[[:space:]]*devices:'; then
   echo "Base compose must not require a GPU/VAAPI device." >&2
   exit 1
 fi
-grep -q '${VAAPI_DEVICE:-/dev/dri/renderD128}' compose.vaapi.yaml
+grep -q '${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD\* device}' compose.vaapi.yaml
 
 grep -q 'COPY vpn_profiles.py' webadmin/Dockerfile
 grep -q 'vpn_profiles.install(app)' webadmin/transcoding_verified_status.py
