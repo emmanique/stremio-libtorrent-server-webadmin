@@ -70,24 +70,8 @@ def test_blank_libva_driver_is_not_seeded_or_reinjected():
 
     assert "\nLIBVA_DRIVER_NAME=\n" not in f"\n{env_example}"
     assert "# LIBVA_DRIVER_NAME=iHD" in env_example
-    assert "grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*
-    start = (ROOT / "start.sh").read_text(encoding="utf-8")
-
-    assert "_repair_gateway_namespace()" in start
-    assert "stale Gluetun namespace detected" in start
-    assert "--no-deps --force-recreate stremio-libtorrent-server" in start
-    assert "repaired_mode" in start
-    assert 'if [ "$repaired_mode" != "container:$gluetun_id" ]' in start
-
-
-def test_start_does_not_recreate_server_when_gateway_namespace_is_current():
-    start = (ROOT / "start.sh").read_text(encoding="utf-8")
-
-    assert '"container:$gluetun_id")' in start
-    assert 'echo "[start] gateway namespace: current"' in start
-    assert "return 0" in start
-" in start
-    assert "sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d'" in start
+    assert "LIBVA_DRIVER_NAME=[[:space:]]*$" in start
+    assert "unset LIBVA_DRIVER_NAME" in start
     assert "- LIBVA_DRIVER_NAME" in vaapi
 
 
