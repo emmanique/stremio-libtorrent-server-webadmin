@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.20
+# Stremio Server WebAdmin 2.0.21
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,9 +9,9 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 2.0.20 |
-| WebAdmin | 2.0.20 |
-| VPN Gateway | 2.0.20 |
+| Fork / Platform | 2.0.21 |
+| WebAdmin | 2.0.21 |
+| VPN Gateway | 2.0.21 |
 | Upstream Server/Core | 1.6.15 |
 
 ## What changed in 2.0.20
@@ -23,7 +23,7 @@ Current versions:
 - The integrated Stremio/libtorrent core remains 1.6.15.
 - Physical validation covered configuration persistence/restart and a complete DIRECT -> VPN -> DIRECT routing cycle.
 
-## Pending 2.0.21 hotfix
+## What changed in 2.0.21
 
 - Fixes an HTTP 500 from `/api/vpn/status` introduced by the 2.0.20 active-profile provider normalization.
 - The provider parser now imports the Python `json` module before reading the persisted active CyberGhost profile.
@@ -69,7 +69,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=2.0.20
+VERSION=2.0.21
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -329,6 +329,6 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v2.0.20.md
+Release notes: docs/releases/v2.0.21.md
 
 License: MIT. See LICENSE.
