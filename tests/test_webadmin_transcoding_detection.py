@@ -382,3 +382,76 @@ def test_profiles_prefers_valid_container_device_over_stale_persisted_device(mon
     assert data["device"] == "/dev/dri/renderD129"
     assert seen
     assert all(device == "/dev/dri/renderD129" for device in seen)
+
+
+def test_nvenc_diagnostics_reports_api_incompatibility():
+    class Result:
+        output = (
+            b"[h264_nvenc] Loaded Nvenc version 11.1\n"
+            b"[h264_nvenc] Driver does not support the required nvenc API version. "
+            b"Required: 12.0 Found: 11.1\n"
+            b"Conversion failed!\n"
+        )
+
+    diagnostics = profiles._nvenc_diagnostics(Result())
+
+    assert diagnostics["failureCode"] == "nvenc-api-incompatible"
+    assert diagnostics["nvencApiCompatible"] is False
+    assert diagnostics["nvencApiRequired"] == "12.0"
+    assert diagnostics["nvencApiAvailable"] == "11.1"
+    assert "required 12.0" in diagnostics["reason"]
+    assert "available 11.1" in diagnostics["reason"]
+
+
+def test_backend_matrix_exposes_nvenc_api_details(monkeypatch):
+    items = [
+        {"id": "vaapi-h264", "available": True, "reason": "ok"},
+        {"id": "vaapi-hevc", "available": True, "reason": "ok"},
+        {
+            "id": "nvenc-h264",
+            "available": False,
+            "reason": "NVIDIA detected and runtime ready, but NVENC API is incompatible.",
+            "nvencApiCompatible": False,
+            "nvencApiRequired": "12.0",
+            "nvencApiAvailable": "11.1",
+        },
+        {
+            "id": "nvenc-hevc",
+            "available": False,
+            "reason": "NVIDIA detected and runtime ready, but NVENC API is incompatible.",
+            "nvencApiCompatible": False,
+            "nvencApiRequired": "12.0",
+            "nvencApiAvailable": "11.1",
+        },
+        {"id": "cpu-h264", "available": True, "reason": "ok"},
+        {"id": "cpu-hevc", "available": True, "reason": "ok"},
+    ]
+
+    monkeypatch.setattr(
+        profiles.base,
+        "_exists",
+        lambda container, path, executable=False: path in {
+            "/dev/dri/renderD129",
+            "/dev/nvidia0",
+        },
+    )
+    monkeypatch.setattr(
+        profiles,
+        "_nvidia_runtime_info",
+        lambda container: {
+            "detected": True,
+            "runtime": True,
+            "name": "NVIDIA GeForce 920M",
+            "driver": "470.256.02",
+        },
+    )
+
+    matrix = profiles._backend_matrix(object(), items, "/dev/dri/renderD129")
+    nvidia = matrix["nvidia"]
+
+    assert nvidia["detected"] is True
+    assert nvidia["runtime"] is True
+    assert nvidia["selectable"] is False
+    assert nvidia["nvencApiCompatible"] is False
+    assert nvidia["nvencApiRequired"] == "12.0"
+    assert nvidia["nvencApiAvailable"] == "11.1"
