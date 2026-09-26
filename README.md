@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.17
+# Stremio Server WebAdmin 2.0.18
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -6,11 +6,22 @@
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.17** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.17** release line. This release adds runtime-verified GPU backend selection, improved Intel VAAPI handling, NVIDIA capability gating, transcoding lifecycle controls and safer hardware/profile detection across hosts.
+Version **2.0.18** keeps upstream server/core **1.6.15** and introduces the maintenance/deployment refactor: a clean production package, generic first-install configuration, explicit backup/upgrade procedures, reusable branch governance and separated Fast CI / Dependencies / Full regression / Release gates.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
+
+## 2.0.18 at a glance
+
+- **Clean deployment package:** production releases now contain only Compose/launcher/configuration/backup/documentation files; source, tests and CI tooling stay in the repository.
+- **Generic first-install baseline:** no fixed LAN IP, personal allowlist, Angola-only timezone or mandatory VAAPI device is assumed.
+- **Safe launcher configuration:** `start.sh` reads literal values from the local `.env` without sourcing it and preserves environment-variable precedence.
+- **Upgrade protection:** `scripts/backup-before-upgrade.sh` captures `.env`, resolved Compose/image state and persistent configuration volumes before an upgrade.
+- **Branch simplification:** only `main` and `development` are permanent; feature/fix/release/hotfix branches are temporary.
+- **Separated CI:** Fast CI covers deterministic merge gates, Dependencies isolates dependency changes, Full regression executes integration/build/smoke/deployment-package tests, and Release publishes only after those contracts pass.
+- **Self-contained GitHub workflows:** new workflows use runner-native `git`, `docker`, `uv` and `gh` commands instead of external composite Actions, avoiding the repository's zero-job `startup_failure` behaviour.
+- **Current versions:** upstream server/core **1.6.15**; fork/WebAdmin/VPN **2.0.18**.
 
 ## Installation and upgrade model
 
