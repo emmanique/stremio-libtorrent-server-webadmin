@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.19
+# Stremio Server WebAdmin 2.0.20
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,22 +9,19 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 2.0.19 |
-| WebAdmin | 2.0.19 |
-| VPN Gateway | 2.0.19 |
+| Fork / Platform | 2.0.20 |
+| WebAdmin | 2.0.20 |
+| VPN Gateway | 2.0.20 |
 | Upstream Server/Core | 1.6.15 |
 
-## What changed in 2.0.19
+## What changed in 2.0.20
 
-- GPU discovery now treats hardware exposure and the active transcoding profile as separate concerns.
-- Dual-GPU hosts can expose both Intel/DRM VAAPI and NVIDIA to the server container when both runtimes are available.
-- VAAPI no longer assumes `/dev/dri/renderD128`; `start.sh` discovers an available render node such as `renderD129`.
-- Direct use of `compose.vaapi.yaml` now requires an explicit `VAAPI_DEVICE`.
-- Empty `LIBVA_DRIVER_NAME` is omitted, allowing libva to auto-detect the correct driver unless an explicit override is configured.
-- WebAdmin independently reports NVIDIA hardware detection, runtime readiness and NVENC API compatibility.
-- Legacy NVIDIA GPUs remain visible as detected even when their driver cannot satisfy the NVENC API required by the bundled FFmpeg.
-- Real FFmpeg runtime self-tests inside the server container remain authoritative for whether a profile is selectable.
-- Existing `.env` files remain valid; operators should review only host-specific VAAPI overrides after upgrade.
+- Clean installs no longer seed an active blank `LIBVA_DRIVER_NAME=` assignment.
+- Existing empty `LIBVA_DRIVER_NAME=` entries are normalized safely; explicit non-empty overrides such as `iHD` remain supported.
+- WebAdmin now receives and reports the detected `VAAPI_DEVICE`, so hosts using render nodes such as `/dev/dri/renderD129` no longer display the stale `renderD128` default.
+- VPN provider telemetry is normalized from the active profile, avoiding stale `pia` or `custom` labels when CyberGhost is active.
+- The integrated Stremio/libtorrent core remains 1.6.15.
+- Physical validation covered configuration persistence/restart and a complete DIRECT -> VPN -> DIRECT routing cycle.
 
 ## Runtime architecture
 
@@ -66,7 +63,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=2.0.19
+VERSION=2.0.20
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -326,6 +323,6 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v2.0.19.md
+Release notes: docs/releases/v2.0.20.md
 
 License: MIT. See LICENSE.
