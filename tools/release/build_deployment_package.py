@@ -19,6 +19,7 @@ FILES = [
     "start.ps1",
     "start.bat",
     "scripts/backup-before-upgrade.sh",
+    "scripts/check-env-upgrade.sh",
     "README.md",
     "QUICKSTART.md",
     "VPN.md",
