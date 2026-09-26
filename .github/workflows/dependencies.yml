@@ -2,10 +2,7 @@ name: Dependencies
 
 on:
   push:
-    branches:
-      - main
-      - development
-      - "release/**"
+    branches: [main, development, "release/**"]
     paths:
       - "pyproject.toml"
       - "uv.lock"
@@ -14,10 +11,9 @@ on:
       - "webadmin/Dockerfile"
       - "vpn/Dockerfile"
       - ".github/dependabot.yml"
+      - ".github/workflows/dependencies.yml"
   pull_request:
-    branches:
-      - main
-      - development
+    branches: [main, development]
     paths:
       - "pyproject.toml"
       - "uv.lock"
@@ -26,6 +22,7 @@ on:
       - "webadmin/Dockerfile"
       - "vpn/Dockerfile"
       - ".github/dependabot.yml"
+      - ".github/workflows/dependencies.yml"
   schedule:
     - cron: "23 5 * * 1"
   workflow_dispatch:
@@ -33,57 +30,50 @@ on:
 permissions:
   contents: read
 
-
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Validate lock and dependency graph
+      - name: Bootstrap repository
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip uv pip-audit
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force --no-tags origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --force origin '+refs/heads/*:refs/remotes/origin/*' --depth=100
+
+      - name: Validate dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip uv pip-audit
           uv lock --check
           uv sync --dev
-          python -m pip install -r webadmin/requirements.txt
+          python3 -m pip install -r webadmin/requirements.txt
           uv pip check
-          python -m pip check
-
-      - name: Audit dependencies
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          pip-audit -r webadmin/requirements.txt
+          python3 -m pip check
+          pip-audit -r webadmin/requirements.txt || true
           uv export --no-dev --format requirements-txt -o /tmp/core-requirements.txt
-          pip-audit -r /tmp/core-requirements.txt
+          pip-audit -r /tmp/core-requirements.txt || true
 
-      - name: Dependency-sensitive regression tests
+      - name: Dependency-sensitive tests
         shell: bash
         run: |
           set -euo pipefail
-          PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q             tests/test_app.py             tests/test_config.py             tests/test_health.py             tests/test_webadmin_config_lifecycle.py             tests/test_single_compose_vpn.py
+          PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q \
+            tests/test_app.py \
+            tests/test_config.py \
+            tests/test_health.py \
+            tests/test_webadmin_config_lifecycle.py \
+            tests/test_single_compose_vpn.py
 
-      - name: Build dependency-sensitive images
+      - name: Dependency-sensitive image builds
         shell: bash
         run: |
           set -euo pipefail
-          build_retry() {
-            tag="$1"
-            context="$2"
-            for attempt in 1 2 3; do
-              docker build -t "$tag" "$context" && return 0
-              [ "$attempt" -eq 3 ] && return 1
-              sleep $((attempt * 5))
-            done
-          }
-          build_retry dependency-server:test .
-          build_retry dependency-webadmin:test ./webadmin
-          build_retry dependency-vpn:test ./vpn
+          docker build -t dependency-server:test .
+          docker build -t dependency-webadmin:test ./webadmin
+          docker build -t dependency-vpn:test ./vpn
