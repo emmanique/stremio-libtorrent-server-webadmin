@@ -105,16 +105,27 @@ COMPOSE_ARGS="-f compose.yaml"
 GPU_BACKEND=${GPU_BACKEND:-$(_env_value GPU_BACKEND auto)}
 VAAPI_DEVICE=${VAAPI_DEVICE:-$(_env_value VAAPI_DEVICE "")}
 LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
+if [ -n "$LIBVA_DRIVER_NAME" ]; then
+    export LIBVA_DRIVER_NAME
+else
+    unset LIBVA_DRIVER_NAME
+fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 _detect_vaapi_device() {
-    # Explicit configured device has priority.
+    # Launcher discovery must not depend on host FFmpeg being installed.
+    # Runtime capability is verified later inside the server container by
+    # WebAdmin's real FFmpeg self-tests.
+
+    # Explicit configured device has priority when the render node exists.
     if [ -n "${VAAPI_DEVICE:-}" ] && [ -e "$VAAPI_DEVICE" ]; then
         printf '%s\n' "$VAAPI_DEVICE"
         return 0
     fi
 
-    # Prefer Intel DRM render nodes.
+    # Prefer Intel DRM render nodes. Enumerate renderD* rather than assuming
+    # renderD128 because Proxmox/LXC and multi-GPU hosts can expose renderD129+
+    # instead.
     for dev in /dev/dri/renderD*; do
         [ -e "$dev" ] || continue
 
@@ -127,7 +138,7 @@ _detect_vaapi_device() {
         fi
     done
 
-    # Generic DRM render-node fallback.
+    # Generic DRM fallback for non-Intel VAAPI-capable hosts.
     for dev in /dev/dri/renderD*; do
         [ -e "$dev" ] || continue
         printf '%s\n' "$dev"
@@ -159,16 +170,28 @@ fi
 
 case "$GPU_BACKEND" in
     auto)
-        if [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+        if [ -n "$VAAPI_DETECTED_DEVICE" ] && [ "$NVIDIA_DETECTED" = "true" ]; then
+            VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+            export VAAPI_DEVICE
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
+
+            # Dual-GPU host: expose both verified accelerator families to the
+            # server container. Keep VAAPI as the initial/default transcoding
+            # policy, while WebAdmin runtime self-tests can validate and offer
+            # both VAAPI and NVIDIA profiles to the operator.
+            GPU_BACKEND_EFFECTIVE=hybrid
+            TRANSCODING_HWACCEL=vaapi
+            TRANSCODING_VIDEO_CODEC=h264_vaapi
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+            echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
+            echo "[start] VAAPI render node: $VAAPI_DEVICE"
+            echo "[start] NVIDIA runtime: available"
+
+        elif [ -n "$VAAPI_DETECTED_DEVICE" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
-
-            # AUTO exposes every detected accelerator so WebAdmin can perform
-            # real runtime self-tests and offer only the working profiles.
-            if [ "$NVIDIA_DETECTED" = "true" ]; then
-                COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
-            fi
 
             GPU_BACKEND_EFFECTIVE=vaapi
             TRANSCODING_HWACCEL=vaapi
@@ -178,25 +201,21 @@ case "$GPU_BACKEND" in
             echo "[start] GPU backend AUTO -> VAAPI"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
 
-            if [ "$NVIDIA_DETECTED" = "true" ]; then
-                echo "[start] NVIDIA runtime also exposed for capability testing"
-            fi
-
         elif [ "$NVIDIA_DETECTED" = "true" ]; then
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
             GPU_BACKEND_EFFECTIVE=nvidia
             TRANSCODING_HWACCEL=nvenc
             TRANSCODING_VIDEO_CODEC=h264_nvenc
-            LIBVA_DRIVER_NAME=
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> NVIDIA"
 
         else
             GPU_BACKEND_EFFECTIVE=cpu
             TRANSCODING_HWACCEL=cpu
             TRANSCODING_VIDEO_CODEC=libx264
-            LIBVA_DRIVER_NAME=
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> CPU fallback"
         fi
         ;;
@@ -229,8 +248,8 @@ case "$GPU_BACKEND" in
         GPU_BACKEND_EFFECTIVE=nvidia
         TRANSCODING_HWACCEL=nvenc
         TRANSCODING_VIDEO_CODEC=h264_nvenc
-        LIBVA_DRIVER_NAME=
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: NVIDIA"
         ;;
 
@@ -238,8 +257,8 @@ case "$GPU_BACKEND" in
         GPU_BACKEND_EFFECTIVE=cpu
         TRANSCODING_HWACCEL=cpu
         TRANSCODING_VIDEO_CODEC=libx264
-        LIBVA_DRIVER_NAME=
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: CPU"
         ;;
 
