@@ -15,3 +15,7 @@ services:
     # the correct driver (for example Intel iHD).
     environment:
       - LIBVA_DRIVER_NAME
+
+  webadmin:
+    environment:
+      VAAPI_DEVICE: "${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD* device}"
