@@ -93,6 +93,13 @@ def test_vpn_status_uses_active_profile_provider():
     assert '"provider": _active_profile_provider()' in vpn_admin
 
 
+
+def test_vpn_admin_imports_json_for_profile_provider():
+    vpn_admin = (ROOT / "webadmin" / "vpn_admin.py").read_text(encoding="utf-8")
+
+    assert "import json" in vpn_admin
+    assert "json.loads(" in vpn_admin
+
 def test_start_repairs_stale_gluetun_namespace_after_stack_upgrade():
     start = (ROOT / "start.sh").read_text(encoding="utf-8")
 
