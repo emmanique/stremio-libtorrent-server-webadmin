@@ -1,16 +1,95 @@
-# Stremio Server WebAdmin 2.0.17
+# Stremio Server WebAdmin 2.0.18
 
-[![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
-[![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
+[![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
+[![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg)](LICENSE)
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
 
-Version **2.0.17** integrates upstream server/core **1.6.15** while keeping the fork platform, WebAdmin and VPN gateway on the independent **2.0.17** release line. This release adds runtime-verified GPU backend selection, improved Intel VAAPI handling, NVIDIA capability gating, transcoding lifecycle controls and safer hardware/profile detection across hosts.
+Version **2.0.18** keeps upstream server/core **1.6.15** and introduces the maintenance/deployment refactor: a clean production package, generic first-install configuration, explicit backup/upgrade procedures, reusable branch governance and separated Fast CI / Dependencies / Full regression / Release gates.
 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
+
+## 2.0.18 at a glance
+
+- **Clean deployment package:** production releases now contain only Compose/launcher/configuration/backup/documentation files; source, tests and CI tooling stay in the repository.
+- **Generic first-install baseline:** no fixed LAN IP, personal allowlist, Angola-only timezone or mandatory VAAPI device is assumed.
+- **Safe launcher configuration:** `start.sh` reads literal values from the local `.env` without sourcing it and preserves environment-variable precedence.
+- **Upgrade protection:** `scripts/backup-before-upgrade.sh` captures `.env`, resolved Compose/image state and persistent configuration volumes before an upgrade.
+- **Branch simplification:** only `main` and `development` are permanent; feature/fix/release/hotfix branches are temporary.
+- **Separated CI:** Fast CI covers deterministic merge gates, Dependencies isolates dependency changes, Full regression executes integration/build/smoke/deployment-package tests, and Release publishes only after those contracts pass.
+- **Self-contained GitHub workflows:** new workflows use runner-native `git`, `docker`, `uv` and `gh` commands instead of external composite Actions, avoiding the repository's zero-job `startup_failure` behaviour.
+- **Current versions:** upstream server/core **1.6.15**; fork/WebAdmin/VPN **2.0.18**.
+
+## Installation and upgrade model
+
+Production hosts should use the **deployment ZIP/TAR attached to a GitHub Release**, not a full source checkout. The deployment package contains only the supported runtime surface: Compose files, launchers, `.env.example`, backup tooling and operational documentation. Source code, tests, GitHub Actions and development tooling remain in the repository only.
+
+### New installation
+
+1. Install Docker Engine with the Docker Compose plugin.
+2. Download the deployment package for the desired release and extract it into a dedicated directory such as `/opt/stremio-webadmin`.
+3. Create the local configuration once:
+
+```bash
+cp .env.example .env
+```
+
+4. Review at minimum these values before first start:
+   - `TZ`;
+   - `PIHOLE_PASSWORD`;
+   - `VPN_LAN_CIDRS` when the LAN is not in `192.168.0.0/16`;
+   - `IPADDRESS_SOURCE` / `IPADDRESS` on multi-homed or statically bound hosts;
+   - optional image pins when a fixed release is preferred over `:latest`;
+   - optional GPU overrides only after the local VAAPI/NVIDIA path is validated.
+5. Validate the resolved topology before starting:
+
+```bash
+sh start.sh config
+```
+
+6. Start the platform:
+
+```bash
+sh start.sh
+```
+
+The default baseline is hardware-neutral and CPU-safe. `start.sh` detects a usable VAAPI/NVIDIA runtime and only adds the corresponding overlay when the host supports it.
+
+### Upgrade
+
+The local `.env` and Docker volumes are **installation state** and must not be replaced by a release package. Before every upgrade:
+
+```bash
+sh scripts/backup-before-upgrade.sh
+```
+
+Use `--with-cache` only when the large cache volume must also be archived:
+
+```bash
+sh scripts/backup-before-upgrade.sh --with-cache
+```
+
+Then extract the new deployment package over the installation directory while preserving the existing `.env`. Compare configuration changes:
+
+```bash
+diff -u .env .env.example || true
+```
+
+Reconcile any newly introduced variables manually, validate the new Compose model, then start:
+
+```bash
+sh start.sh config
+sh start.sh
+```
+
+Do **not** use `docker compose down -v` for a routine upgrade. It deletes persistent volumes. The backup script preserves configuration/state volumes and records the resolved Compose/image state so an upgrade can be rolled back deliberately.
+
+### Development and releases
+
+Only `main` and `development` are long-lived branches. Feature/fix/release/hotfix branches are temporary. Normal development merges into `development`; a release branch is cut from `development`, validated by **Full regression**, merged into `main`, tagged and published. See `docs/BRANCHING.md` and `docs/TESTING.md`.
 
 ## 2.0.17 at a glance
 

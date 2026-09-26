@@ -2,7 +2,7 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -16,7 +16,7 @@ updates:
 
   - package-ecosystem: "pip"
     directory: "/webadmin"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -30,7 +30,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -39,7 +39,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/webadmin"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -48,7 +48,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/vpn"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -57,7 +57,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "develop/2.x"
+    target-branch: "development"
     schedule:
       interval: "weekly"
       day: "monday"

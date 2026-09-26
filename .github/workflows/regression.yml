@@ -1,0 +1,37 @@
+name: Full regression
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Bootstrap repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force --no-tags origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --force origin '+refs/heads/*:refs/remotes/origin/*' --depth=100
+
+      - name: Install regression tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip uv
+          uv lock --check
+          uv sync --dev
+          python3 -m pip install -r webadmin/requirements.txt
+          uv pip check
+
+      - name: Full regression suite
+        run: bash tools/ci/full-regression.sh

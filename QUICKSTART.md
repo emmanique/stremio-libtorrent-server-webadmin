@@ -18,33 +18,31 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.15
-Fork/Platform   2.0.8
-WebAdmin        2.0.8
-VPN Gateway     2.0.8
+Fork/Platform   2.0.18
+WebAdmin        2.0.18
+VPN Gateway     2.0.18
 ```
 
 ## 1. Obtain the deployment files
 
-For a normal managed installation, clone the repository so that you also have `start.sh`, overrides and documentation:
+For production, download the `stremio-webadmin-<version>-deployment.zip` or `.tar.gz` attached to the GitHub Release. This package contains only the supported deployment surface and excludes source code, tests and CI tooling.
+
+```bash
+mkdir -p /opt/stremio-webadmin
+tar -xzf stremio-webadmin-<version>-deployment.tar.gz -C /opt/stremio-webadmin --strip-components=1
+cd /opt/stremio-webadmin
+cp .env.example .env
+```
+
+For source development only, clone the repository and use `development`:
 
 ```bash
 git clone https://github.com/emmanique/stremio-libtorrent-server-webadmin.git
 cd stremio-libtorrent-server-webadmin
+git checkout development
 ```
 
-The application itself is **not built from this checkout**. The checkout only supplies Compose/launcher configuration; application images are pulled from the selected registry.
-
-For a minimal one-file deployment you may download only `compose.yaml`:
-
-```bash
-mkdir -p stremio-platform
-cd stremio-platform
-curl -fsSLO https://raw.githubusercontent.com/emmanique/stremio-libtorrent-server-webadmin/main/compose.yaml
-docker compose pull
-docker compose up -d
-```
-
-In that minimal mode, set `IPADDRESS` explicitly when you want ports/certificate generation tied to a specific LAN address.
+The application itself is **not built from the deployment package**. Compose pulls the published Server, WebAdmin and VPN images from the selected registry.
 
 ## 2. Published images
 
@@ -62,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.8
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.8
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.8
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.18
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.18
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.18
 ```
 
 ### Docker Hub — alternative mirror
@@ -73,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:2.0.3
+edmanique/stremio-libtorrent-server-webadmin:2.0.18
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.3
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.18
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.3
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.18
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.3
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.3
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.3
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.18
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.18
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.18
 ```
 
 Or follow the moving aliases:
@@ -104,7 +102,7 @@ Do not store passwords, API tokens, private keys or certificates in the versione
 
 ## 3. Host IP detection
 
-The tracked `.env` deliberately leaves `IPADDRESS`, `PIHOLE_WEB_BIND_IP` and `PIHOLE_DNS_BIND_IP` empty.
+The `.env.example` template leaves `IPADDRESS`, `PIHOLE_WEB_BIND_IP` and `PIHOLE_DNS_BIND_IP` empty. A local `.env` is created from that template.
 
 Start the stack through `start.sh`. Before Docker Compose is evaluated, the script asks the Linux routing table which IPv4 address the host would use for its default route. That address is exported as `IPADDRESS` and is also used for the Pi-hole bindings.
 
@@ -118,7 +116,7 @@ For example, on a host currently using `192.168.1.244`, the launcher prints:
 [start] Library    : https://192.168.1.244:12470/library/
 ```
 
-If the machine later receives another address through DHCP, running `start.sh` again detects the new address automatically. The tracked `.env` does not need to be edited.
+If the machine later receives another address through DHCP, running `start.sh` again detects the new address automatically. With `IPADDRESS_SOURCE=auto`, the local `.env` is refreshed by the launcher when the host address changes.
 
 To force a specific address for a particular run:
 
@@ -202,7 +200,7 @@ The addon exposes:
 
 - a `My Library` catalog containing content already present on the server;
 - local streams for recognised cached movies/episodes;
-- automatic learning of `IMDb/Stremio ID ↔ cached torrent` from playback reports, without exposing file names in logs.
+- automatic learning of `IMDb/Stremio ID → cached torrent` from playback reports, without exposing file names in logs.
 
 `STREMIOSRV_LIBRARY_ADDON_ALLOW` is empty by default, which activates the server's built-in private-network allowlist. That already includes RFC1918 LAN ranges such as `192.168.0.0/16`.
 
@@ -243,13 +241,7 @@ librarySubtitlesReports
 libraryLabelsLearned
 ```
 
-For a full platform/performance check, including container health, HTTP latency, DNS, VPN path and transcoding readiness:
-
-```bash
-python3 tools/platform_performance_test.py
-```
-
-See `docs/PERFORMANCE.md` for interpretation and optional synthetic encoding tests.
+For contributors using a full source checkout, the repository also contains `tools/platform_performance_test.py` and `docs/PERFORMANCE.md`. These development diagnostics are intentionally not included in the minimal production deployment package.
 
 ## 8. Pi-hole LAN DNS (optional)
 
@@ -299,3 +291,8 @@ sh start.sh
 On first start the gateway remains in DIRECT mode. Configure a CyberGhost/OpenVPN profile in **WebAdmin → VPN**, then enable the VPN there. Disabling VPN returns the persistent gateway to DIRECT mode without stopping the Gluetun container or changing Stremio's network namespace.
 
 The legacy `start-vpn.*` files are compatibility wrappers only.
+
+
+## Upgrade rule
+
+Before every upgrade run `sh scripts/backup-before-upgrade.sh`, keep the existing `.env`, extract the new deployment package over the installation directory, compare `.env` with the new `.env.example`, run `sh start.sh config`, then start the stack with `sh start.sh`. Never use `docker compose down -v` for a routine upgrade.

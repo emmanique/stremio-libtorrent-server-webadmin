@@ -2,48 +2,38 @@ name: Upstream sync
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - ".github/workflows/upstream-sync.yml"
-      - ".github/workflows/ci.yml"
       - ".github/upstream-protected-paths.txt"
       - "tools/upstream/**"
+      - "tools/ci/**"
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
-
-concurrency:
-  group: upstream-controlled-sync
-  cancel-in-progress: true
+  pull-requests: write
 
 jobs:
-  prepare:
-    name: Prepare controlled merge
+  sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      changed: ${{ steps.sync.outputs.changed }}
-      blocked: ${{ steps.sync.outputs.blocked }}
-      main_sha: ${{ steps.sync.outputs.main_sha }}
-      target: ${{ steps.sync.outputs.target }}
-      version: ${{ steps.sync.outputs.version }}
-      branch: ${{ steps.sync.outputs.branch }}
-      integration_sha: ${{ steps.sync.outputs.integration_sha }}
-
+    timeout-minutes: 80
     steps:
-      - name: Check out fork
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
+      - name: Bootstrap main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force origin main upstream/integration || git fetch --force origin main
+          git checkout -B main origin/main
 
-      - name: Controlled merge from principal
+      - name: Prepare controlled upstream integration
         id: sync
-        continue-on-error: true
         shell: bash
         env:
           UPSTREAM_URL: https://github.com/andrewhack/stremio-libtorrent-server.git
@@ -51,81 +41,31 @@ jobs:
           TARGET_BRANCH: upstream/integration
         run: bash tools/upstream/controlled_sync.sh
 
-      - name: Upload sync assessment
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: upstream-sync-report
-          path: upstream-sync-report.md
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Stop when manual reconciliation is required
-        if: steps.sync.outcome == 'failure'
+      - name: Validate integration
+        if: steps.sync.outputs.changed == 'true'
         shell: bash
-        run: |
-          echo "Controlled upstream merge requires manual reconciliation." >&2
-          exit 1
-
-  validate:
-    name: Validate fork after upstream merge
-    needs: prepare
-    if: needs.prepare.outputs.changed == 'true'
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: upstream/integration
-    permissions:
-      contents: read
-
-  promote:
-    name: Promote validated upstream merge
-    needs:
-      - prepare
-      - validate
-    if: needs.prepare.outputs.changed == 'true' && needs.validate.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Promote integration branch safely
-        shell: bash
-        env:
-          EXPECTED_MAIN: ${{ needs.prepare.outputs.main_sha }}
-          INTEGRATION_SHA: ${{ needs.prepare.outputs.integration_sha }}
         run: |
           set -euo pipefail
+          python3 -m pip install --upgrade pip uv
+          uv lock --check
+          uv sync --dev
+          python3 -m pip install -r webadmin/requirements.txt
+          bash tools/ci/full-regression.sh
 
-          git fetch origin main develop/2.x upstream/integration --prune
-
-          CURRENT_MAIN="$(git rev-parse origin/main)"
-          test "$CURRENT_MAIN" = "$EXPECTED_MAIN" || {
-            echo "main moved during validation: expected $EXPECTED_MAIN, current $CURRENT_MAIN" >&2
-            echo "No promotion performed; the next upstream-sync run will rebuild on the new main." >&2
-            exit 1
-          }
-
-          test "$(git rev-parse origin/upstream/integration)" = "$INTEGRATION_SHA"
-
-          git push origin "$INTEGRATION_SHA:refs/heads/main"
-
-          # Keep develop aligned only when nobody advanced it independently
-          # while the upstream validation was running.
-          git fetch origin develop/2.x --prune
-          DEVELOP_SHA="$(git rev-parse origin/develop/2.x)"
-          if [ "$DEVELOP_SHA" = "$EXPECTED_MAIN" ]; then
-            git push origin "$INTEGRATION_SHA:refs/heads/develop/2.x"
+      - name: Open or refresh PR to development
+        if: steps.sync.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_VERSION: ${{ steps.sync.outputs.version }}
+          TARGET_SHA: ${{ steps.sync.outputs.target }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --state open --base development --head upstream/integration --json number --jq '.[0].number // empty')"
+          title="Integrate upstream $TARGET_VERSION"
+          body="Controlled upstream integration for $TARGET_VERSION ($TARGET_SHA). Fork-owned paths were preserved and Full regression passed on upstream/integration. Production remains isolated until the normal release flow."
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
           else
-            echo "develop/2.x has independent work; leaving it unchanged."
+            gh pr create --base development --head upstream/integration --title "$title" --body "$body"
           fi
-
-          git push origin --delete upstream/integration || true
-
-          echo "Validated upstream merge promoted to main: $INTEGRATION_SHA"

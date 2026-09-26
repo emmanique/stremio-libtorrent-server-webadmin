@@ -12,7 +12,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
-      TZ: "${TZ:-Africa/Luanda}"
+      TZ: "${TZ:-UTC}"
       STREMIO_VPN_CONFIG_DIR: /vpn
       STREMIO_VPN_ENABLED_FILE: /vpn/enabled
       STREMIO_DNS_PROXY_PORT: "${STREMIO_DNS_PROXY_PORT:-1053}"
@@ -77,10 +77,10 @@ services:
       STREMIOSRV_LIBRARY_OWNER: "${STREMIOSRV_LIBRARY_OWNER:-}"
       STREMIOSRV_LIBRARY_ADDON_ALLOW: "${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}"
       TRANSCODING_MODE: "${TRANSCODING_MODE:-auto}"
-      TRANSCODING_HWACCEL: "${TRANSCODING_HWACCEL:-vaapi}"
-      VAAPI_DEVICE: "${VAAPI_DEVICE:-/dev/dri/renderD128}"
+      TRANSCODING_HWACCEL: "${TRANSCODING_HWACCEL:-cpu}"
+      VAAPI_DEVICE: "${VAAPI_DEVICE:-}"
       LIBVA_DRIVER_NAME: "${LIBVA_DRIVER_NAME:-}"
-      TRANSCODING_VIDEO_CODEC: "${TRANSCODING_VIDEO_CODEC:-h264_vaapi}"
+      TRANSCODING_VIDEO_CODEC: "${TRANSCODING_VIDEO_CODEC:-libx264}"
       TRANSCODING_VIDEO_QUALITY: "${TRANSCODING_VIDEO_QUALITY:-22}"
       TRANSCODING_AUDIO_CODEC: "${TRANSCODING_AUDIO_CODEC:-aac}"
       TRANSCODING_AUDIO_BITRATE: "${TRANSCODING_AUDIO_BITRATE:-192k}"
@@ -89,7 +89,7 @@ services:
       TRANSCODING_DIRECT_VIDEO_CODECS: "${TRANSCODING_DIRECT_VIDEO_CODECS:-h264}"
       TRANSCODING_DIRECT_AUDIO_CODECS: "${TRANSCODING_DIRECT_AUDIO_CODECS:-aac,mp3,ac3}"
       TRANSCODING_FALLBACK_CODEC: "${TRANSCODING_FALLBACK_CODEC:-libx264}"
-      TRANSCODING_HW_DECODE: "${TRANSCODING_HW_DECODE:-true}"
+      TRANSCODING_HW_DECODE: "${TRANSCODING_HW_DECODE:-false}"
     volumes:
       - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
       - stremio-config:/config:ro
@@ -146,7 +146,7 @@ services:
     container_name: stremio-pihole
     restart: unless-stopped
     environment:
-      TZ: "${TZ:-Africa/Luanda}"
+      TZ: "${TZ:-UTC}"
       FTLCONF_webserver_api_password: "${PIHOLE_PASSWORD:-}"
       FTLCONF_dns_listeningMode: all
       # One stable upstream in both modes. The VPN supervisor exposes 172.30.0.10:1053:
