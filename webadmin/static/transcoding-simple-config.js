@@ -119,10 +119,17 @@
           return '';
         };
 
+        const nvencApi = backendId === 'nvidia' && item.nvencApiCompatible === false
+          ? `<div class="simpleBackendLine">NVENC API: <b>INCOMPATIBLE</b></div>
+             <div class="simpleBackendLine">Required: <b>${item.nvencApiRequired || 'unknown'}</b></div>
+             <div class="simpleBackendLine">Available: <b>${item.nvencApiAvailable || 'unknown'}</b></div>`
+          : '';
+
         return `<div class="simpleBackend ${statusClass}">
           <strong>${item.label || backendId.toUpperCase()}</strong>
           <div class="simpleBackendLine">Detected: <b>${detected}</b>${extra(backendId)}</div>
           <div class="simpleBackendLine">Runtime: <b>${runtime}</b></div>
+          ${nvencApi}
           <div class="simpleBackendLine">H.264: <b>${h264}</b></div>
           <div class="simpleBackendLine">HEVC: <b>${hevc}</b></div>
           <div class="simpleBackendLine">Selectable: <b>${item.selectable ? 'YES' : 'NO'}</b></div>

@@ -18,9 +18,9 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.15
-Fork/Platform   2.0.18
-WebAdmin        2.0.18
-VPN Gateway     2.0.18
+Fork/Platform   2.0.19
+WebAdmin        2.0.19
+VPN Gateway     2.0.19
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.18
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.18
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.18
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.19
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.19
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.19
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:2.0.18
+edmanique/stremio-libtorrent-server-webadmin:2.0.19
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.18
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.19
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.18
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.19
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.18
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.18
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.18
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.19
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.19
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.19
 ```
 
 Or follow the moving aliases:
@@ -261,10 +261,16 @@ The platform is **copy first**: compatible streams remain Direct Stream/`copy`. 
 
 WebAdmin exposes explicit profiles only after real FFmpeg runtime self-tests. Available profiles can include VAAPI encode-only, VAAPI Full GPU, NVIDIA NVENC and CPU libx264/libx265 modes.
 
-VAAPI:
+VAAPI (recommended through the launcher):
 
 ```bash
-docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+sh start.sh
+```
+
+`start.sh` discovers an available `/dev/dri/renderD*` node. If the VAAPI overlay is invoked directly, set the device explicitly, for example:
+
+```bash
+VAAPI_DEVICE=/dev/dri/renderD129 docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 ```
 
 NVIDIA/NVENC:
