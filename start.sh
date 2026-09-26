@@ -188,15 +188,29 @@ fi
 
 case "$GPU_BACKEND" in
     auto)
-        if [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+        if [ -n "$VAAPI_DETECTED_DEVICE" ] && [ "$NVIDIA_DETECTED" = "true" ]; then
+            VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+            export VAAPI_DEVICE
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
+
+            # Dual-GPU host: expose both verified accelerator families to the
+            # server container. Keep VAAPI as the initial/default transcoding
+            # policy, while WebAdmin runtime self-tests can validate and offer
+            # both VAAPI and NVIDIA profiles to the operator.
+            GPU_BACKEND_EFFECTIVE=hybrid
+            TRANSCODING_HWACCEL=vaapi
+            TRANSCODING_VIDEO_CODEC=h264_vaapi
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+            echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
+            echo "[start] VAAPI render node: $VAAPI_DEVICE"
+            echo "[start] NVIDIA runtime: available"
+
+        elif [ -n "$VAAPI_DETECTED_DEVICE" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
 
-            # AUTO selects exactly one accelerator backend. Do not layer
-            # compose.gpu.yaml on top of the VAAPI overlay: that overlay forces
-            # runtime: nvidia and would make a VAAPI-selected host depend on the
-            # NVIDIA container runtime.
             GPU_BACKEND_EFFECTIVE=vaapi
             TRANSCODING_HWACCEL=vaapi
             TRANSCODING_VIDEO_CODEC=h264_vaapi
