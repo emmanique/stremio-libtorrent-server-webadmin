@@ -18,9 +18,9 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.15
-Fork/Platform   2.0.19
-WebAdmin        2.0.19
-VPN Gateway     2.0.19
+Fork/Platform   2.0.20
+WebAdmin        2.0.20
+VPN Gateway     2.0.20
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.19
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.19
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.19
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.20
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.20
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.20
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:2.0.19
+edmanique/stremio-libtorrent-server-webadmin:2.0.20
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.19
+edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.20
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.19
+edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.20
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.19
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.19
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.19
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.20
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.20
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.20
 ```
 
 Or follow the moving aliases:
