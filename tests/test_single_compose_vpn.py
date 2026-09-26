@@ -62,6 +62,35 @@ def test_base_compose_does_not_require_vaapi_device():
     assert "${VAAPI_DEVICE:-/dev/dri/renderD128}" not in vaapi
 
 
+
+def test_blank_libva_driver_is_not_seeded_or_reinjected():
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+    vaapi = (ROOT / "compose.vaapi.yaml").read_text(encoding="utf-8")
+
+    assert "\nLIBVA_DRIVER_NAME=\n" not in f"\n{env_example}"
+    assert "# LIBVA_DRIVER_NAME=iHD" in env_example
+    assert "grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert "_repair_gateway_namespace()" in start
+    assert "stale Gluetun namespace detected" in start
+    assert "--no-deps --force-recreate stremio-libtorrent-server" in start
+    assert "repaired_mode" in start
+    assert 'if [ "$repaired_mode" != "container:$gluetun_id" ]' in start
+
+
+def test_start_does_not_recreate_server_when_gateway_namespace_is_current():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert '"container:$gluetun_id")' in start
+    assert 'echo "[start] gateway namespace: current"' in start
+    assert "return 0" in start
+" in start
+    assert "sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d'" in start
+    assert "- LIBVA_DRIVER_NAME" in vaapi
+
+
 def test_start_repairs_stale_gluetun_namespace_after_stack_upgrade():
     start = (ROOT / "start.sh").read_text(encoding="utf-8")
 
