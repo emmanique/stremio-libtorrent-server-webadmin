@@ -32,7 +32,8 @@ It executes:
 - network/integration tests with retry;
 - build of Server, WebAdmin and VPN images;
 - runtime smoke tests for all images;
-- release deployment-package generation and content validation.
+- release deployment-package generation and content validation;
+- clean-install simulation by extracting the deployment package, creating a fresh `.env` from `.env.example` and resolving the stack through `start.sh config`.
 
 A release must never bypass this workflow.
 
