@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.18
+# Stremio Server WebAdmin 2.0.19
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,30 +9,22 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 2.0.18 |
-| WebAdmin | 2.0.18 |
-| VPN Gateway | 2.0.18 |
+| Fork / Platform | 2.0.19 |
+| WebAdmin | 2.0.19 |
+| VPN Gateway | 2.0.19 |
 | Upstream Server/Core | 1.6.15 |
 
-## What changed in 2.0.18
+## What changed in 2.0.19
 
-- Production installation is now based on a minimal deployment ZIP/TAR attached to a GitHub Release, not a full source checkout.
-- The deployment baseline is host-neutral: no fixed LAN IP, personal allowlist, Angola-only timezone or mandatory GPU device.
-- start.sh reads local .env values safely and keeps precedence as exported environment > .env > autodetection/default.
-- GPU_BACKEND=auto selects VAAPI or NVIDIA only after local runtime capability is detected; otherwise it remains CPU-safe.
-- A pre-upgrade backup script preserves configuration/state volumes and records the resolved Compose/image state.
-- CI is separated into Fast CI, Dependencies, Full regression, Prepare release, Release and Upstream sync.
-- Full regression builds and validates the deployment package and simulates a clean installation from it before a production release.
-- Only main and development are long-lived branches. feature/*, fix/*, release/* and hotfix/* are temporary.
-
-## Planned changes for 2.0.19
-
-- GPU auto-detection now treats hardware exposure and the active transcoding profile as separate concerns.
-- Dual-GPU hosts can expose both Intel/DRM VAAPI and NVIDIA to the server container when both runtimes are available; WebAdmin still enables only profiles that pass real FFmpeg self-tests.
-- VAAPI no longer assumes `/dev/dri/renderD128`. `start.sh` discovers an available render node and exports `VAAPI_DEVICE`; WebAdmin then verifies real FFmpeg capability inside the server container; direct Compose usage with `compose.vaapi.yaml` must provide `VAAPI_DEVICE` explicitly.
-- An empty `LIBVA_DRIVER_NAME` is no longer forced into the server container, allowing libva driver autodetection. Set an explicit value such as `iHD` only when the host requires it.
-- NVIDIA detection, container-runtime readiness and NVENC encoder compatibility are reported separately. Legacy GPUs can therefore be shown as detected/runtime-ready even when their driver exposes an older NVENC API than the bundled FFmpeg requires.
-- Upgrade impact: existing `.env` files remain valid. Review `VAAPI_DEVICE` and `LIBVA_DRIVER_NAME` only if they were previously set as host-specific overrides.
+- GPU discovery now treats hardware exposure and the active transcoding profile as separate concerns.
+- Dual-GPU hosts can expose both Intel/DRM VAAPI and NVIDIA to the server container when both runtimes are available.
+- VAAPI no longer assumes `/dev/dri/renderD128`; `start.sh` discovers an available render node such as `renderD129`.
+- Direct use of `compose.vaapi.yaml` now requires an explicit `VAAPI_DEVICE`.
+- Empty `LIBVA_DRIVER_NAME` is omitted, allowing libva to auto-detect the correct driver unless an explicit override is configured.
+- WebAdmin independently reports NVIDIA hardware detection, runtime readiness and NVENC API compatibility.
+- Legacy NVIDIA GPUs remain visible as detected even when their driver cannot satisfy the NVENC API required by the bundled FFmpeg.
+- Real FFmpeg runtime self-tests inside the server container remain authoritative for whether a profile is selectable.
+- Existing `.env` files remain valid; operators should review only host-specific VAAPI overrides after upgrade.
 
 ## Runtime architecture
 
@@ -74,7 +66,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=2.0.18
+VERSION=2.0.19
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -334,6 +326,6 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v2.0.18.md
+Release notes: docs/releases/v2.0.19.md
 
 License: MIT. See LICENSE.
