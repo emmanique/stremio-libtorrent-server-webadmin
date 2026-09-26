@@ -106,7 +106,7 @@ Review these parameters before first start:
 | STREMIOSRV_LIBRARY_ADDON_ALLOW | Leave empty for the built-in private-network allowlist unless a deliberate custom allowlist is required. |
 | GPU_BACKEND | Keep auto for normal installations. |
 | VAAPI_DEVICE | Leave empty unless a specific local render node has been validated. |
-| LIBVA_DRIVER_NAME | Leave empty unless the host requires an explicit driver such as iHD. |
+| LIBVA_DRIVER_NAME | Omit it by default. Add a non-empty override such as iHD only when the host requires it. |
 
 VPN credentials, certificates and private keys are not entered in .env. Configure/import them later in WebAdmin -> VPN.
 
@@ -171,7 +171,7 @@ Recommended baseline:
 ~~~env
 GPU_BACKEND=auto
 VAAPI_DEVICE=
-LIBVA_DRIVER_NAME=
+# LIBVA_DRIVER_NAME=iHD  # optional explicit override only
 TRANSCODING_HWACCEL=cpu
 TRANSCODING_VIDEO_CODEC=libx264
 ~~~

@@ -108,6 +108,13 @@ LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
 if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
+    # Docker Compose reads .env independently from the launcher. A blank active
+    # LIBVA_DRIVER_NAME= line would otherwise be re-injected after the shell
+    # variable is unset. Remove only an empty assignment; preserve non-empty
+    # host-specific overrides such as iHD.
+    if grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$' "$ENV_FILE"; then
+        sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
+    fi
     unset LIBVA_DRIVER_NAME
 fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')

@@ -62,6 +62,37 @@ def test_base_compose_does_not_require_vaapi_device():
     assert "${VAAPI_DEVICE:-/dev/dri/renderD128}" not in vaapi
 
 
+
+def test_blank_libva_driver_is_not_seeded_or_reinjected():
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+    vaapi = (ROOT / "compose.vaapi.yaml").read_text(encoding="utf-8")
+
+    assert "\nLIBVA_DRIVER_NAME=\n" not in f"\n{env_example}"
+    assert "# LIBVA_DRIVER_NAME=iHD" in env_example
+    assert "LIBVA_DRIVER_NAME=[[:space:]]*$" in start
+    assert "unset LIBVA_DRIVER_NAME" in start
+    assert "- LIBVA_DRIVER_NAME" in vaapi
+
+
+def test_vaapi_overlay_reports_detected_device_to_webadmin():
+    vaapi = (ROOT / "compose.vaapi.yaml").read_text(encoding="utf-8")
+    transcoding = (ROOT / "webadmin" / "transcoding_config.py").read_text(encoding="utf-8")
+
+    assert "  webadmin:" in vaapi
+    assert 'VAAPI_DEVICE: "' in vaapi
+    assert 'os.getenv("VAAPI_DEVICE", "")' in transcoding
+    assert '"transcoding_vaapi_device": "/dev/dri/renderD128"' not in transcoding
+
+
+def test_vpn_status_uses_active_profile_provider():
+    vpn_admin = (ROOT / "webadmin" / "vpn_admin.py").read_text(encoding="utf-8")
+
+    assert "def _active_profile_provider()" in vpn_admin
+    assert 'result["provider"] = active_provider' in vpn_admin
+    assert '"provider": _active_profile_provider()' in vpn_admin
+
+
 def test_start_repairs_stale_gluetun_namespace_after_stack_upgrade():
     start = (ROOT / "start.sh").read_text(encoding="utf-8")
 
