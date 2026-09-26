@@ -5,6 +5,7 @@ Credentials are stored in a private Docker volume and are never returned by the 
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading

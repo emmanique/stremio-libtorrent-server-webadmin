@@ -23,6 +23,12 @@ Current versions:
 - The integrated Stremio/libtorrent core remains 1.6.15.
 - Physical validation covered configuration persistence/restart and a complete DIRECT -> VPN -> DIRECT routing cycle.
 
+## Pending 2.0.21 hotfix
+
+- Fixes an HTTP 500 from `/api/vpn/status` introduced by the 2.0.20 active-profile provider normalization.
+- The provider parser now imports the Python `json` module before reading the persisted active CyberGhost profile.
+- No deployment topology, persistent-volume layout, VPN credentials, or `.env` migration is required for this patch.
+
 ## Runtime architecture
 
 ~~~text
