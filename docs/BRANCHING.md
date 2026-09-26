@@ -55,3 +55,7 @@ Do not create version branches such as `development/2.x`, `maintenance/2.0.x`, o
 ## Recommended branch protection
 
 For `main`, require pull requests, **Fast CI** and **Full regression**. Do not allow routine direct pushes. For `development`, require pull requests and **Fast CI**. Release tags should be treated as immutable after publication.
+
+## Legacy branch cleanup
+
+Historical version branches may remain temporarily for traceability, but they are not workflow targets and must not be used for new work. In particular, `develop/2.x` is legacy; `development` is the single integration branch. Old feature/fix/release/hotfix branches should be deleted after their merge/tag when no longer required for audit or rollback.
