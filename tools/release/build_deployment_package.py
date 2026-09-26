@@ -28,6 +28,7 @@ FILES = [
     "FORK_VERSION",
     "SERVER_VERSION",
     "docs/DEPLOYMENT_PACKAGE.md",
+    "docs/CLEAN_INSTALL_TEST.md",
 ]
 
 
