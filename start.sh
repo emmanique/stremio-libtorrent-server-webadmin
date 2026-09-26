@@ -108,6 +108,239 @@ LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
 if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
+    # Docker Compose reads .env independently from the launcher. A blank active
+    # LIBVA_DRIVER_NAME= line would therefore be re-injected even after this
+    # shell variable is unset. Normalize that invalid legacy/new-install state
+    # by removing only an empty assignment; explicit non-empty overrides remain.
+    if grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
+
+_detect_vaapi_device() {
+    # Launcher discovery must not depend on host FFmpeg being installed.
+    # Runtime capability is verified later inside the server container by
+    # WebAdmin's real FFmpeg self-tests.
+
+    # Explicit configured device has priority when the render node exists.
+    if [ -n "${VAAPI_DEVICE:-}" ] && [ -e "$VAAPI_DEVICE" ]; then
+        printf '%s\n' "$VAAPI_DEVICE"
+        return 0
+    fi
+
+    # Prefer Intel DRM render nodes. Enumerate renderD* rather than assuming
+    # renderD128 because Proxmox/LXC and multi-GPU hosts can expose renderD129+
+    # instead.
+    for dev in /dev/dri/renderD*; do
+        [ -e "$dev" ] || continue
+
+        node=$(basename "$dev")
+        vendor_file="/sys/class/drm/$node/device/vendor"
+
+        if [ -r "$vendor_file" ] && [ "$(cat "$vendor_file" 2>/dev/null)" = "0x8086" ]; then
+            printf '%s\n' "$dev"
+            return 0
+        fi
+    done
+
+    # Generic DRM fallback for non-Intel VAAPI-capable hosts.
+    for dev in /dev/dri/renderD*; do
+        [ -e "$dev" ] || continue
+        printf '%s\n' "$dev"
+        return 0
+    done
+
+    return 1
+}
+
+_nvidia_available() {
+    [ -e /dev/nvidia0 ] || return 1
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
+    nvidia-smi >/dev/null 2>&1 || return 1
+
+    docker info 2>/dev/null |
+        awk '/Runtimes:/ {
+            for (i=2; i<=NF; i++)
+                if ($i == "nvidia") found=1
+        }
+        END {exit found ? 0 : 1}'
+}
+
+VAAPI_DETECTED_DEVICE=$(_detect_vaapi_device 2>/dev/null || true)
+NVIDIA_DETECTED=false
+
+if _nvidia_available; then
+    NVIDIA_DETECTED=true
+fi
+
+case "$GPU_BACKEND" in
+    auto)
+        if [ -n "$VAAPI_DETECTED_DEVICE" ] && [ "$NVIDIA_DETECTED" = "true" ]; then
+            VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+            export VAAPI_DEVICE
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
+
+            # Dual-GPU host: expose both verified accelerator families to the
+            # server container. Keep VAAPI as the initial/default transcoding
+            # policy, while WebAdmin runtime self-tests can validate and offer
+            # both VAAPI and NVIDIA profiles to the operator.
+            GPU_BACKEND_EFFECTIVE=hybrid
+            TRANSCODING_HWACCEL=vaapi
+            TRANSCODING_VIDEO_CODEC=h264_vaapi
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+            echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
+            echo "[start] VAAPI render node: $VAAPI_DEVICE"
+            echo "[start] NVIDIA runtime: available"
+
+        elif [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+            VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+            export VAAPI_DEVICE
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
+
+            GPU_BACKEND_EFFECTIVE=vaapi
+            TRANSCODING_HWACCEL=vaapi
+            TRANSCODING_VIDEO_CODEC=h264_vaapi
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+            echo "[start] GPU backend AUTO -> VAAPI"
+            echo "[start] VAAPI render node: $VAAPI_DEVICE"
+
+        elif [ "$NVIDIA_DETECTED" = "true" ]; then
+            COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+            GPU_BACKEND_EFFECTIVE=nvidia
+            TRANSCODING_HWACCEL=nvenc
+            TRANSCODING_VIDEO_CODEC=h264_nvenc
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+            echo "[start] GPU backend AUTO -> NVIDIA"
+
+        else
+            GPU_BACKEND_EFFECTIVE=cpu
+            TRANSCODING_HWACCEL=cpu
+            TRANSCODING_VIDEO_CODEC=libx264
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+            echo "[start] GPU backend AUTO -> CPU fallback"
+        fi
+        ;;
+
+    vaapi|intel|intel-vaapi)
+        if [ -z "$VAAPI_DETECTED_DEVICE" ]; then
+            echo "[start] ERROR: VAAPI requested but no DRM render node was detected." >&2
+            exit 1
+        fi
+
+        VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
+        export VAAPI_DEVICE
+        COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
+        GPU_BACKEND_EFFECTIVE=vaapi
+        TRANSCODING_HWACCEL=vaapi
+        TRANSCODING_VIDEO_CODEC=h264_vaapi
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+
+        echo "[start] GPU backend forced: VAAPI"
+        echo "[start] VAAPI render node: $VAAPI_DEVICE"
+        ;;
+
+    nvidia|nvenc)
+        if [ "$NVIDIA_DETECTED" != "true" ]; then
+            echo "[start] ERROR: NVIDIA requested but GPU/runtime is not available." >&2
+            exit 1
+        fi
+
+        COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
+        GPU_BACKEND_EFFECTIVE=nvidia
+        TRANSCODING_HWACCEL=nvenc
+        TRANSCODING_VIDEO_CODEC=h264_nvenc
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+        echo "[start] GPU backend forced: NVIDIA"
+        ;;
+
+    cpu|software|none)
+        GPU_BACKEND_EFFECTIVE=cpu
+        TRANSCODING_HWACCEL=cpu
+        TRANSCODING_VIDEO_CODEC=libx264
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
+        echo "[start] GPU backend forced: CPU"
+        ;;
+
+    *)
+        echo "[start] ERROR: invalid GPU_BACKEND='$GPU_BACKEND'." >&2
+        echo "[start] valid values: auto, vaapi, nvidia, cpu" >&2
+        exit 1
+        ;;
+esac
+
+export GPU_BACKEND GPU_BACKEND_EFFECTIVE
+
+echo "[start] GPU requested : $GPU_BACKEND"
+echo "[start] GPU effective : $GPU_BACKEND_EFFECTIVE"
+
+echo "[start] detected host IPv4: $IPADDRESS"
+echo "[start] Web Player : http://$IPADDRESS:8080"
+echo "[start] WebAdmin   : http://$IPADDRESS:8090"
+echo "[start] API        : http://$IPADDRESS:11470"
+echo "[start] Library    : https://$IPADDRESS:12470/library/"
+echo "[start] Pi-hole    : http://$PIHOLE_WEB_BIND_IP:8053/admin/"
+
+if ! docker compose version >/dev/null 2>&1; then
+    echo "[start] Docker Compose plugin is not available." >&2
+    exit 1
+fi
+
+_repair_gateway_namespace() {
+    gluetun_id=$(docker inspect -f '{{.Id}}' stremio-gluetun 2>/dev/null || true)
+    stremio_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' stremio-libtorrent-server 2>/dev/null || true)
+
+    if [ -z "$gluetun_id" ] || [ -z "$stremio_mode" ]; then
+        echo "[start] gateway namespace check skipped: containers are not available yet"
+        return 0
+    fi
+
+    case "$stremio_mode" in
+        "container:$gluetun_id")
+            echo "[start] gateway namespace: current"
+            return 0
+            ;;
+        container:*)
+            echo "[start] stale Gluetun namespace detected; recreating only Stremio..."
+            # Gluetun is already healthy because the normal Compose start above
+            # honors the service_healthy dependency. Recreate only the dependent
+            # service so Docker resolves network_mode: service:gluetun to the
+            # current gateway container ID.
+            # shellcheck disable=SC2086
+            docker compose $COMPOSE_ARGS up -d --no-deps --force-recreate stremio-libtorrent-server
+
+            repaired_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' stremio-libtorrent-server 2>/dev/null || true)
+            if [ "$repaired_mode" != "container:$gluetun_id" ]; then
+                echo "[start] ERROR: Stremio did not attach to the current Gluetun namespace." >&2
+                return 1
+            fi
+            echo "[start] gateway namespace repaired"
+            ;;
+        *)
+            echo "[start] ERROR: unexpected Stremio network mode: $stremio_mode" >&2
+            return 1
+            ;;
+    esac
+}
+
+if [ "$#" -eq 0 ]; then
+    echo "[start] pulling published images..."
+    # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
+    docker compose $COMPOSE_ARGS pull
+    # Do not exec here: v2.0.6 performs a post-start namespace integrity check.
+    # shellcheck disable=SC2086
+    docker compose $COMPOSE_ARGS up -d --remove-orphans
+    _repair_gateway_namespace
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+exec docker compose $COMPOSE_ARGS "$@"
+ "$ENV_FILE"; then
+        sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
+    fi
     unset LIBVA_DRIVER_NAME
 fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
