@@ -121,6 +121,25 @@ def _set_vpn_requested(enabled: bool) -> None:
             pass
 
 
+def _active_profile_provider() -> str | None:
+    try:
+        profile_id = (VPN_DIR / "active_profile").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not re.fullmatch(r"[a-z0-9_-]+", profile_id):
+        return None
+    try:
+        data = json.loads(
+            (VPN_DIR / "profiles" / profile_id / "profile.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    provider = str(data.get("provider") or "").strip().lower()
+    return provider or None
+
+
 def _read_public_config() -> dict[str, object]:
     gluetun = _container(GLUETUN_CONTAINER)
     env = _env(gluetun)
@@ -138,6 +157,9 @@ def _read_public_config() -> dict[str, object]:
     for key, filename in PUBLIC_FILES.items():
         path = VPN_DIR / filename
         result[key] = _read_text(filename) if path.exists() else defaults[key]
+    active_provider = _active_profile_provider()
+    if active_provider:
+        result["provider"] = active_provider
     result["credentials"] = {
         "username": bool(_read_text(SECRET_FILES["username"])),
         "password": bool(_read_text(SECRET_FILES["password"])),
@@ -256,7 +278,10 @@ def vpn_status():
             "killSwitchActive": bool(routed and requested and firewall_on),
             "failClosed": bool(routed and requested and firewall_on),
         },
-        "runtime": _runtime_settings(settings),
+        "runtime": {
+            **_runtime_settings(settings),
+            **({"provider": _active_profile_provider()} if _active_profile_provider() else {}),
+        },
         "config": _read_public_config(),
         "limitations": {
             "portForwarding": False,
