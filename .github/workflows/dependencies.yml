@@ -33,9 +33,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: dependencies-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   validate:
