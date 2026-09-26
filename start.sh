@@ -105,6 +105,11 @@ COMPOSE_ARGS="-f compose.yaml"
 GPU_BACKEND=${GPU_BACKEND:-$(_env_value GPU_BACKEND auto)}
 VAAPI_DEVICE=${VAAPI_DEVICE:-$(_env_value VAAPI_DEVICE "")}
 LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
+if [ -n "$LIBVA_DRIVER_NAME" ]; then
+    export LIBVA_DRIVER_NAME
+else
+    unset LIBVA_DRIVER_NAME
+fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 _vaapi_device_works() {
@@ -205,16 +210,16 @@ case "$GPU_BACKEND" in
             GPU_BACKEND_EFFECTIVE=nvidia
             TRANSCODING_HWACCEL=nvenc
             TRANSCODING_VIDEO_CODEC=h264_nvenc
-            LIBVA_DRIVER_NAME=
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> NVIDIA"
 
         else
             GPU_BACKEND_EFFECTIVE=cpu
             TRANSCODING_HWACCEL=cpu
             TRANSCODING_VIDEO_CODEC=libx264
-            LIBVA_DRIVER_NAME=
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+            unset LIBVA_DRIVER_NAME
+            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> CPU fallback"
         fi
         ;;
@@ -247,8 +252,8 @@ case "$GPU_BACKEND" in
         GPU_BACKEND_EFFECTIVE=nvidia
         TRANSCODING_HWACCEL=nvenc
         TRANSCODING_VIDEO_CODEC=h264_nvenc
-        LIBVA_DRIVER_NAME=
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: NVIDIA"
         ;;
 
@@ -256,8 +261,8 @@ case "$GPU_BACKEND" in
         GPU_BACKEND_EFFECTIVE=cpu
         TRANSCODING_HWACCEL=cpu
         TRANSCODING_VIDEO_CODEC=libx264
-        LIBVA_DRIVER_NAME=
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC LIBVA_DRIVER_NAME
+        unset LIBVA_DRIVER_NAME
+        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: CPU"
         ;;
 
