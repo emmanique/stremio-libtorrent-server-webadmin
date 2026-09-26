@@ -7,3 +7,8 @@ services:
   stremio-libtorrent-server:
     devices:
       - "${VAAPI_DEVICE:-/dev/dri/renderD128}:${VAAPI_DEVICE:-/dev/dri/renderD128}"
+    # Forward an explicit driver override only when start.sh exports one.
+    # If unset, LIBVA_DRIVER_NAME must be absent so libva can auto-detect
+    # the correct driver (for example Intel iHD).
+    environment:
+      - LIBVA_DRIVER_NAME
