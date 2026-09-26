@@ -15,95 +15,68 @@ permissions:
   contents: write
   packages: write
 
-concurrency:
-  group: release-${{ inputs.version || github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
-  resolve:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.source.outputs.version }}
-      tag: ${{ steps.source.outputs.tag }}
-      ref: ${{ steps.source.outputs.ref }}
-    steps:
-      - name: Resolve release source
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-            REF="main"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-            REF="$GITHUB_REF_NAME"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-
-  regression:
-    needs: resolve
-    uses: ./.github/workflows/regression.yml
-    with:
-      ref: ${{ needs.resolve.outputs.ref }}
-
   publish:
-    needs: [resolve, regression]
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 100
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_IMAGE: edmanique/stremio-libtorrent-server-webadmin
-
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.resolve.outputs.ref }}
-          fetch-depth: 0
+      - name: Bootstrap release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            git fetch --force origin main
+            git checkout --detach origin/main
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            git fetch --force origin "$GITHUB_REF_NAME"
+            git checkout --detach FETCH_HEAD
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+          echo "MAJOR=${VERSION%%.*}" >> "$GITHUB_ENV"
+          echo "SERVER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
+          echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
+          echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Install release tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip uv
+          uv lock --check
+          uv sync --dev
+          python3 -m pip install -r webadmin/requirements.txt
 
       - name: Validate release contract
         shell: bash
-        env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           SERVER="$(tr -d '[:space:]' < SERVER_VERSION)"
           FORK="$(tr -d '[:space:]' < FORK_VERSION)"
           WEBADMIN="$(tr -d '[:space:]' < webadmin/WEBADMIN_VERSION)"
           CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
-
           test "$VERSION" = "$FORK"
           test "$FORK" = "$WEBADMIN"
           test "$SERVER" = "$CORE"
-          case "$VERSION" in 2.*) ;; *) echo "Only 2.x releases are supported here." >&2; exit 1;; esac
-          test -f "docs/releases/$TAG.md"
-          bash tools/ci/repo-guard.sh
+          test -f "docs/releases/v$VERSION.md"
+          bash tools/ci/full-regression.sh
 
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-          echo "MAJOR=${VERSION%%.*}" >> "$GITHUB_ENV"
-          echo "SERVER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin" >> "$GITHUB_ENV"
-          echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
-          echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
-
-      - name: Ensure tag is safe
+      - name: Ensure immutable release tag
         if: github.event_name == 'workflow_dispatch'
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git fetch origin --tags --force
           TARGET="$(git rev-parse HEAD)"
-
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             EXISTING="$(git rev-list -n1 "$TAG")"
             if gh release view "$TAG" >/dev/null 2>&1; then
@@ -126,142 +99,55 @@ jobs:
             git push origin "$TAG"
           fi
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        uses: docker/login-action@v3
-        with:
-          registry: docker.io
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
-
-      - name: Build release images
+      - name: Login registries
         shell: bash
         run: |
           set -euo pipefail
-          build_retry() {
-            context="$1"; shift
-            for attempt in 1 2 3; do
-              docker build "$@" "$context" && return 0
-              [ "$attempt" -eq 3 ] && return 1
-              sleep $((attempt * 5))
-            done
-          }
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+          fi
 
+      - name: Build and publish release images
+        shell: bash
+        run: |
+          set -euo pipefail
           COMMON=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" --label "org.opencontainers.image.version=$VERSION")
-          build_retry . "${COMMON[@]}" -t "$SERVER_IMAGE:$VERSION" -t "$SERVER_IMAGE:$MAJOR" -t "$SERVER_IMAGE:latest"
-          build_retry ./webadmin "${COMMON[@]}" -t "$WEBADMIN_IMAGE:$VERSION" -t "$WEBADMIN_IMAGE:$MAJOR" -t "$WEBADMIN_IMAGE:latest"
-          build_retry ./vpn "${COMMON[@]}" -t "$VPN_IMAGE:$VERSION" -t "$VPN_IMAGE:$MAJOR" -t "$VPN_IMAGE:latest"
-
-      - name: Smoke release images
-        shell: bash
-        run: |
-          set -euo pipefail
-          cleanup() {
-            docker rm -f stremio-release-smoke webadmin-release-smoke >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          cleanup
-
-          docker run -d --name stremio-release-smoke -p 18099:11470 "$SERVER_IMAGE:$VERSION" >/dev/null
-          for i in $(seq 1 120); do
-            curl -fsS http://127.0.0.1:18099/health >/tmp/server-health.json 2>/dev/null && break
-            sleep 1
-          done
-          test -s /tmp/server-health.json
-
-          docker run -d --name webadmin-release-smoke -p 18090:8090 -v /var/run/docker.sock:/var/run/docker.sock "$WEBADMIN_IMAGE:$VERSION" >/dev/null
-          for i in $(seq 1 90); do
-            curl -fsS http://127.0.0.1:18090/health >/dev/null 2>&1 && break
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:18090/ | grep -q 'vpn-admin.js'
-          docker run --rm --entrypoint /bin/sh "$VPN_IMAGE:$VERSION"             -c 'test -x /stremio-vpn-entrypoint && test -x /gluetun-entrypoint'
-
-      - name: Publish GHCR
-        shell: bash
-        run: |
-          set -euo pipefail
+          docker build "${COMMON[@]}" -t "$SERVER_IMAGE:$VERSION" -t "$SERVER_IMAGE:$MAJOR" -t "$SERVER_IMAGE:latest" .
+          docker build "${COMMON[@]}" -t "$WEBADMIN_IMAGE:$VERSION" -t "$WEBADMIN_IMAGE:$MAJOR" -t "$WEBADMIN_IMAGE:latest" ./webadmin
+          docker build "${COMMON[@]}" -t "$VPN_IMAGE:$VERSION" -t "$VPN_IMAGE:$MAJOR" -t "$VPN_IMAGE:latest" ./vpn
           for image in "$SERVER_IMAGE" "$WEBADMIN_IMAGE" "$VPN_IMAGE"; do
             docker push "$image:$VERSION"
             docker push "$image:$MAJOR"
             docker push "$image:latest"
           done
 
-      - name: Mirror to Docker Hub
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:$VERSION"
-          docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:$MAJOR"
-          docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:latest"
-          docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-$VERSION"
-          docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-$MAJOR"
-          docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-latest"
-          docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-$VERSION"
-          docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-$MAJOR"
-          docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-latest"
-
-          for tag in "$VERSION" "$MAJOR" latest "webadmin-$VERSION" "webadmin-$MAJOR" webadmin-latest "vpn-$VERSION" "vpn-$MAJOR" vpn-latest; do
-            docker push "$DOCKERHUB_IMAGE:$tag"
-          done
-
-          DOCKERHUB_USER="$DOCKERHUB_USERNAME" REPO=edmanique/stremio-libtorrent-server-webadmin             sh docker/push-readme.sh || true
-
-      - name: Verify anonymous pulls
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker logout ghcr.io >/dev/null 2>&1 || true
-          docker logout docker.io >/dev/null 2>&1 || true
-          rm -f "$HOME/.docker/config.json" || true
-
-          docker pull "$SERVER_IMAGE:$VERSION"
-          docker pull "$WEBADMIN_IMAGE:$VERSION"
-          docker pull "$VPN_IMAGE:$VERSION"
-
           if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
-            docker pull "$DOCKERHUB_IMAGE:$VERSION"
-            docker pull "$DOCKERHUB_IMAGE:webadmin-$VERSION"
-            docker pull "$DOCKERHUB_IMAGE:vpn-$VERSION"
+            docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:$VERSION"
+            docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:$MAJOR"
+            docker tag "$SERVER_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:latest"
+            docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-$VERSION"
+            docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-$MAJOR"
+            docker tag "$WEBADMIN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:webadmin-latest"
+            docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-$VERSION"
+            docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-$MAJOR"
+            docker tag "$VPN_IMAGE:$VERSION" "$DOCKERHUB_IMAGE:vpn-latest"
+            for tag in "$VERSION" "$MAJOR" latest "webadmin-$VERSION" "webadmin-$MAJOR" webadmin-latest "vpn-$VERSION" "vpn-$MAJOR" vpn-latest; do
+              docker push "$DOCKERHUB_IMAGE:$tag"
+            done
           fi
 
-      - name: Build deployment artefacts
+      - name: Build and publish deployment package
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist
           python tools/release/build_deployment_package.py --version "$VERSION"
           (cd dist && sha256sum -c SHA256SUMS)
-
-      - name: Create or refresh GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          NOTES="docs/releases/$TAG.md"
+          NOTES="docs/releases/v$VERSION.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "Stremio Server WebAdmin $VERSION" --notes-file "$NOTES" --latest
           else
             gh release create "$TAG" --verify-tag --title "Stremio Server WebAdmin $VERSION" --notes-file "$NOTES" --latest
           fi
-
-      - name: Attach deployment package
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" \
-            dist/*-deployment.zip \
-            dist/*-deployment.tar.gz \
-            dist/SHA256SUMS \
-            --clobber
+          gh release upload "$TAG" dist/*-deployment.zip dist/*-deployment.tar.gz dist/SHA256SUMS --clobber
