@@ -1,4 +1,4 @@
-name: Version bump
+name: Prepare release
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: version-bump
+  group: prepare-release
   cancel-in-progress: false
 
 jobs:
@@ -22,10 +22,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Check out main
+      - name: Check out development
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: development
           fetch-depth: 0
 
       - name: Set up Python
@@ -67,8 +67,6 @@ jobs:
             FORK_VERSION \
             webadmin/WEBADMIN_VERSION \
             uv.lock \
-            README.md \
-            QUICKSTART.md \
             "docs/releases/v$VERSION.md"
 
           git commit -m "Prepare release $VERSION"
@@ -86,4 +84,4 @@ jobs:
             --base main \
             --head "$BRANCH" \
             --title "Release $VERSION" \
-            --body "Prepare platform release $VERSION. The integrated server/core version remains independently tracked by SERVER_VERSION. Merge only after CI and Dependencies are green."
+            --body "Prepare platform release $VERSION from `development`. Update README.md/QUICKSTART.md and complete the release notes in this PR before merge. Merge only after Fast CI, Full regression and Dependencies are green. After publication, sync `main` back into `development` and delete this temporary release branch."

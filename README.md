@@ -1,7 +1,7 @@
 # Stremio Server WebAdmin 2.0.17
 
-[![2.x Continuous Validation](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/2x-ci.yml)
-[![VPN integration guard](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml/badge.svg)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/vpn-integration-guard.yml)
+[![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
+[![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg)](LICENSE)
 
 Self-hosted Stremio streaming platform with an open libtorrent server, WebAdmin, Pi-hole, hardware transcoding support and optional CyberGhost/OpenVPN routing through Gluetun.
@@ -11,6 +11,74 @@ Version **2.0.17** integrates upstream server/core **1.6.15** while keeping the 
 > This repository does not bundle movies, series, torrent indexes or third-party content addons.
 
 ---
+
+## Installation and upgrade model
+
+Production hosts should use the **deployment ZIP/TAR attached to a GitHub Release**, not a full source checkout. The deployment package contains only the supported runtime surface: Compose files, launchers, `.env.example`, backup tooling and operational documentation. Source code, tests, GitHub Actions and development tooling remain in the repository only.
+
+### New installation
+
+1. Install Docker Engine with the Docker Compose plugin.
+2. Download the deployment package for the desired release and extract it into a dedicated directory such as `/opt/stremio-webadmin`.
+3. Create the local configuration once:
+
+```bash
+cp .env.example .env
+```
+
+4. Review at minimum these values before first start:
+   - `TZ`;
+   - `PIHOLE_PASSWORD`;
+   - `VPN_LAN_CIDRS` when the LAN is not in `192.168.0.0/16`;
+   - `IPADDRESS_SOURCE` / `IPADDRESS` on multi-homed or statically bound hosts;
+   - optional image pins when a fixed release is preferred over `:latest`;
+   - optional GPU overrides only after the local VAAPI/NVIDIA path is validated.
+5. Validate the resolved topology before starting:
+
+```bash
+sh start.sh config
+```
+
+6. Start the platform:
+
+```bash
+sh start.sh
+```
+
+The default baseline is hardware-neutral and CPU-safe. `start.sh` detects a usable VAAPI/NVIDIA runtime and only adds the corresponding overlay when the host supports it.
+
+### Upgrade
+
+The local `.env` and Docker volumes are **installation state** and must not be replaced by a release package. Before every upgrade:
+
+```bash
+sh scripts/backup-before-upgrade.sh
+```
+
+Use `--with-cache` only when the large cache volume must also be archived:
+
+```bash
+sh scripts/backup-before-upgrade.sh --with-cache
+```
+
+Then extract the new deployment package over the installation directory while preserving the existing `.env`. Compare configuration changes:
+
+```bash
+diff -u .env .env.example || true
+```
+
+Reconcile any newly introduced variables manually, validate the new Compose model, then start:
+
+```bash
+sh start.sh config
+sh start.sh
+```
+
+Do **not** use `docker compose down -v` for a routine upgrade. It deletes persistent volumes. The backup script preserves configuration/state volumes and records the resolved Compose/image state so an upgrade can be rolled back deliberately.
+
+### Development and releases
+
+Only `main` and `development` are long-lived branches. Feature/fix/release/hotfix branches are temporary. Normal development merges into `development`; a release branch is cut from `development`, validated by **Full regression**, merged into `main`, tagged and published. See `docs/BRANCHING.md` and `docs/TESTING.md`.
 
 ## 2.0.17 at a glance
 

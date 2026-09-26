@@ -1,0 +1,120 @@
+name: Full regression
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref or SHA to validate
+        required: false
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip uv
+          uv lock --check
+          uv sync --dev
+          python -m pip install -r webadmin/requirements.txt
+          uv pip check
+
+      - name: Static and repository validation
+        run: bash tools/ci/static-check.sh
+
+      - name: Compose validation
+        run: bash tools/ci/compose-check.sh
+
+      - name: Release documentation contract
+        run: python tools/ci/release-docs-check.py
+
+      - name: Complete deterministic regression
+        run: bash tools/ci/run-tests.sh deterministic
+
+      - name: Network integration regression
+        run: bash tools/ci/run-tests.sh integration
+
+      - name: Build runtime images
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_retry() {
+            tag="$1"; context="$2"
+            for attempt in 1 2 3; do
+              docker build -t "$tag" "$context" && return 0
+              [ "$attempt" -eq 3 ] && return 1
+              sleep $((attempt * 5))
+            done
+          }
+          build_retry stremio-ci-server:test .
+          build_retry stremio-ci-webadmin:test ./webadmin
+          build_retry stremio-ci-vpn:test ./vpn
+
+      - name: Runtime image smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() { docker rm -f stremio-ci-server webadmin-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          cleanup
+
+          docker run -d --name stremio-ci-server -p 18099:11470 stremio-ci-server:test >/dev/null
+          for i in $(seq 1 120); do
+            curl -fsS http://127.0.0.1:18099/health >/tmp/server-health.json 2>/dev/null && break
+            sleep 1
+          done
+          test -s /tmp/server-health.json
+
+          docker run -d --name webadmin-ci -p 18090:8090 -v /var/run/docker.sock:/var/run/docker.sock stremio-ci-webadmin:test >/dev/null
+          for i in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:18090/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18090/ | grep -q 'vpn-admin.js'
+          docker run --rm --entrypoint /bin/sh stremio-ci-vpn:test -c 'test -x /stremio-vpn-entrypoint && test -x /gluetun-entrypoint'
+
+      - name: Build and validate deployment package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          python tools/release/build_deployment_package.py
+          test -f dist/SHA256SUMS
+          zipfile="$(find dist -maxdepth 1 -name '*-deployment.zip' -print -quit)"
+          test -n "$zipfile"
+          unzip -l "$zipfile" | tee /tmp/deployment-files.txt
+          ! grep -Eq '(^|/)(tests|tools|\.github|src|webadmin|vpn)/' /tmp/deployment-files.txt
+          grep -q '/compose.yaml' /tmp/deployment-files.txt
+          grep -q '/\.env.example' /tmp/deployment-files.txt
+          grep -q '/scripts/backup-before-upgrade.sh' /tmp/deployment-files.txt
+
+      - name: Upload deployment package for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-package
+          path: |
+            dist/*-deployment.zip
+            dist/*-deployment.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error

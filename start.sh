@@ -19,6 +19,24 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
+ENV_FILE="$ROOT/.env"
+[ -f "$ENV_FILE" ] || cp "$ROOT/.env.example" "$ENV_FILE"
+
+# Read a single literal KEY=value from .env without sourcing/evaluating the file.
+# Shell-exported variables keep highest precedence; .env is the persistent local baseline.
+_env_value() {
+    key=$1
+    fallback=${2-}
+    value=$(awk -v key="$key" '
+        $0 ~ "^[[:space:]]*" key "=" {
+            sub("^[[:space:]]*" key "=", "", $0)
+            print
+            exit
+        }
+    ' "$ENV_FILE" 2>/dev/null || true)
+    [ -n "$value" ] && printf '%s\n' "$value" || printf '%s\n' "$fallback"
+}
+
 _detect_ip() {
     if command -v ip >/dev/null 2>&1; then
         detected=$(ip route get "${IP_DETECT_TARGET:-1.1.1.1}" 2>/dev/null \
@@ -43,8 +61,22 @@ _is_ipv4() {
         END {exit bad ? 1 : 0}'
 }
 
+IPADDRESS_SOURCE=${IPADDRESS_SOURCE:-$(_env_value IPADDRESS_SOURCE auto)}
+IPADDRESS_SOURCE=$(printf '%s' "$IPADDRESS_SOURCE" | tr '[:upper:]' '[:lower:]')
+
 if [ -z "${IPADDRESS:-}" ]; then
-    IPADDRESS=$(_detect_ip || true)
+    case "$IPADDRESS_SOURCE" in
+        manual)
+            IPADDRESS=$(_env_value IPADDRESS "")
+            ;;
+        auto|"")
+            IPADDRESS=$(_detect_ip || true)
+            ;;
+        *)
+            echo "[start] invalid IPADDRESS_SOURCE='$IPADDRESS_SOURCE' (use auto or manual)." >&2
+            exit 1
+            ;;
+    esac
 fi
 
 if [ -z "${IPADDRESS:-}" ] || ! _is_ipv4 "$IPADDRESS"; then
@@ -54,26 +86,25 @@ if [ -z "${IPADDRESS:-}" ] || ! _is_ipv4 "$IPADDRESS"; then
 fi
 
 export IPADDRESS
-PIHOLE_WEB_BIND_IP=${PIHOLE_WEB_BIND_IP:-$IPADDRESS}
-PIHOLE_DNS_BIND_IP=${PIHOLE_DNS_BIND_IP:-$IPADDRESS}
+PIHOLE_WEB_BIND_IP=${PIHOLE_WEB_BIND_IP:-$(_env_value PIHOLE_WEB_BIND_IP "$IPADDRESS")}
+PIHOLE_DNS_BIND_IP=${PIHOLE_DNS_BIND_IP:-$(_env_value PIHOLE_DNS_BIND_IP "$IPADDRESS")}
 export PIHOLE_WEB_BIND_IP PIHOLE_DNS_BIND_IP
 
-# Persist the detected address for every later Compose/WebAdmin operation.  A
-# shell-only export disappears as soon as this launcher exits, which made a
-# fresh install fall back to localhost/0.0.0.0 on subsequent restarts.
-ENV_FILE="$ROOT/.env"
-if [ ! -f "$ENV_FILE" ]; then
-    cp "$ROOT/.env.example" "$ENV_FILE"
-fi
-if grep -q '^IPADDRESS=' "$ENV_FILE"; then
-    sed -i "s/^IPADDRESS=.*/IPADDRESS=$IPADDRESS/" "$ENV_FILE"
-else
-    printf '\nIPADDRESS=%s\n' "$IPADDRESS" >> "$ENV_FILE"
+# In auto mode persist the latest detected host address for Compose/WebAdmin
+# operations that may be run without this launcher. Manual mode is never rewritten.
+if [ "$IPADDRESS_SOURCE" = "auto" ]; then
+    if grep -q '^IPADDRESS=' "$ENV_FILE"; then
+        sed -i "s/^IPADDRESS=.*/IPADDRESS=$IPADDRESS/" "$ENV_FILE"
+    else
+        printf '\nIPADDRESS=%s\n' "$IPADDRESS" >> "$ENV_FILE"
+    fi
 fi
 
 COMPOSE_ARGS="-f compose.yaml"
 
-GPU_BACKEND=${GPU_BACKEND:-auto}
+GPU_BACKEND=${GPU_BACKEND:-$(_env_value GPU_BACKEND auto)}
+VAAPI_DEVICE=${VAAPI_DEVICE:-$(_env_value VAAPI_DEVICE "")}
+LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 _detect_vaapi_device() {
