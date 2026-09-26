@@ -109,10 +109,15 @@ if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
     # Docker Compose reads .env independently from the launcher. A blank active
-    # LIBVA_DRIVER_NAME= line would therefore be re-injected even after this
-    # shell variable is unset. Normalize that invalid legacy/new-install state
-    # by removing only an empty assignment; explicit non-empty overrides remain.
-    if grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
+    # LIBVA_DRIVER_NAME= line would otherwise be re-injected after the shell
+    # variable is unset. Remove only an empty assignment; preserve non-empty
+    # host-specific overrides such as iHD.
+    if grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$' "$ENV_FILE"; then
+        sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
+    fi
+    unset LIBVA_DRIVER_NAME
+fi
+GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 _detect_vaapi_device() {
     # Launcher discovery must not depend on host FFmpeg being installed.
