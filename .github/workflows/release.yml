@@ -2,6 +2,7 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v2.*.*"
   workflow_dispatch:
@@ -35,10 +36,14 @@ jobs:
             VERSION="${{ inputs.version }}"
             git fetch --force origin main
             git checkout --detach origin/main
-          else
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             git fetch --force origin "$GITHUB_REF_NAME"
             git checkout --detach FETCH_HEAD
+          else
+            git fetch --force origin main
+            git checkout --detach origin/main
+            VERSION="$(tr -d '[:space:]' < FORK_VERSION)"
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=v$VERSION" >> "$GITHUB_ENV"
@@ -47,7 +52,24 @@ jobs:
           echo "WEBADMIN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-webadmin" >> "$GITHUB_ENV"
           echo "VPN_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stremio-libtorrent-server-webadmin-vpn" >> "$GITHUB_ENV"
 
+      - name: Decide publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+          SHOULD_PUBLISH=true
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "branch" ]; then
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              SHOULD_PUBLISH=false
+              echo "[release] $TAG already exists; this main push is not a new release."
+            else
+              echo "[release] $TAG does not exist; publishing the coordinated release from main."
+            fi
+          fi
+          echo "SHOULD_PUBLISH=$SHOULD_PUBLISH" >> "$GITHUB_ENV"
+
       - name: Install release tooling
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -57,6 +79,7 @@ jobs:
           python3 -m pip install -r webadmin/requirements.txt
 
       - name: Validate release contract
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +94,7 @@ jobs:
           bash tools/ci/full-regression.sh
 
       - name: Ensure immutable release tag
-        if: github.event_name == 'workflow_dispatch'
+        if: env.SHOULD_PUBLISH == 'true' && github.ref_type != 'tag'
         shell: bash
         run: |
           set -euo pipefail
@@ -100,6 +123,7 @@ jobs:
           fi
 
       - name: Login registries
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -109,6 +133,7 @@ jobs:
           fi
 
       - name: Build and publish release images
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -138,6 +163,7 @@ jobs:
           fi
 
       - name: Build and publish deployment package
+        if: env.SHOULD_PUBLISH == 'true'
         shell: bash
         run: |
           set -euo pipefail

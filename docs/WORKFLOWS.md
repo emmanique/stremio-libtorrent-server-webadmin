@@ -20,7 +20,7 @@ Creates a temporary `release/<version>` from `development`, updates version meta
 
 ## Release — `.github/workflows/release.yml`
 
-Publishing first calls Full regression. Only a green regression may publish images, immutable tags and deployment ZIP/TAR artefacts.
+After a release PR is merged to `main`, the workflow reads `FORK_VERSION`. If that version has no existing tag, it runs the full release gate and publishes images, an immutable version tag and deployment ZIP/TAR artefacts. Later `main` commits do not republish an already-tagged version. Manual and tag-triggered publication remain available.
 
 ## Upstream sync — `.github/workflows/upstream-sync.yml`
 
