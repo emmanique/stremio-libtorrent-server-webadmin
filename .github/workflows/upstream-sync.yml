@@ -2,13 +2,12 @@ name: Upstream sync
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - ".github/workflows/upstream-sync.yml"
-      - ".github/workflows/regression.yml"
       - ".github/upstream-protected-paths.txt"
       - "tools/upstream/**"
+      - "tools/ci/**"
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
@@ -17,34 +16,24 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: upstream-controlled-sync
-  cancel-in-progress: true
-
 jobs:
-  prepare:
-    name: Prepare controlled merge
+  sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      changed: ${{ steps.sync.outputs.changed }}
-      blocked: ${{ steps.sync.outputs.blocked }}
-      main_sha: ${{ steps.sync.outputs.main_sha }}
-      target: ${{ steps.sync.outputs.target }}
-      version: ${{ steps.sync.outputs.version }}
-      branch: ${{ steps.sync.outputs.branch }}
-      integration_sha: ${{ steps.sync.outputs.integration_sha }}
-
+    timeout-minutes: 80
     steps:
-      - name: Check out fork
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
+      - name: Bootstrap main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force origin main upstream/integration || git fetch --force origin main
+          git checkout -B main origin/main
 
-      - name: Controlled merge from principal
+      - name: Prepare controlled upstream integration
         id: sync
-        continue-on-error: true
         shell: bash
         env:
           UPSTREAM_URL: https://github.com/andrewhack/stremio-libtorrent-server.git
@@ -52,69 +41,31 @@ jobs:
           TARGET_BRANCH: upstream/integration
         run: bash tools/upstream/controlled_sync.sh
 
-      - name: Upload sync assessment
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: upstream-sync-report
-          path: upstream-sync-report.md
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Stop when manual reconciliation is required
-        if: steps.sync.outcome == 'failure'
+      - name: Validate integration
+        if: steps.sync.outputs.changed == 'true'
         shell: bash
         run: |
-          echo "Controlled upstream merge requires manual reconciliation." >&2
-          exit 1
+          set -euo pipefail
+          python3 -m pip install --upgrade pip uv
+          uv lock --check
+          uv sync --dev
+          python3 -m pip install -r webadmin/requirements.txt
+          bash tools/ci/full-regression.sh
 
-  validate:
-    name: Validate fork after upstream merge
-    needs: prepare
-    if: needs.prepare.outputs.changed == 'true'
-    uses: ./.github/workflows/regression.yml
-    with:
-      ref: upstream/integration
-    permissions:
-      contents: read
-
-  promote:
-    name: Open or refresh upstream integration PR
-    needs:
-      - prepare
-      - validate
-    if: needs.prepare.outputs.changed == 'true' && needs.validate.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-      - name: Check out validated integration branch
-        uses: actions/checkout@v4
-        with:
-          ref: upstream/integration
-          fetch-depth: 0
-
-      - name: Open or refresh pull request to development
+      - name: Open or refresh PR to development
+        if: steps.sync.outputs.changed == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_VERSION: ${{ needs.prepare.outputs.version }}
-          TARGET_SHA: ${{ needs.prepare.outputs.target }}
+          TARGET_VERSION: ${{ steps.sync.outputs.version }}
+          TARGET_SHA: ${{ steps.sync.outputs.target }}
         run: |
           set -euo pipefail
-          git fetch origin development upstream/integration --prune
-          test "$(git rev-parse origin/upstream/integration)" = "${{ needs.prepare.outputs.integration_sha }}"
-
           existing="$(gh pr list --state open --base development --head upstream/integration --json number --jq '.[0].number // empty')"
-          title="Integrate upstream ${TARGET_VERSION}"
-          body="Controlled upstream integration for ${TARGET_VERSION} (${TARGET_SHA}). Fork-owned paths were preserved and Full regression passed on upstream/integration. Merge into development only after PR checks pass; production remains isolated until the normal release flow."
-
+          title="Integrate upstream $TARGET_VERSION"
+          body="Controlled upstream integration for $TARGET_VERSION ($TARGET_SHA). Fork-owned paths were preserved and Full regression passed on upstream/integration. Production remains isolated until the normal release flow."
           if [ -n "$existing" ]; then
             gh pr edit "$existing" --title "$title" --body "$body"
-            echo "Updated PR #$existing"
           else
             gh pr create --base development --head upstream/integration --title "$title" --body "$body"
           fi
