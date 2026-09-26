@@ -13,8 +13,39 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - run: echo "pinned checkout resolved"
+      - name: Bootstrap repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force --no-tags origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --force origin '+refs/heads/*:refs/remotes/origin/*' --depth=100
+
+      - name: Install test tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip uv
+          uv sync --dev
+          python3 -m pip install -r webadmin/requirements.txt
+
+      - name: Static and repository validation
+        run: bash tools/ci/static-check.sh
+
+      - name: Compose validation
+        run: bash tools/ci/compose-check.sh
+
+      - name: Documentation/change contract
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --force origin "$BASE_SHA"
+          python tools/ci/docs-contract.py
+
+      - name: Deterministic regression tests
+        run: bash tools/ci/run-tests.sh deterministic
