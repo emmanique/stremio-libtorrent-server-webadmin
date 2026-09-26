@@ -58,7 +58,8 @@ def test_base_compose_does_not_require_vaapi_device():
     vaapi = (ROOT / "compose.vaapi.yaml").read_text(encoding="utf-8")
 
     assert 'devices:' not in compose.split("  stremio-libtorrent-server:", 1)[1].split("  webadmin:", 1)[0]
-    assert "${VAAPI_DEVICE:-/dev/dri/renderD128}" in vaapi
+    assert "${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD* device}" in vaapi
+    assert "${VAAPI_DEVICE:-/dev/dri/renderD128}" not in vaapi
 
 
 def test_start_repairs_stale_gluetun_namespace_after_stack_upgrade():
