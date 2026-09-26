@@ -29,7 +29,7 @@ Current versions:
 
 - GPU auto-detection now treats hardware exposure and the active transcoding profile as separate concerns.
 - Dual-GPU hosts can expose both Intel/DRM VAAPI and NVIDIA to the server container when both runtimes are available; WebAdmin still enables only profiles that pass real FFmpeg self-tests.
-- VAAPI no longer assumes `/dev/dri/renderD128`. `start.sh` detects a usable render node and exports `VAAPI_DEVICE`; direct Compose usage with `compose.vaapi.yaml` must provide `VAAPI_DEVICE` explicitly.
+- VAAPI no longer assumes `/dev/dri/renderD128`. `start.sh` discovers an available render node and exports `VAAPI_DEVICE`; WebAdmin then verifies real FFmpeg capability inside the server container; direct Compose usage with `compose.vaapi.yaml` must provide `VAAPI_DEVICE` explicitly.
 - An empty `LIBVA_DRIVER_NAME` is no longer forced into the server container, allowing libva driver autodetection. Set an explicit value such as `iHD` only when the host requires it.
 - NVIDIA detection, container-runtime readiness and NVENC encoder compatibility are reported separately. Legacy GPUs can therefore be shown as detected/runtime-ready even when their driver exposes an older NVENC API than the bundled FFmpeg requires.
 - Upgrade impact: existing `.env` files remain valid. Review `VAAPI_DEVICE` and `LIBVA_DRIVER_NAME` only if they were previously set as host-specific overrides.
