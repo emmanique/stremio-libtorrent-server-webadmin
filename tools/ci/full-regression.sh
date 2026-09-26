@@ -53,4 +53,18 @@ grep -q '/compose.yaml' /tmp/deployment-files.txt
 grep -q '/\.env.example' /tmp/deployment-files.txt
 grep -q '/scripts/backup-before-upgrade.sh' /tmp/deployment-files.txt
 
+# Simulate a real first installation from the exact deployment artifact.
+rm -rf /tmp/stremio-clean-install
+mkdir -p /tmp/stremio-clean-install
+unzip -q "$zipfile" -d /tmp/stremio-clean-install
+install_root="$(find /tmp/stremio-clean-install -mindepth 1 -maxdepth 1 -type d -print -quit)"
+test -n "$install_root"
+cd "$install_root"
+test ! -e .env
+cp .env.example .env
+IPADDRESS=192.0.2.10 IPADDRESS_SOURCE=manual GPU_BACKEND=cpu sh start.sh config >/tmp/clean-install-compose.yaml
+grep -q 'stremio-libtorrent-server' /tmp/clean-install-compose.yaml
+grep -q 'stremio-webadmin' /tmp/clean-install-compose.yaml
+grep -q 'stremio-gluetun' /tmp/clean-install-compose.yaml
+
 echo "Full regression passed."

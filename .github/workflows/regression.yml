@@ -35,3 +35,4 @@ jobs:
 
       - name: Full regression suite
         run: bash tools/ci/full-regression.sh
+
