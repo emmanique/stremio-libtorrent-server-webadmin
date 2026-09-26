@@ -12,76 +12,50 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: prepare-release
-  cancel-in-progress: false
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     steps:
-      - name: Check out development
-        uses: actions/checkout@v4
-        with:
-          ref: development
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        run: python -m pip install --upgrade uv
-
-      - name: Prepare platform version
+      - name: Bootstrap development
+        shell: bash
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-        run: python tools/release/prepare_version.py
-
-      - name: Validate prepared release
-        run: |
-          bash tools/ci/repo-guard.sh
-          uv lock --check
-          python -m compileall -q src webadmin docker tools
-
-      - name: Create release branch
-        env:
-          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          BRANCH="release/$VERSION"
+          git init .
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git fetch --force origin development
+          git checkout -B development FETCH_HEAD
 
-          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
-            echo "Branch $BRANCH already exists." >&2
-            exit 1
-          fi
+      - name: Prepare version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade uv
+          python tools/release/prepare_version.py
+          bash tools/ci/repo-guard.sh
+          uv lock --check
+          python3 -m compileall -q src webadmin docker tools
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-
-          git add \
-            FORK_VERSION \
-            webadmin/WEBADMIN_VERSION \
-            uv.lock \
-            "docs/releases/v$VERSION.md"
-
-          git commit -m "Prepare release $VERSION"
-          git push origin "$BRANCH"
-
-      - name: Open release pull request
+      - name: Create release branch and PR
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           BRANCH="release/$VERSION"
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "Release $VERSION" \
-            --body "Prepare platform release $VERSION from `development`. Update README.md/QUICKSTART.md and complete the release notes in this PR before merge. Merge only after Fast CI, Full regression and Dependencies are green. After publication, sync `main` back into `development` and delete this temporary release branch."
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            echo "Branch $BRANCH already exists." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add FORK_VERSION webadmin/WEBADMIN_VERSION uv.lock "docs/releases/v$VERSION.md"
+          git commit -m "Prepare release $VERSION"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "Release $VERSION" --body "Prepare platform release $VERSION from development. Complete README.md, QUICKSTART.md and release notes before merge. Full regression is mandatory before production publication."
