@@ -112,33 +112,20 @@ else
 fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
-_vaapi_device_works() {
-    dev=$1
-    [ -e "$dev" ] || return 1
-    command -v ffmpeg >/dev/null 2>&1 || return 1
-
-    # Probe the render node directly. A device is only considered usable when
-    # FFmpeg can initialize VAAPI and complete a tiny H.264 encode.
-    ffmpeg -hide_banner -loglevel error \
-        -vaapi_device "$dev" \
-        -f lavfi -i color=size=64x64:rate=1:color=black \
-        -vf 'format=nv12,hwupload' \
-        -frames:v 1 \
-        -c:v h264_vaapi \
-        -f null - \
-        >/dev/null 2>&1
-}
-
 _detect_vaapi_device() {
-    # Explicit configured device has priority, but it must be a usable render
-    # node. This avoids accepting a stale or non-functional path.
-    if [ -n "${VAAPI_DEVICE:-}" ] && _vaapi_device_works "$VAAPI_DEVICE"; then
+    # Launcher discovery must not depend on host FFmpeg being installed.
+    # Runtime capability is verified later inside the server container by
+    # WebAdmin's real FFmpeg self-tests.
+
+    # Explicit configured device has priority when the render node exists.
+    if [ -n "${VAAPI_DEVICE:-}" ] && [ -e "$VAAPI_DEVICE" ]; then
         printf '%s\n' "$VAAPI_DEVICE"
         return 0
     fi
 
-    # Prefer working Intel DRM render nodes, but test every candidate because a
-    # host may expose multiple /dev/dri/renderD* devices.
+    # Prefer Intel DRM render nodes. Enumerate renderD* rather than assuming
+    # renderD128 because Proxmox/LXC and multi-GPU hosts can expose renderD129+
+    # instead.
     for dev in /dev/dri/renderD*; do
         [ -e "$dev" ] || continue
 
@@ -146,21 +133,16 @@ _detect_vaapi_device() {
         vendor_file="/sys/class/drm/$node/device/vendor"
 
         if [ -r "$vendor_file" ] && [ "$(cat "$vendor_file" 2>/dev/null)" = "0x8086" ]; then
-            if _vaapi_device_works "$dev"; then
-                printf '%s\n' "$dev"
-                return 0
-            fi
-        fi
-    done
-
-    # Generic fallback: test every remaining render node and select the first
-    # one that actually passes the VAAPI encode probe.
-    for dev in /dev/dri/renderD*; do
-        [ -e "$dev" ] || continue
-        if _vaapi_device_works "$dev"; then
             printf '%s\n' "$dev"
             return 0
         fi
+    done
+
+    # Generic DRM fallback for non-Intel VAAPI-capable hosts.
+    for dev in /dev/dri/renderD*; do
+        [ -e "$dev" ] || continue
+        printf '%s\n' "$dev"
+        return 0
     done
 
     return 1
