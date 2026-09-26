@@ -164,12 +164,10 @@ case "$GPU_BACKEND" in
             export VAAPI_DEVICE
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
 
-            # AUTO exposes every detected accelerator so WebAdmin can perform
-            # real runtime self-tests and offer only the working profiles.
-            if [ "$NVIDIA_DETECTED" = "true" ]; then
-                COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
-            fi
-
+            # AUTO selects exactly one accelerator backend. Do not layer
+            # compose.gpu.yaml on top of the VAAPI overlay: that overlay forces
+            # runtime: nvidia and would make a VAAPI-selected host depend on the
+            # NVIDIA container runtime.
             GPU_BACKEND_EFFECTIVE=vaapi
             TRANSCODING_HWACCEL=vaapi
             TRANSCODING_VIDEO_CODEC=h264_vaapi
@@ -177,10 +175,6 @@ case "$GPU_BACKEND" in
 
             echo "[start] GPU backend AUTO -> VAAPI"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
-
-            if [ "$NVIDIA_DETECTED" = "true" ]; then
-                echo "[start] NVIDIA runtime also exposed for capability testing"
-            fi
 
         elif [ "$NVIDIA_DETECTED" = "true" ]; then
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
