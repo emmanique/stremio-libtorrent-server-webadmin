@@ -36,13 +36,3 @@ jobs:
       - name: Full regression suite
         run: bash tools/ci/full-regression.sh
 
-      - name: Upload validated deployment candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: stremio-webadmin-deployment-candidate
-          path: |
-            dist/*-deployment.zip
-            dist/*-deployment.tar.gz
-            dist/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 14
