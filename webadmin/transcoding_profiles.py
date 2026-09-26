@@ -6,6 +6,7 @@ pipeline is usable.
 """
 from __future__ import annotations
 
+import re
 import shlex
 import time
 from datetime import UTC, datetime
@@ -122,13 +123,57 @@ def _selected() -> tuple[str, int]:
     return profile, quality
 
 
-def _result(profile_id: str, available: bool, reason: str, verified: bool = True) -> dict[str, object]:
+def _result(
+    profile_id: str,
+    available: bool,
+    reason: str,
+    verified: bool = True,
+    **details: object,
+) -> dict[str, object]:
     return {
         **PROFILE_META[profile_id],
         "id": profile_id,
         "available": available,
         "verified": verified,
         "reason": reason,
+        **details,
+    }
+
+
+def _result_text(result) -> str:
+    if result is None or not result.output:
+        return ""
+    return result.output.decode("utf-8", errors="replace").strip()
+
+
+def _nvenc_diagnostics(result) -> dict[str, object]:
+    raw = _result_text(result)
+    required = None
+    found = None
+    match = re.search(
+        r"required nvenc API version\.\s*Required:\s*([0-9.]+)\s*Found:\s*([0-9.]+)",
+        raw,
+        re.IGNORECASE,
+    )
+    if match:
+        required, found = match.groups()
+        return {
+            "failureCode": "nvenc-api-incompatible",
+            "nvencApiCompatible": False,
+            "nvencApiRequired": required,
+            "nvencApiAvailable": found,
+            "reason": (
+                f"NVIDIA detected and runtime ready, but NVENC API is incompatible: "
+                f"required {required}, available {found}."
+            ),
+        }
+
+    return {
+        "failureCode": "encoder-self-test-failed",
+        "nvencApiCompatible": None,
+        "nvencApiRequired": None,
+        "nvencApiAvailable": None,
+        "reason": _last_error(result),
     }
 
 
@@ -226,7 +271,19 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
     ok = bool(result is not None and result.exit_code == 0)
     if ok:
         reason = "One-frame encoder runtime self-test passed."
+        if meta["engine"] == "nvenc":
+            return _result(
+                profile_id,
+                True,
+                reason,
+                nvencApiCompatible=True,
+                failureCode=None,
+            )
     else:
+        if meta["engine"] == "nvenc":
+            diagnostics = _nvenc_diagnostics(result)
+            reason = str(diagnostics.pop("reason"))
+            return _result(profile_id, False, reason, **diagnostics)
         reason = _last_error(result)
     return _result(profile_id, ok, reason)
 
@@ -300,6 +357,23 @@ def _backend_matrix(
     vaapi_hevc = available("vaapi-hevc")
     nvenc_h264 = available("nvenc-h264")
     nvenc_hevc = available("nvenc-hevc")
+    nvenc_h264_item = profiles.get("nvenc-h264") or {}
+    nvenc_hevc_item = profiles.get("nvenc-hevc") or {}
+    nvenc_api_required = (
+        nvenc_h264_item.get("nvencApiRequired")
+        or nvenc_hevc_item.get("nvencApiRequired")
+    )
+    nvenc_api_available = (
+        nvenc_h264_item.get("nvencApiAvailable")
+        or nvenc_hevc_item.get("nvencApiAvailable")
+    )
+    nvenc_api_compatible = None
+    for nvenc_item in (nvenc_h264_item, nvenc_hevc_item):
+        if nvenc_item.get("nvencApiCompatible") is False:
+            nvenc_api_compatible = False
+            break
+        if nvenc_item.get("nvencApiCompatible") is True:
+            nvenc_api_compatible = True
     cpu_h264 = available("cpu-h264")
     cpu_hevc = available("cpu-hevc")
 
@@ -328,6 +402,9 @@ def _backend_matrix(
             "h264": nvenc_h264,
             "hevc": nvenc_hevc,
             "selectable": nvenc_h264 or nvenc_hevc,
+            "nvencApiCompatible": nvenc_api_compatible,
+            "nvencApiRequired": nvenc_api_required,
+            "nvencApiAvailable": nvenc_api_available,
             "reason": (
                 reason("nvenc-h264")
                 if not nvenc_h264
