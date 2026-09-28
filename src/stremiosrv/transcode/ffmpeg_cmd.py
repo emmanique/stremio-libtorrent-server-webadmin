@@ -12,7 +12,7 @@ def build_audio_cmd(media_url: str, decision: dict, channels: int = 2) -> list[s
     if decision.get("action") == "copy":
         cmd += ["-c:a", "copy"]
     else:
-        cmd += ["-c:a", "aac", "-ac", str(channels), "-ab", "384000", "-ar", "48000"]
+        cmd += ["-c:a", "aac", "-ac", str(channels), "-ab", "192000", "-ar", "48000"]
     cmd += ["-f", "mp4", "pipe:1"]
     return cmd
 

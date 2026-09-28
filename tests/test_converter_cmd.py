@@ -114,3 +114,58 @@ def test_build_hls_cmd_has_a_protocol_whitelist_before_input():
     i = argv.index("-protocol_whitelist")
     assert argv[i + 1] == "file,crypto,data,http,tcp,tls,https"
     assert i < argv.index("-i")
+
+
+def test_single_track_hls_transcode_uses_192k_audio():
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "transcode"},
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        None,
+        "/tmp/j",
+    )
+
+    assert "-ab" in cmd
+    assert cmd[cmd.index("-ab") + 1] == "192000"
+    assert "384000" not in cmd
+
+
+def test_multitrack_hls_uses_192k_audio():
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "transcode"},
+        "_streams": [
+            {
+                "track": "video",
+                "index": 0,
+                "codec": "h264",
+            },
+            {
+                "track": "audio",
+                "index": 1,
+                "codec": "eac3",
+                "lang": "eng",
+            },
+            {
+                "track": "audio",
+                "index": 2,
+                "codec": "aac",
+                "lang": "por",
+            },
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        None,
+        "/tmp/j",
+    )
+
+    assert "-b:a" in cmd
+    assert cmd[cmd.index("-b:a") + 1] == "192k"
+    assert "384k" not in cmd

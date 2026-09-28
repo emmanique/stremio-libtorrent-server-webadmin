@@ -78,12 +78,12 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
     # browser can switch tracks reliably even when the source mixes E-AC3/DTS/TrueHD/etc. The old
     # single-track path keeps its copy/transcode decision unchanged.
     if multitrack and audio_tracks:
-        argv += ["-c:a", "aac", "-ac", "2", "-b:a", "384k"]
+        argv += ["-c:a", "aac", "-ac", "2", "-b:a", "192k"]
     elif a is not None:
         if a.get("action") == "copy":
             argv += ["-c:a", "copy"]
         else:
-            argv += ["-c:a", "aac", "-ac", "2", "-ab", "384000"]
+            argv += ["-c:a", "aac", "-ac", "2", "-ab", "192000"]
 
     if multitrack:
         variants: list[str] = []

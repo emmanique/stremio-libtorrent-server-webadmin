@@ -29,10 +29,12 @@ jobs:
           set -euo pipefail
           python3 -m pip install --upgrade pip uv
           uv lock --check
-          uv sync --dev
-          python3 -m pip install -r webadmin/requirements.txt
+          uv sync --frozen --dev
           uv pip check
 
       - name: Full regression suite
-        run: bash tools/ci/full-regression.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/ci/full-regression.sh
 

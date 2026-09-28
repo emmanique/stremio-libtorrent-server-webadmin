@@ -148,6 +148,55 @@ _detect_vaapi_device() {
     return 1
 }
 
+_detect_vaapi_driver() {
+    dev="$1"
+
+    [ -n "$dev" ] || return 1
+    [ -e "$dev" ] || return 1
+
+    vendor=""
+    driver=""
+
+    drm_name=$(basename "$dev")
+    sysdev="/sys/class/drm/$drm_name/device"
+
+    if [ -r "$sysdev/vendor" ]; then
+        vendor=$(cat "$sysdev/vendor" 2>/dev/null || true)
+    fi
+
+    if [ -e "$sysdev/driver" ]; then
+        driver=$(basename "$(readlink -f "$sysdev/driver" 2>/dev/null)" 2>/dev/null || true)
+    fi
+
+    # Intel DRM/i915: use the modern Intel Media Driver.
+    #
+    # Driver availability is validated inside the runtime image, not on the
+    # Docker host. The host is responsible only for identifying the GPU.
+    #
+    # Never automatically fall back to i965. On some Intel generations i965
+    # can initialise partially and then abort FFmpeg during encoding.
+    if [ "$vendor" = "0x8086" ] || [ "$driver" = "i915" ]; then
+        printf '%s\n' "iHD"
+        return 0
+    fi
+
+    # AMD
+    if [ "$vendor" = "0x1002" ] || [ "$driver" = "amdgpu" ]; then
+        for path in \
+            /usr/lib/x86_64-linux-gnu/dri/radeonsi_drv_video.so \
+            /usr/lib64/dri/radeonsi_drv_video.so \
+            /usr/lib/dri/radeonsi_drv_video.so
+        do
+            if [ -e "$path" ]; then
+                printf '%s\n' "radeonsi"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
 _nvidia_available() {
     [ -e /dev/nvidia0 ] || return 1
     command -v nvidia-smi >/dev/null 2>&1 || return 1
@@ -162,6 +211,12 @@ _nvidia_available() {
 }
 
 VAAPI_DETECTED_DEVICE=$(_detect_vaapi_device 2>/dev/null || true)
+VAAPI_DETECTED_DRIVER=""
+
+if [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+    VAAPI_DETECTED_DRIVER=$(_detect_vaapi_driver "$VAAPI_DETECTED_DEVICE" 2>/dev/null || true)
+fi
+
 NVIDIA_DETECTED=false
 
 if _nvidia_available; then
@@ -173,6 +228,11 @@ case "$GPU_BACKEND" in
         if [ -n "$VAAPI_DETECTED_DEVICE" ] && [ "$NVIDIA_DETECTED" = "true" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
+
+            if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+                LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+                export LIBVA_DRIVER_NAME
+            fi
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
 
             # Dual-GPU host: expose both verified accelerator families to the
@@ -191,6 +251,11 @@ case "$GPU_BACKEND" in
         elif [ -n "$VAAPI_DETECTED_DEVICE" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
+
+            if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+                LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+                export LIBVA_DRIVER_NAME
+            fi
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
 
             GPU_BACKEND_EFFECTIVE=vaapi
@@ -228,6 +293,11 @@ case "$GPU_BACKEND" in
 
         VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
         export VAAPI_DEVICE
+
+        if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+            LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+            export LIBVA_DRIVER_NAME
+        fi
         COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
         GPU_BACKEND_EFFECTIVE=vaapi
         TRANSCODING_HWACCEL=vaapi
@@ -273,6 +343,14 @@ export GPU_BACKEND GPU_BACKEND_EFFECTIVE
 
 echo "[start] GPU requested : $GPU_BACKEND"
 echo "[start] GPU effective : $GPU_BACKEND_EFFECTIVE"
+
+if [ -n "${VAAPI_DEVICE:-}" ]; then
+    echo "[start] VAAPI device  : $VAAPI_DEVICE"
+fi
+
+if [ -n "${LIBVA_DRIVER_NAME:-}" ]; then
+    echo "[start] VAAPI driver  : $LIBVA_DRIVER_NAME"
+fi
 
 echo "[start] detected host IPv4: $IPADDRESS"
 echo "[start] Web Player : http://$IPADDRESS:8080"
@@ -324,9 +402,17 @@ _repair_gateway_namespace() {
 }
 
 if [ "$#" -eq 0 ]; then
-    echo "[start] pulling published images..."
-    # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
-    docker compose $COMPOSE_ARGS pull
+    case "${STREMIO_PULL_POLICY:-always}" in
+        never)
+            echo "[start] image pull disabled (STREMIO_PULL_POLICY=never)"
+            ;;
+        *)
+            echo "[start] pulling published images..."
+            # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
+            docker compose $COMPOSE_ARGS pull
+            ;;
+    esac
+
     # Do not exec here: v2.0.6 performs a post-start namespace integrity check.
     # shellcheck disable=SC2086
     docker compose $COMPOSE_ARGS up -d --remove-orphans

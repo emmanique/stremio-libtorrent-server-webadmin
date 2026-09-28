@@ -14,10 +14,10 @@ pyproject.toml               upstream stremiosrv package version
 Current baseline:
 
 ```text
-Fork/Platform    2.0.18
-WebAdmin         2.0.18
-VPN Gateway      2.0.18
-Upstream Server  1.6.15
+Fork/Platform    2.0.22-dev
+WebAdmin         2.0.22-dev
+VPN Gateway      2.0.22-dev
+Upstream Server  1.6.20
 ```
 
 The fork release tag is `vX.Y.Z`. Container images are tagged with the fork release version. Server/core reporting remains tied to the independently integrated upstream version.

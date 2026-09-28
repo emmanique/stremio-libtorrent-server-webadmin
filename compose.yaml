@@ -1,9 +1,9 @@
-name: stremio-platform
+name: "${COMPOSE_PROJECT_NAME:-stremio-platform}"
 
 services:
   gluetun:
     image: "${VPN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:latest}"
-    pull_policy: always
+    pull_policy: "${STREMIO_PULL_POLICY:-always}"
     container_name: stremio-gluetun
     hostname: stremio-gluetun
     restart: unless-stopped
@@ -53,7 +53,7 @@ services:
 
   stremio-libtorrent-server:
     image: "${STREMIO_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin:latest}"
-    pull_policy: always
+    pull_policy: "${STREMIO_PULL_POLICY:-always}"
     container_name: stremio-libtorrent-server
     # This service shares Gluetun's network namespace. Docker forbids a separate
     # hostname together with network_mode: service:gluetun.
@@ -105,7 +105,7 @@ services:
 
   webadmin:
     image: "${WEBADMIN_IMAGE:-ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:latest}"
-    pull_policy: always
+    pull_policy: "${STREMIO_PULL_POLICY:-always}"
     container_name: stremio-webadmin
     restart: unless-stopped
     environment:
@@ -141,7 +141,7 @@ services:
 
   pihole:
     image: pihole/pihole:latest
-    pull_policy: always
+    pull_policy: "${STREMIO_PULL_POLICY:-always}"
     container_name: stremio-pihole
     restart: unless-stopped
     environment:

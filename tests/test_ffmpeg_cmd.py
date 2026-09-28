@@ -42,3 +42,14 @@ def test_audio_to_aac_stereo():
 def test_audio_copy():
     cmd = build_audio_cmd("http://x/0", {"action": "copy"})
     assert "copy" in cmd
+
+
+def test_audio_transcode_uses_192k_default_bitrate():
+    cmd = build_audio_cmd(
+        "http://x/0",
+        {"action": "transcode"},
+    )
+
+    assert "-ab" in cmd
+    assert cmd[cmd.index("-ab") + 1] == "192000"
+    assert "384000" not in cmd

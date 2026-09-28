@@ -80,13 +80,77 @@ def hwaccel_profiler(request: Request) -> dict:
 
 @router.get("/transcode.json")
 def transcode_stats(request: Request) -> dict:
-    """Transcoding / GPU status for the admin card: whether HW accel is active, the detected
-    profile (e.g. nvenc-linux / vaapi*; None = CPU/direct-play only), and how many transcodes are
-    running right now. Most playback is direct-play and uses no transcoder at all."""
-    p = request.app.state.settings.transcode_profile
-    conv = getattr(request.app.state, "converter", None)
+    """Return telemetry for the effective transcoding profile.
+
+    The resolved execution profile is authoritative. Runtime environment
+    variables are compatibility inputs to the profiler, not an independent
+    telemetry source.
+    """
+    from stremiosrv.transcode.profiler import detect_profile
+
+    conv = getattr(
+        request.app.state,
+        "converter",
+        None,
+    )
+
+    profile = detect_profile()
+
+    engine = None
+    codec = None
+    hwdecode = False
+    hwaccel = False
+
+    if profile:
+        # Legacy discovery identifies available hardware only.
+        # It must not invent an encoder policy.
+        if profile.startswith("vaapi-renderD"):
+            engine = "vaapi"
+            hwaccel = True
+
+        elif profile == "nvenc-linux":
+            engine = "nvenc"
+            hwaccel = True
+
+        elif profile.startswith("vaapi-"):
+            engine = "vaapi"
+            hwaccel = True
+
+            if profile.endswith("hevc"):
+                codec = "hevc_vaapi"
+            else:
+                codec = "h264_vaapi"
+
+            hwdecode = profile.startswith(
+                "vaapi-full-"
+            )
+
+        elif profile.startswith("nvenc-"):
+            engine = "nvenc"
+            hwaccel = True
+
+            if profile.endswith("hevc"):
+                codec = "hevc_nvenc"
+            else:
+                codec = "h264_nvenc"
+
+        elif profile.startswith("cpu-"):
+            engine = "cpu"
+
+            if profile.endswith("hevc"):
+                codec = "libx265"
+            else:
+                codec = "libx264"
+
     return {
-        "hwAccel": p is not None,
-        "profile": p,
-        "activeTranscodes": conv.active_count() if conv is not None else 0,
+        "hwAccel": hwaccel,
+        "profile": profile,
+        "engine": engine,
+        "videoCodec": codec,
+        "hwDecode": hwdecode,
+        "activeTranscodes": (
+            conv.active_count()
+            if conv is not None
+            else 0
+        ),
     }

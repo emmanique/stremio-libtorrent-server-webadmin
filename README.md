@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.18
+# Stremio Server WebAdmin 2.0.22-dev
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,12 +9,12 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 2.0.18 |
-| WebAdmin | 2.0.18 |
-| VPN Gateway | 2.0.18 |
-| Upstream Server/Core | 1.6.15 |
+| Fork / Platform | 2.0.22-dev |
+| WebAdmin | 2.0.22-dev |
+| VPN Gateway | 2.0.22-dev |
+| Upstream Server/Core | 1.6.20 |
 
-## What changed in 2.0.18
+## What changed in 2.0.22-dev
 
 - Production installation is now based on a minimal deployment ZIP/TAR attached to a GitHub Release, not a full source checkout.
 - The deployment baseline is host-neutral: no fixed LAN IP, personal allowlist, Angola-only timezone or mandatory GPU device.
@@ -74,7 +74,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=2.0.18
+VERSION=2.0.22-dev
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -334,6 +334,6 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v2.0.18.md
+Release notes: docs/releases/v2.0.22-dev.md
 
 License: MIT. See LICENSE.

@@ -51,3 +51,31 @@ def test_transcode_stats_with_profile_and_jobs():
     s.transcode_profile = "nvenc-linux"
     b = TestClient(create_app(settings=s, converter=FakeConv())).get("/transcode.json").json()
     assert b == {"hwAccel": True, "profile": "nvenc-linux", "activeTranscodes": 2}
+
+
+def test_transcode_json_prefers_effective_vaapi_runtime(monkeypatch):
+    monkeypatch.setenv("TRANSCODING_HWACCEL", "vaapi")
+    monkeypatch.setenv("TRANSCODING_VIDEO_CODEC", "h264_vaapi")
+
+    c = client()
+    c.app.state.settings.transcode_profile = "nvenc-linux"
+
+    result = c.get("/transcode.json").json()
+
+    assert result["hwAccel"] is True
+    assert result["profile"] == "vaapi"
+
+
+def test_transcode_json_preserves_legacy_profile_without_runtime_override(
+    monkeypatch,
+):
+    monkeypatch.delenv("TRANSCODING_HWACCEL", raising=False)
+    monkeypatch.delenv("TRANSCODING_VIDEO_CODEC", raising=False)
+
+    c = client()
+    c.app.state.settings.transcode_profile = "nvenc-linux"
+
+    result = c.get("/transcode.json").json()
+
+    assert result["hwAccel"] is True
+    assert result["profile"] == "nvenc-linux"
