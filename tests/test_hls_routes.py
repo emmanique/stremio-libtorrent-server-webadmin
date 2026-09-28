@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from stremiosrv.app import create_app
@@ -42,6 +44,7 @@ def _app_client(monkeypatch):
     from stremiosrv.app import create_app
 
     monkeypatch.setattr(hls, "probe_media", lambda url: {"format": {"name": "matroska"}, "streams": []})
+    monkeypatch.setattr(hls, "resolve_media_input", lambda request, url: url)
     return TestClient(create_app())
 
 
@@ -175,6 +178,7 @@ def test_probe_answers_504_when_ffprobe_times_out(monkeypatch):
     from stremiosrv.api import hls
 
     monkeypatch.setattr(hls, "probe_media", _times_out)
+    monkeypatch.setattr(hls, "resolve_media_input", lambda request, url: url)
     c = TestClient(create_app())
     assert c.get("/hlsv2/probe", params={"mediaURL": "http://x/y"}).status_code == 504
 
@@ -184,6 +188,7 @@ def test_the_master_playlist_answers_504_when_ffprobe_times_out(monkeypatch):
     from stremiosrv.api import hls
 
     monkeypatch.setattr(hls, "probe_media", _times_out)
+    monkeypatch.setattr(hls, "resolve_media_input", lambda request, url: url)
     app = create_app()
     app.state.converter = _FakeConv()
     r = TestClient(app).get("/hlsv2/job1/master.m3u8", params={"mediaURL": "http://x/y"})
@@ -267,3 +272,40 @@ def test_subtitle_playlist_route_marks_job_active(monkeypatch):
     assert "#EXTM3U" in r.text
     assert "track=31" in r.text
     assert conv.touched == ["job1"]
+
+
+# --- Task 7: resolve_media_input wired in, protocol whitelist, HLS-format refusal (Minor 8) ---
+
+
+def test_probe_resolves_the_media_url():
+    """probe_media must receive the RESOLVED URL, never the raw client mediaURL. Asserting only
+    that resolve_media_input was called (`m.called`) is vacuous: a regression back to
+    `probe_media(mediaURL)` -- the raw value, the exact SSRF bug this task closes -- would still
+    call resolve_media_input (its return value would just be discarded) and this test would keep
+    passing. The sentinel + assert_called_once_with proves probe_media got THAT value."""
+    c = TestClient(create_app())
+    resolved = "http://127.0.0.1:11470/RESOLVED"
+    with patch("stremiosrv.api.hls.resolve_media_input", return_value=resolved), \
+         patch("stremiosrv.api.hls.probe_media",
+               return_value={"format": {"name": "matroska"}, "streams": [], "samples": {}}) as pm:
+        c.get("/hlsv2/probe", params={"mediaURL": "https://cdn.example/v.mkv"})
+    pm.assert_called_once_with(resolved)  # not the raw client URL
+
+
+def test_master_refuses_hls_format_input():
+    """A torrent whose bytes are themselves an HLS playlist must not be handed to ffmpeg as a
+    transcode input (Minor 8).
+
+    A converter is attached deliberately: create_app() with none wired in answers 503
+    ("transcoder unavailable") before master() ever reaches the probe/refusal, which would make
+    this test pass vacuously through the 503 branch instead of proving the 415 path is reached.
+    """
+    app = create_app()
+    app.state.converter = _FakeConv()
+    c = TestClient(app)
+    with patch("stremiosrv.api.hls.resolve_media_input", side_effect=lambda r, u: u), \
+         patch("stremiosrv.api.hls.probe_media",
+               return_value={"format": {"name": "hls"}, "streams": [], "samples": {}}):
+        r = c.get("/hlsv2/00000000/master.m3u8",
+                  params={"mediaURL": "http://127.0.0.1:11470/aabb/0"})
+    assert r.status_code == 415

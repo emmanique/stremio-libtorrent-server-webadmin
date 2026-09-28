@@ -103,3 +103,14 @@ def test_single_track_path_keeps_existing_fmp4_layout():
     assert "-var_stream_map" not in cmd
     assert "fmp4" in cmd
     assert "/tmp/j/index.m3u8" in cmd
+
+
+def test_build_hls_cmd_has_a_protocol_whitelist_before_input():
+    """ffmpeg must not be free to follow whatever scheme a redirect throws at it -- only the
+    handful this server actually serves media over (Minor 8's protocol whitelist), and it has to
+    precede -i to guard the input it names."""
+    argv = build_hls_cmd("http://127.0.0.1:1/x", DEC_COPY, None, "/tmp/j")
+    assert "-protocol_whitelist" in argv
+    i = argv.index("-protocol_whitelist")
+    assert argv[i + 1] == "file,crypto,data,http,tcp,tls,https"
+    assert i < argv.index("-i")

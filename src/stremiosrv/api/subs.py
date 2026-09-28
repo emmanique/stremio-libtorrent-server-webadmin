@@ -8,13 +8,14 @@ import re
 import subprocess
 import tempfile
 import time
-import urllib.request
 import zlib
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from stremiosrv import metrics
+from stremiosrv.api.media_fetch import resolve_media_input
+from stremiosrv.proxy import client, dest, upstream
 from stremiosrv.stream.fileserver import file_disk_path
 from stremiosrv.subs.opensub import opensubtitles_hash_and_size
 from stremiosrv.transcode.probe import ProbeTimeoutError, probe_media
@@ -95,7 +96,12 @@ def to_webvtt(text: str) -> str:
             f.write(text)
             tmp = f.name
         proc = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-y", "-i", tmp, "-f", "webvtt", "pipe:1"],
+            # The input is our own local temp file, so ffmpeg never needs a network protocol. Pin the
+            # whitelist to local ones so a subtitle body that is really a manifest can't make ffmpeg
+            # fetch its segments (defence in depth: today ffmpeg's default already refuses http from a
+            # file input, so this changes no working case -- it just makes that guarantee explicit).
+            ["ffmpeg", "-hide_banner", "-y", "-protocol_whitelist", "file,crypto,data",
+             "-i", tmp, "-f", "webvtt", "pipe:1"],
             capture_output=True, timeout=15, check=False,
         )
         if proc.returncode == 0 and proc.stdout.strip():
@@ -119,7 +125,7 @@ _FETCH_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 
 
 @router.get("/subtitles.{ext}")
-def subtitles_proxy(ext: str, source: str = Query(alias="from")) -> Response:
+def subtitles_proxy(ext: str, request: Request, source: str = Query(alias="from")) -> Response:
     """Fetch an external subtitle (Stremio passes `?from=<url>`) and serve it on our own origin —
     CORS-safe and format-normalized. Mirrors the stock server's `/subtitles.:ext`: **the client asks
     for the extension it wants.** Android/native players request **`.srt`** (SubRip, for ExoPlayer);
@@ -131,13 +137,23 @@ def subtitles_proxy(ext: str, source: str = Query(alias="from")) -> Response:
     and the bare `urlopen` was 403'd by subs5.strem.io -> 502. See `_FETCH_UA`."""
     if not source.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="only http(s) subtitle sources are allowed")
-    req = urllib.request.Request(source, headers={"User-Agent": _FETCH_UA})
+    home = client.is_home_client(request)
+    deadline = upstream.Deadline(upstream.DEADLINE)
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            raw = r.read()
-            content_encoding = r.headers.get("Content-Encoding", "")
+        resp, conn = upstream.open_url(source, "GET", {"user-agent": _FETCH_UA}, home, deadline)
+    except dest.Refused as e:
+        logger.warning("subtitle source refused by destination guard: %s", e)
+        raise HTTPException(status_code=403, detail="subtitle source not allowed") from e
+    except Exception as e:  # unreachable, too slow, too many redirects, bad upstream
+        raise HTTPException(status_code=502, detail="failed to fetch subtitle") from e
+    try:
+        raw = resp.read()
+        content_encoding = resp.getheader("Content-Encoding", "") or ""
     except Exception as e:
         raise HTTPException(status_code=502, detail="failed to fetch subtitle") from e
+    finally:
+        resp.close()
+        conn.close()
     text = decode_subtitle(_decompress(raw, content_encoding))
     if ext.lower() == "vtt":
         # charset=utf-8 so strict players (ExoPlayer) don't second-guess the encoding.
@@ -187,9 +203,10 @@ def opensub_hash(request: Request, videoUrl: str | None = None, mediaURL: str | 
             hsh, size = opensubtitles_hash_and_size(file_disk_path(eng.save_path(), h, idx))
             return {"error": None, "result": {"size": size, "hash": hsh}}
         return {"error": None, "result": None}  # couldn't resolve in time -> client falls back to filename
-    if os.path.exists(src):
-        hsh, size = opensubtitles_hash_and_size(src)
-        return {"error": None, "result": {"size": size, "hash": hsh}}
+    # No filesystem fallback: a real client sends our own /<ih>/<idx> stream URL (handled above) or
+    # an addon http(s) URL, never a local path. Probing an arbitrary path for its size and hash is
+    # a local-file oracle for anyone who can reach this route, so it is refused here -- the client
+    # falls back to filename matching, exactly as it does for `result: null`.
     return {"error": None, "result": None}
 
 
@@ -234,15 +251,18 @@ def subtitle_signature(videoUrl: str | None = None, container: str | None = None
 
 
 @router.get("/{info_hash}/{idx:int}/subtitles.json")
-def subtitles_list(info_hash: str, idx: int, mediaURL: str) -> dict:
+def subtitles_list(info_hash: str, idx: int, mediaURL: str, request: Request) -> dict:
     # Unlike the playback routes, this one has an ordinary answer for "no tracks" and the player
     # asks for it on every playback. A slow probe must not turn that into a 500 -- but it is still
     # said out loud, because an empty list on a file that does have subtitles is otherwise silent.
+    media = resolve_media_input(request, mediaURL)
     try:
-        pr = probe_media(mediaURL)
+        pr = probe_media(media)
     except ProbeTimeoutError:
         logger.warning("subtitle probe timed out; answering with no tracks")
         return {"subtitles": []}
+    if "hls" in (pr.get("format", {}).get("name") or ""):
+        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
     subs = [
         {"id": s.get("id"), "track": s.get("index"), "codec": s.get("codec"), "lang": s.get("lang")}
         for s in pr["streams"]
@@ -298,12 +318,33 @@ def _webvtt_stream(proc: subprocess.Popen):
 
 
 @router.get("/{info_hash}/{idx:int}/subtitles.vtt")
-def subtitles_vtt(info_hash: str, idx: int, mediaURL: str, track: int = 0) -> StreamingResponse:
-    _subtitle_stream_by_global_index(mediaURL, track)
+def subtitles_vtt(
+    info_hash: str,
+    idx: int,
+    mediaURL: str,
+    request: Request,
+    track: int = 0,
+) -> StreamingResponse:
+    media = resolve_media_input(request, mediaURL)
+
+    # `track` is the global FFmpeg stream index returned by
+    # /subtitles.json, not the subtitle-relative 0:s:<n> index.
+    _subtitle_stream_by_global_index(media, track)
+
     argv = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", mediaURL,
-        "-map", f"0:{track}", "-c:s", "webvtt", "-f", "webvtt", "pipe:1",
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-nostdin",
+        "-protocol_whitelist",
+        "file,crypto,data,http,tcp,tls,https",
+        "-i", media,
+        "-map", f"0:{track}",
+        "-c:s", "webvtt",
+        "-f", "webvtt",
+        "pipe:1",
     ]
+
     try:
         proc = subprocess.Popen(
             argv,
@@ -312,5 +353,12 @@ def subtitles_vtt(info_hash: str, idx: int, mediaURL: str, track: int = 0) -> St
             bufsize=0,
         )
     except OSError as e:
-        raise HTTPException(status_code=503, detail="subtitle extractor unavailable") from e
-    return StreamingResponse(_webvtt_stream(proc), media_type="text/vtt; charset=utf-8")
+        raise HTTPException(
+            status_code=503,
+            detail="subtitle extractor unavailable",
+        ) from e
+
+    return StreamingResponse(
+        _webvtt_stream(proc),
+        media_type="text/vtt; charset=utf-8",
+    )

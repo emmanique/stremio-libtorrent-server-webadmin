@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
+from stremiosrv.api.media_fetch import resolve_media_input
 from stremiosrv.api.subs import parse_stream_url
 from stremiosrv.transcode.fingerprint import decide
 from stremiosrv.transcode.probe import ProbeTimeoutError, probe_media
@@ -125,11 +126,15 @@ def _subtitle_media_playlist(media_url: str, track: int, duration: float) -> str
 # gives when a transcode fails to start.
 
 @router.api_route("/probe", methods=["GET", "HEAD"])
-def probe(mediaURL: str) -> dict:
+def probe(mediaURL: str, request: Request) -> dict:
+    media = resolve_media_input(request, mediaURL)
     try:
-        return probe_media(mediaURL)
+        pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
+    if "hls" in (pr.get("format", {}).get("name") or ""):
+        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
+    return pr
 
 
 @router.api_route("/{job_id}/master.m3u8", methods=["GET", "HEAD"])
@@ -145,17 +150,20 @@ def master(
     conv = _converter(request)
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
+    media = resolve_media_input(request, mediaURL)
     try:
-        pr = probe_media(mediaURL)
+        pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
+    if "hls" in (pr.get("format", {}).get("name") or ""):
+        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
     # The fingerprint decision historically carried only the selected primary audio action. Preserve
     # the full probed stream inventory as private converter metadata so HLS can expose alternate
     # audio and text-subtitle renditions without changing the public fingerprint contract.
     dec["_streams"] = list(pr.get("streams") or [])
     try:
-        d = conv.ensure_job(job_id, mediaURL, dec)
+        d = conv.ensure_job(job_id, media, dec)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job id") from e
     master_path = d / "master.m3u8"

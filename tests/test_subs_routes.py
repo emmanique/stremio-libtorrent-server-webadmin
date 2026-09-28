@@ -1,3 +1,6 @@
+import os
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from stremiosrv.api.subs import parse_stream_url
@@ -17,21 +20,55 @@ def test_opensub_hash_null_for_unresolvable_url():
     assert r.json() == {"error": None, "result": None}
 
 
-def test_opensub_hash_route(tmp_path):
-    p = tmp_path / "v.bin"
-    p.write_bytes(b"\x00" * (2 * 65536))  # 128 KiB zeros -> filesize hash
-    c = TestClient(create_app())
-    r = c.get("/opensubHash", params={"videoUrl": str(p)})
-    assert r.status_code == 200
-    # Stock-server envelope: result carries BOTH the hash AND the byte size. OpenSubtitles matches on
-    # moviehash + moviebytesize, so a bare hash (no size) silently breaks OpenSubtitles-addon matching.
-    assert r.json() == {"error": None, "result": {"size": 131072, "hash": "0000000000020000"}}
-
-
 def test_opensub_hash_requires_source():
     c = TestClient(create_app())
     r = c.get("/opensubHash")
     assert r.status_code == 422
+
+
+def test_opensubhash_does_not_probe_arbitrary_local_paths(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"x" * 1000)
+    c = TestClient(create_app())
+    r = c.get("/opensubHash", params={"videoUrl": str(secret)})
+    assert r.status_code == 200
+    assert r.json() == {"error": None, "result": None}  # never a size/hash for a local path
+
+
+def test_opensubhash_rejects_a_bare_existing_directory():
+    c = TestClient(create_app())
+    r = c.get("/opensubHash", params={"videoUrl": os.getcwd()})
+    assert r.json() == {"error": None, "result": None}
+
+
+def test_opensub_hash_returns_size_and_hash_on_engine_success(monkeypatch):
+    # The engine-success envelope: a resolvable own stream URL, metadata present and the edge pieces
+    # in, returns {"error": null, "result": {"size", "hash"}} -- the shape the OpenSubtitles addon
+    # needs (moviehash AND moviebytesize). The null cases are covered above; this covers the hit.
+    from stremiosrv.api import subs
+
+    class FakeHandle:
+        def has_metadata(self):
+            return True
+
+    class FakeEngine:
+        def get(self, info_hash):
+            return FakeHandle()
+
+        def add(self, info_hash):
+            return FakeHandle()
+
+        def save_path(self):
+            return "/data"
+
+    monkeypatch.setattr(subs, "_ensure_edges", lambda *a, **k: True)
+    monkeypatch.setattr(subs, "file_disk_path", lambda *a, **k: "/data/movie.mkv")
+    monkeypatch.setattr(subs, "opensubtitles_hash_and_size", lambda path: ("deadbeefdeadbeef", 4242))
+    app = create_app()
+    app.state.engine = FakeEngine()
+    r = TestClient(app).get("/opensubHash", params={"videoUrl": "https://h:12470/" + "a" * 40 + "/6"})
+    assert r.status_code == 200
+    assert r.json() == {"error": None, "result": {"size": 4242, "hash": "deadbeefdeadbeef"}}
 
 
 def test_casting_returns_empty_list():
@@ -129,6 +166,7 @@ def test_subtitles_list_answers_its_empty_shape_when_the_probe_times_out(monkeyp
         raise ProbeTimeoutError("ffprobe did not answer within 30s")
 
     monkeypatch.setattr(subs_api, "probe_media", _times_out)
+    monkeypatch.setattr(subs_api, "resolve_media_input", lambda request, url: url)
     c = TestClient(create_app())
     with caplog.at_level(logging.WARNING):
         r = c.get("/" + "a" * 40 + "/0/subtitles.json", params={"mediaURL": "http://x/y"})
@@ -140,6 +178,14 @@ def test_subtitles_list_answers_its_empty_shape_when_the_probe_times_out(monkeyp
 def test_subtitles_vtt_uses_same_global_track_id_as_subtitles_list(monkeypatch):
     import io
     from stremiosrv.api import subs as subs_api
+
+    # This regression starts after upstream 1.6.20 media resolution.
+    # Destination/media guard behaviour has dedicated tests.
+    monkeypatch.setattr(
+        subs_api,
+        "resolve_media_input",
+        lambda request, url: url,
+    )
 
     monkeypatch.setattr(
         subs_api,
@@ -202,6 +248,14 @@ def test_subtitles_vtt_uses_same_global_track_id_as_subtitles_list(monkeypatch):
 def test_subtitles_vtt_invalid_global_track_returns_controlled_404(monkeypatch):
     from stremiosrv.api import subs as subs_api
 
+    # This regression starts after upstream 1.6.20 media resolution.
+    # Destination/media guard behaviour has dedicated tests.
+    monkeypatch.setattr(
+        subs_api,
+        "resolve_media_input",
+        lambda request, url: url,
+    )
+
     monkeypatch.setattr(
         subs_api,
         "probe_media",
@@ -226,6 +280,14 @@ def test_subtitles_vtt_invalid_global_track_returns_controlled_404(monkeypatch):
 
 def test_subtitles_vtt_probe_timeout_is_controlled_504(monkeypatch):
     from stremiosrv.api import subs as subs_api
+
+    # This regression starts after upstream 1.6.20 media resolution.
+    # Destination/media guard behaviour has dedicated tests.
+    monkeypatch.setattr(
+        subs_api,
+        "resolve_media_input",
+        lambda request, url: url,
+    )
     from stremiosrv.transcode.probe import ProbeTimeoutError
 
     def _times_out(url):
@@ -240,3 +302,146 @@ def test_subtitles_vtt_probe_timeout_is_controlled_504(monkeypatch):
     )
     assert r.status_code == 504
     assert r.json()["detail"] == "subtitle probe timed out"
+
+
+def test_subtitles_list_resolves_the_media_url(monkeypatch):
+    """probe_media must receive the resolved (own-or-reader) URL, never the raw client mediaURL --
+    the same contract hls.py's probe route gets (Task 7 / Minor 8)."""
+    from stremiosrv.api import subs as subs_api
+
+    seen_by_resolve = []
+    seen_by_probe = []
+
+    def fake_resolve(request, url):
+        seen_by_resolve.append(url)
+        return "http://127.0.0.1:1/resolved"
+
+    def fake_probe(url):
+        seen_by_probe.append(url)
+        return {"format": {"name": "matroska"}, "streams": []}
+
+    monkeypatch.setattr(subs_api, "resolve_media_input", fake_resolve)
+    monkeypatch.setattr(subs_api, "probe_media", fake_probe)
+    c = TestClient(create_app())
+    r = c.get("/" + "a" * 40 + "/0/subtitles.json",
+              params={"mediaURL": "https://cdn.example/v.mkv"})
+    assert r.status_code == 200
+    assert seen_by_resolve == ["https://cdn.example/v.mkv"]
+    assert seen_by_probe == ["http://127.0.0.1:1/resolved"]
+
+
+def test_subtitles_list_refuses_hls_format_input():
+    """A torrent whose bytes are themselves an HLS playlist must not be handed to ffprobe's HLS
+    demuxer here either -- same Minor-8 concern as hls.py's probe/master, and the same fix: refuse
+    a *successful* probe that reports an hls format. ProbeTimeoutError's separate
+    `{"subtitles": []}` branch (a slow/failed probe) is untouched -- this is only for a probe that
+    succeeded and found a playlist.
+
+    For an own mediaURL (the normal torrent case), resolve_media_input returns it unchanged and
+    ffprobe's HLS demuxer can then open absolute LAN segment URLs a malicious torrent's playlist
+    names -- the protocol whitelist permits http/https, so it does not stop this on its own."""
+    c = TestClient(create_app())
+    with patch("stremiosrv.api.subs.resolve_media_input", side_effect=lambda r, u: u), \
+         patch("stremiosrv.api.subs.probe_media",
+               return_value={"format": {"name": "hls"}, "streams": [], "samples": {}}):
+        r = c.get("/" + "a" * 40 + "/0/subtitles.json",
+                  params={"mediaURL": "http://127.0.0.1:11470/aabb/0"})
+    assert r.status_code == 415
+
+
+def test_subtitles_vtt_resolves_the_media_url_and_whitelists_protocols(monkeypatch):
+    """The raw client URL must never reach ffmpeg and the input protocol whitelist
+    must precede -i, while preserving the fork's streaming Popen implementation."""
+    import io
+    from stremiosrv.api import subs as subs_api
+
+    seen = {}
+
+    class _Proc:
+        def __init__(self, argv, **kwargs):
+            seen["argv"] = argv
+            seen["kwargs"] = kwargs
+            self.stdout = io.BytesIO(
+                b"WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nhi\\n"
+            )
+            self._returncode = None
+
+        def wait(self, timeout=None):
+            self._returncode = 0
+            return 0
+
+        def poll(self):
+            return self._returncode
+
+        def terminate(self):
+            self._returncode = 0
+
+        def kill(self):
+            self._returncode = -9
+
+    monkeypatch.setattr(
+        subs_api,
+        "resolve_media_input",
+        lambda request, url: "http://127.0.0.1:1/resolved",
+    )
+
+    monkeypatch.setattr(
+        subs_api,
+        "probe_media",
+        lambda url: {
+            "format": {"name": "matroska"},
+            "streams": [
+                {
+                    "id": 31,
+                    "index": 31,
+                    "track": "subtitle",
+                    "codec": "subrip",
+                    "lang": "eng",
+                }
+            ],
+            "samples": {},
+        },
+    )
+
+    monkeypatch.setattr(subs_api.subprocess, "Popen", _Proc)
+
+    c = TestClient(create_app())
+
+    r = c.get(
+        "/" + "a" * 40 + "/0/subtitles.vtt",
+        params={
+            "mediaURL": "https://cdn.example/v.mkv",
+            "track": 31,
+        },
+    )
+
+    assert r.status_code == 200
+
+    argv = seen["argv"]
+
+    assert "http://127.0.0.1:1/resolved" in argv
+    assert "https://cdn.example/v.mkv" not in argv
+
+    assert "-protocol_whitelist" in argv
+    i = argv.index("-protocol_whitelist")
+    assert argv[i + 1] == "file,crypto,data,http,tcp,tls,https"
+    assert i < argv.index("-i")
+
+    # Preserve the fork contract: track is FFmpeg's GLOBAL stream index.
+    assert ["-map", "0:31"] == argv[
+        argv.index("-map"):argv.index("-map") + 2
+    ]
+    assert "0:s:31" not in argv
+
+
+def test_subtitles_from_a_refused_destination_is_403():
+    c = TestClient(create_app())
+    # link-local (cloud-metadata range) is refused to everyone, home or not
+    r = c.get("/subtitles.srt", params={"from": "http://169.254.169.254/latest/meta-data/"})
+    assert r.status_code == 403
+
+
+def test_subtitles_from_non_http_is_400():
+    c = TestClient(create_app())
+    r = c.get("/subtitles.vtt", params={"from": "file:///etc/hostname"})
+    assert r.status_code == 400
