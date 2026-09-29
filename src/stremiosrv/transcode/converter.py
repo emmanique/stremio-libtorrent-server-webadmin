@@ -121,6 +121,14 @@ def build_hls_cmd(
     audio_tracks = _hls_audio_tracks(decision)
     multitrack = len(audio_tracks) > 1
 
+    # Retain legacy explicit-profile behaviour for upgrade compatibility.
+    # AUTO never enters these branches.
+    if v.get("action") == "transcode":
+        if profile == "nvenc-linux":
+            argv += ["-hwaccel", "cuda"]
+        elif profile and profile.startswith("vaapi-full-"):
+            argv += ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
+
     # VAAPI encode-only needs a device for hwupload but deliberately keeps
     # decode in software; GPU availability must not become a decode policy.
     if v.get("action") == "transcode" and profile == "auto" and backend_name == "vaapi" and backend_device:
