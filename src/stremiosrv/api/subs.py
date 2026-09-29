@@ -324,6 +324,8 @@ def subtitles_vtt(
     mediaURL: str,
     request: Request,
     track: int = 0,
+    start: float | None = None,
+    duration: float | None = None,
 ) -> StreamingResponse:
     media = resolve_media_input(request, mediaURL)
 
@@ -331,9 +333,10 @@ def subtitles_vtt(
     # /subtitles.json, not the subtitle-relative 0:s:<n> index.
     _subtitle_stream_by_global_index(media, track)
     logger.warning(
-        "subtitle trace: stage=vtt method=%s track=%s",
+        "subtitle trace: stage=vtt method=%s track=%s windowed=%s",
         request.method,
         track,
+        start is not None or duration is not None,
     )
 
     argv = [
@@ -343,7 +346,13 @@ def subtitles_vtt(
         "-nostdin",
         "-protocol_whitelist",
         "file,crypto,data,http,tcp,tls,https",
-        "-i", media,
+    ]
+    if start is not None:
+        argv += ["-ss", f"{max(0.0, start):.3f}"]
+    argv += ["-i", media]
+    if duration is not None:
+        argv += ["-t", f"{max(0.001, duration):.3f}"]
+    argv += [
         "-map", f"0:{track}",
         "-c:s", "webvtt",
         "-f", "webvtt",
