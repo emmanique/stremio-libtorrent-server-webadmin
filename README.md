@@ -14,6 +14,65 @@ Current versions:
 | VPN Gateway | 3.0.0 |
 | Upstream Server/Core | 1.6.20 |
 
+## 3.0.0 — features added by this fork
+
+Version 3.0.0 marks the platform-level fork as a distinct distribution rather than only a repackaged upstream server. The upstream/core version remains independently versioned; the capabilities below are maintained by this fork on top of the main upstream server.
+
+### WebAdmin and operations
+
+- Independent **WebAdmin** service that remains available while the Stremio server container is restarted or recreated.
+- Browser dashboard for runtime health, component versions, configuration, restart operations, logs, cache/stream visibility and transcoding diagnostics.
+- Persistent WebAdmin/server configuration outside the application containers so normal image replacement does not discard local settings.
+- Configuration save/read-back and server restart flows designed to survive DIRECT/VPN deployment changes.
+
+### Integrated network stack
+
+- Single Compose-based platform integrating **Stremio Server, WebAdmin, Pi-hole and Gluetun**.
+- VPN can remain unconfigured/disabled without preventing normal DIRECT operation; enabling it switches the streaming stack to VPN egress.
+- Pi-hole is integrated as the platform DNS layer, with optional LAN DNS exposure rather than requiring host port 53 in the base deployment.
+- Stable Gluetun network namespace and fail-closed behaviour while VPN operation is explicitly requested.
+- Host-neutral deployment variables, automatic host-IP discovery and explicit overrides for multi-homed/special installations.
+
+### Automatic GPU transcoding
+
+- **AUTO-only transcoding policy**: WebAdmin detects and exposes acceleration but does not manually choose the playback codec or force a transcode.
+- Automatic Intel/DRM **VAAPI** and NVIDIA/**NVENC** capability discovery, with CPU-safe operation when no validated accelerator is available.
+- Real FFmpeg capability checks distinguish GPU detection, runtime readiness and usable H.264/HEVC encode capability.
+- Live telemetry distinguishes an available GPU from the engine actually used by current playback; Direct Stream/copy remains visible as copy.
+- Equivalent HLS workloads are deduplicated so compatible clients share one main video FFmpeg/HLS job instead of unnecessarily creating duplicate video transcodes.
+- Transcode lifecycle/garbage collection is hardened against workload cleanup races.
+
+### HDR-aware playback
+
+- Probe metadata retains video profile, pixel format, bit depth, colour transfer/primaries, HDR and Dolby Vision indicators.
+- HDR10/PQ/HLG can follow the validated AUTO VAAPI HDR-to-SDR path when transcoding is required: hardware decode, `tonemap_vaapi`, BT.709 output and `h264_vaapi` encode.
+- HEVC SDR remains eligible for Direct Stream/copy when compatible.
+- Dolby Vision is deliberately kept separate from the HDR10 fallback until a DoVi-specific path is validated instead of silently treating DoVi as HDR10.
+
+### Embedded subtitles for browser/HLS playback
+
+- Embedded subtitle tracks are discovered and advertised as HLS subtitle renditions without mixing subtitle extraction into the main video FFmpeg process.
+- WebVTT is delivered in finite 30-second HLS windows rather than one movie-length streaming subtitle response.
+- Window extraction uses output-side seeking to avoid header-only WebVTT results observed with sparse embedded subtitle streams.
+- Each window carries `X-TIMESTAMP-MAP` so FFmpeg segment-local cue times are mapped to the HLS playback clock.
+- This finite-window + timestamp-map path has been validated in real browser playback with visible, synchronized and continuous subtitles.
+- Subtitle-only FFmpeg extraction is excluded from the WebAdmin count of active video transcodes.
+
+### Streaming/proxy compatibility and resilience
+
+- Dedicated media-fetch/proxy handling, upstream playlist/client compatibility work, handshake compatibility and library/protocol adaptations support the self-hosted browser stack.
+- Torrent/media destination guards remain in the fetch path; subtitle and HLS changes do not bypass existing media-input validation.
+- Pins/library behaviour and browser compatibility have dedicated regression coverage.
+
+### Deployment and regression engineering
+
+- Minimal release deployment packages are supported so a production host does not require a complete source checkout.
+- Upgrade guidance preserves `.env`, configuration/state volumes, VPN material and persistent data.
+- CI separates fast checks, dependency checks and full regression, including deployment/package validation.
+- Expanded regression coverage includes AUTO GPU routing, HDR decisions, HLS/subtitles, deduplication/GC, proxy/media fetch, handshake, pins/library, Compose topology and WebAdmin transcoding detection.
+
+> **Versioning note:** `3.0.0` is the version of this fork/platform and WebAdmin. The embedded Stremio server/core keeps its own upstream-derived version (currently `1.6.20`) so fork features are not misrepresented as upstream features.
+
 ## What changed in 3.0.0
 
 ### Automatic transcoding architecture
