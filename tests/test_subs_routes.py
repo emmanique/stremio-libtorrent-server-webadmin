@@ -245,6 +245,48 @@ def test_subtitles_vtt_uses_same_global_track_id_as_subtitles_list(monkeypatch):
     assert kwargs["bufsize"] == 0
 
 
+def test_subtitles_vtt_window_passes_seek_and_duration_to_ffmpeg(monkeypatch):
+    import io
+    from stremiosrv.api import subs as subs_api
+
+    seen = {}
+
+    monkeypatch.setattr(subs_api, "resolve_media_input", lambda request, url: "http://127.0.0.1/media")
+    monkeypatch.setattr(
+        subs_api, "probe_media",
+        lambda url: {"format": {}, "streams": [
+            {"index": 9, "track": "subtitle", "codec": "subrip", "lang": "por"}
+        ], "samples": {}},
+    )
+
+    class _Proc:
+        def __init__(self, argv, **kwargs):
+            seen["argv"] = argv
+            self.stdout = io.BytesIO(b"WEBVTT\\n\\n")
+            self._returncode = None
+        def wait(self, timeout=None):
+            self._returncode = 0
+            return 0
+        def poll(self):
+            return self._returncode
+        def terminate(self):
+            self._returncode = 0
+        def kill(self):
+            self._returncode = -9
+
+    monkeypatch.setattr(subs_api.subprocess, "Popen", _Proc)
+    r = TestClient(create_app()).get(
+        "/" + "a" * 40 + "/0/subtitles.vtt",
+        params={"mediaURL": "http://media", "track": 9, "start": 60, "duration": 30},
+    )
+    assert r.status_code == 200
+    argv = seen["argv"]
+    assert ["-ss", "60.000"] == argv[argv.index("-ss"):argv.index("-ss") + 2]
+    assert ["-t", "30.000"] == argv[argv.index("-t"):argv.index("-t") + 2]
+    assert argv.index("-ss") < argv.index("-i")
+    assert argv.index("-t") > argv.index("-i")
+
+
 def test_subtitles_vtt_invalid_global_track_returns_controlled_404(monkeypatch):
     from stremiosrv.api import subs as subs_api
 
