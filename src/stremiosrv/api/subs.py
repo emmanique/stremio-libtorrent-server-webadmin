@@ -328,7 +328,7 @@ def _trace_webvtt_timeline(payload: bytes, start: float | None, duration: float 
     cues = list(_VTT_CUE_RE.finditer(payload))
     first = cues[0].group("start").decode("ascii") if cues else "-"
     last = cues[-1].group("end").decode("ascii") if cues else "-"
-    logger.warning(
+    logger.debug(
         "subtitle trace: stage=vtt-result window_start=%s window_duration=%s bytes=%s cues=%s first=%s last=%s",
         f"{start:.3f}" if start is not None else "-",
         f"{duration:.3f}" if duration is not None else "-",
@@ -392,7 +392,7 @@ def subtitles_vtt(
     # `track` is the global FFmpeg stream index returned by
     # /subtitles.json, not the subtitle-relative 0:s:<n> index.
     _subtitle_stream_by_global_index(media, track)
-    logger.warning(
+    logger.debug(
         "subtitle trace: stage=vtt method=%s track=%s windowed=%s",
         request.method,
         track,
