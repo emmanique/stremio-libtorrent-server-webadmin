@@ -74,13 +74,32 @@ def _direct_video_codecs() -> set[str]:
     }
 
 
+def _source_video_stream(decision: dict) -> dict:
+    """Return probed source-video metadata carried privately by the HLS decision."""
+    return next(
+        (
+            stream
+            for stream in decision.get("_streams") or []
+            if stream.get("track") == "video"
+        ),
+        {},
+    )
+
+
 def _source_video_codec(decision: dict) -> str | None:
     """Return the probed source video codec already carried by the HLS decision."""
-    for stream in decision.get("_streams") or []:
-        if stream.get("track") == "video":
-            codec = str(stream.get("codec") or "").strip().lower()
-            return codec or None
-    return None
+    codec = str(_source_video_stream(decision).get("codec") or "").strip().lower()
+    return codec or None
+
+
+def _source_is_hdr(decision: dict) -> bool:
+    """Whether the probed source is HDR/PQ/HLG.
+
+    This is execution metadata only. It never promotes COPY to TRANSCODE.
+    """
+    source = _source_video_stream(decision)
+    transfer = str(source.get("colorTransfer") or "").strip().lower()
+    return bool(source.get("isHdr")) or transfer in {"smpte2084", "arib-std-b67"}
 
 
 def _apply_direct_video_policy(
@@ -129,10 +148,27 @@ def build_hls_cmd(
         elif profile and profile.startswith("vaapi-full-"):
             argv += ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
 
-    # VAAPI encode-only needs a device for hwupload but deliberately keeps
-    # decode in software; GPU availability must not become a decode policy.
+    source_hdr = _source_is_hdr(decision)
+    auto_vaapi_hdr = (
+        v.get("action") == "transcode"
+        and profile == "auto"
+        and backend_name == "vaapi"
+        and bool(backend_device)
+        and source_hdr
+    )
+
+    # Ordinary AUTO VAAPI remains encode-only. HDR is different: once the
+    # core has already requested a video transcode, keeping HDR10/PQ frames
+    # on the VAAPI surface allows tonemap_vaapi to produce SDR BT.709 in real
+    # time. Hardware availability still never promotes COPY to TRANSCODE.
     if v.get("action") == "transcode" and profile == "auto" and backend_name == "vaapi" and backend_device:
         argv += ["-vaapi_device", str(backend_device)]
+        if auto_vaapi_hdr:
+            argv += [
+                "-hwaccel", "vaapi",
+                "-hwaccel_device", str(backend_device),
+                "-hwaccel_output_format", "vaapi",
+            ]
 
     argv += ["-i", media_url, "-map", "0:v:0"]
     if multitrack:
@@ -147,7 +183,16 @@ def build_hls_cmd(
     else:
         w = v.get("scale_width")
         if profile == "auto" and backend_name == "vaapi" and backend_device:
-            vf = f"scale={w}:-2:flags=lanczos,format=nv12,hwupload" if w else "format=nv12,hwupload"
+            if auto_vaapi_hdr:
+                source_width = int(_source_video_stream(decision).get("width") or 0)
+                filters = [
+                    "tonemap_vaapi=format=nv12:matrix=bt709:primaries=bt709:transfer=bt709"
+                ]
+                if w and (not source_width or int(w) < source_width):
+                    filters.append(f"scale_vaapi=w={w}:h=-2:format=nv12")
+                vf = ",".join(filters)
+            else:
+                vf = f"scale={w}:-2:flags=lanczos,format=nv12,hwupload" if w else "format=nv12,hwupload"
             argv += ["-vf", vf, "-c:v", "h264_vaapi"]
         elif profile == "auto" and backend_name == "nvenc":
             # NVENC encode only: AUTO does not force CUDA/NVDEC decode.
