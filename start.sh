@@ -108,8 +108,12 @@ LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
 if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
-    # Keep an empty legacy value from being exported into Compose/runtime.
-    if grep -q '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*
+    # Remove a blank legacy override so libva can auto-detect the runtime driver.
+    if grep -q '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$' "$ENV_FILE" 2>/dev/null; then
+        sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
+    fi
+    unset LIBVA_DRIVER_NAME
+fi
 GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
 
 _detect_vaapi_device() {
