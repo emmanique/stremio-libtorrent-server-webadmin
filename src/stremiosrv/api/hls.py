@@ -6,6 +6,7 @@ server byte-for-byte — the player follows whatever URIs we publish.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -93,28 +94,36 @@ def _master_with_subtitles(master_text: str, probe: dict, media_url: str) -> str
 
 
 def _subtitle_media_playlist(media_url: str, track: int, duration: float) -> str:
-    """Return a VOD WebVTT rendition playlist for an embedded subtitle track.
-
-    The WebVTT endpoint already emits the complete timed-text resource.  Do not model that resource
-    as one media segment whose EXTINF/TARGETDURATION equals the movie duration: some HLS consumers
-    wait for/seek subtitle media as if it were a huge timed segment and never render its cues.
-    WebVTT renditions may instead reference the complete sidecar resource directly from a minimal
-    VOD playlist.  The cue timestamps remain authoritative inside the VTT body.
-    """
+    """Build a VOD WebVTT media playlist with finite extraction windows."""
     parsed = parse_stream_url(media_url)
     if parsed is None:
         raise HTTPException(status_code=400, detail="subtitle mediaURL is not a server stream URL")
     info_hash, idx = parsed
-    query = urlencode({"mediaURL": media_url, "track": track})
-    vtt_uri = f"/{info_hash}/{idx}/subtitles.vtt?{query}"
-    return (
-        "#EXTM3U\n"
-        "#EXT-X-VERSION:3\n"
-        "#EXT-X-PLAYLIST-TYPE:VOD\n"
-        "#EXT-X-MEDIA-SEQUENCE:0\n"
-        f"{vtt_uri}\n"
-        "#EXT-X-ENDLIST\n"
-    )
+    total = max(float(duration or 0.0), 0.001)
+    segment = 30.0
+    count = max(1, math.ceil(total / segment))
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{math.ceil(segment)}",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+    ]
+    for n in range(count):
+        offset = n * segment
+        length = min(segment, total - offset)
+        query = urlencode({
+            "mediaURL": media_url,
+            "track": track,
+            "start": f"{offset:.3f}",
+            "duration": f"{length:.3f}",
+        })
+        lines += [
+            f"#EXTINF:{length:.3f},",
+            f"/{info_hash}/{idx}/subtitles.vtt?{query}",
+        ]
+    lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines) + "\n"
 
 
 # HEAD is accepted on the read routes below. FastAPI, unlike bare Starlette, does NOT add HEAD to a
