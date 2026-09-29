@@ -334,3 +334,9 @@ The legacy `start-vpn.*` files are compatibility wrappers only.
 ## Upgrade rule
 
 Before every upgrade run `sh scripts/backup-before-upgrade.sh`, keep the existing `.env`, extract the new deployment package over the installation directory, run `sh scripts/check-env-upgrade.sh` to identify newly introduced variables, review any reported changes, run `sh start.sh config`, then start the stack with `sh start.sh`. Never use `docker compose down -v` for a routine upgrade.
+
+## 2.0.22 AUTO launcher and transcoding
+
+Use `./start.sh` for normal installation/startup. It detects the host IP and GPU, exports the detected VAAPI render node to the Compose overlay, and leaves `VAAPI_DEVICE` portable/unset in `.env` unless the administrator explicitly overrides it. `./start.sh --help` is side-effect-free: it does not create/update `.env`, probe hardware, pull images, or start the stack. Direct use of `compose.vaapi.yaml` bypasses discovery and requires `VAAPI_DEVICE` in the invoking shell.
+
+AUTO preserves Stremio's playback decision: COPY stays COPY. Only after the core requests video transcoding does AUTO select the available execution backend (VAAPI encode, NVENC encode, or CPU/libx264 fallback). Hardware decode is not forced by GPU discovery.
