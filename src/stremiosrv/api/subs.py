@@ -348,7 +348,10 @@ def subtitles_vtt(
         "file,crypto,data,http,tcp,tls,https",
     ]
     if start is not None:
-        argv += ["-ss", f"{max(0.0, start):.3f}"]
+        # HLS WebVTT segments must retain the source media timeline.  Without -copyts every
+        # independently extracted window restarts its cues near 00:00, so later subtitle
+        # segments drift out of sync and eventually disappear from playback.
+        argv += ["-copyts", "-ss", f"{max(0.0, start):.3f}"]
     argv += ["-i", media]
     if duration is not None:
         argv += ["-t", f"{max(0.001, duration):.3f}"]
