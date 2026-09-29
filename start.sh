@@ -135,6 +135,17 @@ COMPOSE_ARGS="-f compose.yaml"
 GPU_BACKEND=${GPU_BACKEND:-$(_env_value GPU_BACKEND auto)}
 VAAPI_DEVICE=${VAAPI_DEVICE:-$(_env_value VAAPI_DEVICE "")}
 LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
+
+# Intel Media Driver is case-sensitive on Linux: the installed module is
+# iHD_drv_video.so. Canonicalize legacy/inherited lowercase overrides so an
+# environment such as LIBVA_DRIVER_NAME=ihd cannot break otherwise working
+# Intel VAAPI discovery.
+case "$(printf '%s' "$LIBVA_DRIVER_NAME" | tr '[:upper:]' '[:lower:]')" in
+    ihd)
+        LIBVA_DRIVER_NAME=iHD
+        ;;
+esac
+
 if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
