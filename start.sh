@@ -410,13 +410,6 @@ fi
 
 # shellcheck disable=SC2086
 exec docker compose $COMPOSE_ARGS "$@"
- "$ENV_FILE" 2>/dev/null; then
-        sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
-    fi
-    unset LIBVA_DRIVER_NAME
-fi
-GPU_BACKEND=$(printf '%s' "$GPU_BACKEND" | tr '[:upper:]' '[:lower:]')
-
 _detect_vaapi_device() {
     # Launcher discovery must not depend on host FFmpeg being installed.
     # Runtime capability is verified later inside the server container by
