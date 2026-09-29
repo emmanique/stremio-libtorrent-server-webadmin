@@ -16,6 +16,21 @@ Current versions:
 
 ## What changed in 2.0.22-dev
 
+### Automatic transcoding architecture
+
+- Transcoding execution is now **AUTO-only**. WebAdmin no longer selects or forces H.264, HEVC, VAAPI, NVENC, CPU or a manual execution profile.
+- The Stremio core remains authoritative for the media decision: **Direct Stream/copy vs transcode and the required output codec**. Detecting a GPU never forces re-encoding.
+- `GPU_BACKEND=auto` discovers a usable VAAPI or NVIDIA/NVENC backend and exposes that capability to the runtime. If no valid GPU backend exists, the server remains on the normal Stremio/CPU path.
+- Intel/DRM installations discover the available render node instead of assuming `/dev/dri/renderD128`. `VAAPI_DEVICE` may still be set explicitly for a validated host-specific override.
+- `LIBVA_DRIVER_NAME` is optional. Leave it empty for libva autodetection; set a driver such as `iHD` only when the host requires it.
+- WebAdmin hardware tests for H.264/HEVC are **diagnostic capability tests only**. They do not choose the playback codec and do not mean that an idle or copy session is using the encoder.
+- Live WebAdmin telemetry reports AUTO policy, detected backend/device, active FFmpeg sessions, actual Direct Stream/transcode state and the effective runtime decision.
+- Legacy profile/codec fields are retained only for upgrade compatibility and diagnostics; they are no longer authoritative execution controls and are read-only in the configuration UI.
+- Equivalent HLS requests are deduplicated by effective workload so compatible requests share one main video FFmpeg/HLS job. Subtitle extraction remains an independent process and is not treated as a duplicate video transcode.
+- Transcode lifecycle/garbage collection was hardened to avoid workload cleanup races.
+
+### Deployment, upgrade and CI
+
 - Production installation is now based on a minimal deployment ZIP/TAR attached to a GitHub Release, not a full source checkout.
 - The deployment baseline is host-neutral: no fixed LAN IP, personal allowlist, Angola-only timezone or mandatory GPU device.
 - start.sh reads local .env values safely and keeps precedence as exported environment > .env > autodetection/default.
@@ -25,7 +40,7 @@ Current versions:
 - Full regression builds and validates the deployment package and simulates a clean installation from it before a production release.
 - Only main and development are long-lived branches. feature/*, fix/*, release/* and hotfix/* are temporary.
 
-## Planned changes for 2.0.19
+## Hardware compatibility notes
 
 - GPU auto-detection now treats hardware exposure and the active transcoding profile as separate concerns.
 - Dual-GPU hosts can expose both Intel/DRM VAAPI and NVIDIA to the server container when both runtimes are available; WebAdmin still enables only profiles that pass real FFmpeg self-tests.
@@ -161,7 +176,7 @@ Then verify in WebAdmin:
 - Server restart;
 - Pi-hole state;
 - VPN remains NOT CONFIGURED / DIRECT until explicitly configured;
-- transcoding capability matrix;
+- AUTO transcoding status, detected backend/device and capability diagnostics;
 - Library access if enabled.
 
 # Configuration rules
@@ -172,7 +187,7 @@ With IPADDRESS_SOURCE=auto, start.sh detects the IPv4 used by the default route 
 
 ## GPU / transcoding
 
-The baseline is copy-first and CPU-safe. Compatible streams are not re-encoded merely because a GPU exists.
+The execution policy is **AUTO-only**. Compatible streams are not re-encoded merely because a GPU exists. Stremio first decides whether video is copied or transcoded and which codec is required; hardware discovery only determines whether an available accelerator can implement a transcode that Stremio has already requested.
 
 Recommended baseline:
 
@@ -180,11 +195,22 @@ Recommended baseline:
 GPU_BACKEND=auto
 VAAPI_DEVICE=
 LIBVA_DRIVER_NAME=
-TRANSCODING_HWACCEL=cpu
-TRANSCODING_VIDEO_CODEC=libx264
+TRANSCODING_HWACCEL=auto
+TRANSCODING_MODE=auto
 ~~~
 
-start.sh adds the VAAPI or NVIDIA overlay only when the local host can support it. Explicit GPU values should be treated as host-specific overrides.
+Do not configure `TRANSCODING_VIDEO_CODEC` to force H.264/HEVC as part of the AUTO baseline. Existing legacy codec/profile values may still be read during upgrade, but they are not authoritative execution decisions.
+
+`start.sh` adds the VAAPI or NVIDIA overlay only when the local host can support it. Explicit GPU values are host-specific overrides.
+
+Useful runtime checks:
+
+~~~bash
+curl -fsS http://HOST-IP:11470/transcode.json | python3 -m json.tool
+curl -fsS http://HOST-IP:8090/api/transcoding/status | python3 -m json.tool
+~~~
+
+A detected backend such as `vaapi` means acceleration is available; it does **not** mean the current playback must use the GPU. A session whose actual FFmpeg command contains `-c:v copy` is correctly copying video even when VAAPI/NVENC is available.
 
 ## VPN
 
@@ -270,7 +296,7 @@ curl -fsS http://HOST-IP:8090/health
 curl -fsS http://HOST-IP:8090/api/component-versions
 ~~~
 
-Also validate configuration save/restart, VPN state, DNS path and transcoding capability after each release upgrade.
+Also validate configuration save/restart, VPN state, DNS path, AUTO transcoding telemetry and detected hardware capability after each release upgrade.
 
 # Rollback
 
