@@ -18,9 +18,9 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.20
-Fork/Platform   2.0.22-dev
-WebAdmin        2.0.22-dev
-VPN Gateway     2.0.22-dev
+Fork/Platform   3.0.0
+WebAdmin        3.0.0
+VPN Gateway     3.0.0
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:2.0.22-dev
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:2.0.22-dev
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:2.0.22-dev
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:3.0.0
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:3.0.0
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:3.0.0
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:2.0.22-dev
+edmanique/stremio-libtorrent-server-webadmin:3.0.0
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.22-dev
+edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.0
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.22-dev
+edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.0
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:2.0.22-dev
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-2.0.22-dev
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-2.0.22-dev
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:3.0.0
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.0
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.0
 ```
 
 Or follow the moving aliases:
