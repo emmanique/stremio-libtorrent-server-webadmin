@@ -672,13 +672,20 @@ def _profile_summary(profile: str, quality: int) -> str:
 
 
 def transcoding_status():
-    """Extend the runtime telemetry without replacing its implementation."""
+    """Expose AUTO-only policy while preserving live runtime telemetry.
+
+    The lower telemetry layers discover processes, capabilities and the actual
+    FFmpeg command.  They must not turn persisted legacy profile fields into an
+    execution decision: Stremio remains authoritative for copy/transcode and
+    codec selection.
+    """
     data = base.transcoding_status()
     if not isinstance(data, dict):
         return data
-    selected, quality = _selected()
-    data["executionProfile"] = {"id": selected, "quality": quality}
-    data["policySummary"] = _profile_summary(selected, quality)
+
+    _, quality = _selected()
+    data["executionProfile"] = {"id": "auto", "quality": quality}
+    data["policySummary"] = _profile_summary("auto", quality)
 
     cached_profiles = PROFILE_CACHE.get("value")
     if isinstance(cached_profiles, dict):
@@ -689,51 +696,34 @@ def transcoding_status():
         data["profilesCheckedAt"] = None
 
     policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
-    if selected in PROFILE_META:
-        meta = PROFILE_META[selected]
-        mode = meta["codec"] if selected != "preserve" else "preserve"
-        policy["transcoding_mode"] = mode
-        policy["transcoding_hwaccel"] = meta["engine"]
-        policy["transcoding_video_codec"] = meta["encoder"] or "core"
-        policy["transcoding_decode"] = meta["decode"]
-        data["policy"] = policy
+    policy.update({
+        "transcoding_mode": "auto",
+        "transcoding_hwaccel": "auto",
+        "transcoding_video_codec": None,
+        "transcoding_decode": "core",
+    })
+    data["policy"] = policy
 
-        # The legacy status layer reports the old auto/hwaccel fields under
-        # state.requested/effective. Once an explicit execution profile is
-        # selected those values are no longer authoritative and made the UI
-        # contradict itself. Keep every status surface aligned with the profile.
-        state = data.get("state") if isinstance(data.get("state"), dict) else {}
-        requested = state.get("requested") if isinstance(state.get("requested"), dict) else {}
-        effective = state.get("effective") if isinstance(state.get("effective"), dict) else {}
-        requested.update({
-            "profile": selected,
-            "mode": mode,
-            "hwaccel": meta["engine"],
-            "videoCodec": meta["encoder"] or "core",
-            "decode": meta["decode"],
-        })
-        effective.update({
-            "profile": selected,
-            "mode": mode,
-            "hwaccel": meta["engine"],
-            "videoCodec": meta["encoder"] or "core",
-            "decode": meta["decode"],
-        })
-        state["requested"] = requested
-        state["effective"] = effective
-        data["state"] = state
-
-        if meta["engine"] in {"vaapi", "nvenc"}:
-            active = data.get("active") if isinstance(data.get("active"), dict) else {}
-            sessions = active.get("sessions") if isinstance(active.get("sessions"), list) else []
-            mismatches = [s for s in sessions if s.get("action") == "transcoding" and s.get("engine") != meta["engine"]]
-            if mismatches:
-                warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else []
-                warnings.append(
-                    f"{meta['label']} is selected but an existing transcoding job is using another engine. "
-                    "Stop/restart playback so the new FFmpeg job uses the selected profile."
-                )
-                data["warnings"] = warnings
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    requested = state.get("requested") if isinstance(state.get("requested"), dict) else {}
+    effective = state.get("effective") if isinstance(state.get("effective"), dict) else {}
+    requested.update({
+        "profile": "auto",
+        "mode": "auto",
+        "hwaccel": "auto",
+        "videoCodec": None,
+        "decode": "core",
+    })
+    effective.update({
+        "profile": "auto",
+        "mode": "auto",
+        "hwaccel": "auto",
+        "videoCodec": None,
+        "decode": "core",
+    })
+    state["requested"] = requested
+    state["effective"] = effective
+    data["state"] = state
     return data
 
 
