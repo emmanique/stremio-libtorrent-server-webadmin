@@ -198,6 +198,13 @@ def master(
     except OSError as e:
         raise HTTPException(status_code=500, detail="failed to read master playlist") from e
     body = _master_with_subtitles(master_text, pr, mediaURL)
+    tracks = _subtitle_streams(pr)
+    logger.info(
+        "subtitle trace: stage=master method=%s tracks=%s advertised=%s",
+        request.method,
+        len(tracks),
+        body.count("#EXT-X-MEDIA:TYPE=SUBTITLES"),
+    )
     return Response(content=body, media_type=_M3U8)
 
 
@@ -210,6 +217,11 @@ def subtitle_playlist(job_id: str, track: int, request: Request, mediaURL: str, 
     # browser is actively consuming the subtitle rendition.
     conv.touch(job_id)
     body = _subtitle_media_playlist(mediaURL, track, duration)
+    logger.info(
+        "subtitle trace: stage=playlist method=%s track=%s",
+        request.method,
+        track,
+    )
     return Response(content=body, media_type=_M3U8)
 
 
