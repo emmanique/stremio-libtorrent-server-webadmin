@@ -15,7 +15,7 @@ else
 fi
 
 bash tools/ci/static-check.sh
-bash tools/ci/compose-check.sh
+bash -x tools/ci/compose-check.sh
 "$PYTHON_BIN" tools/ci/release-docs-check.py
 bash tools/ci/run-tests.sh deterministic
 bash tools/ci/run-tests.sh integration
