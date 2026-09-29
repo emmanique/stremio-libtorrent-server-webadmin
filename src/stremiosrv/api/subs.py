@@ -330,7 +330,7 @@ def subtitles_vtt(
     # `track` is the global FFmpeg stream index returned by
     # /subtitles.json, not the subtitle-relative 0:s:<n> index.
     _subtitle_stream_by_global_index(media, track)
-    logger.info(
+    logger.warning(
         "subtitle trace: stage=vtt method=%s track=%s",
         request.method,
         track,
