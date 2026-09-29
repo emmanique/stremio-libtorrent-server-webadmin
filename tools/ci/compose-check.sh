@@ -8,8 +8,8 @@ docker compose -f compose.yaml config --quiet
 server_json="$(docker compose -f compose.yaml config --format json)"
 test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].hostname // empty')" = ""
 test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].network_mode')" = "service:gluetun"
-test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.TRANSCODING_HWACCEL')" = "cpu"
-test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.TRANSCODING_VIDEO_CODEC')" = "libx264"
+test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.TRANSCODING_HWACCEL')" = "auto"
+test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.TRANSCODING_VIDEO_CODEC // empty')" = ""
 test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.TRANSCODING_HW_DECODE')" = "false"
 test "$(printf '%s' "$server_json" | jq -r '.services["stremio-libtorrent-server"].environment.VAAPI_DEVICE // empty')" = ""
 
