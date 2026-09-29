@@ -3,6 +3,9 @@ set -euo pipefail
 export IPADDRESS="${IPADDRESS:-192.0.2.10}"
 export PIHOLE_WEB_BIND_IP="${PIHOLE_WEB_BIND_IP:-192.0.2.10}"
 export PIHOLE_DNS_BIND_IP="${PIHOLE_DNS_BIND_IP:-192.0.2.10}"
+# Keep the base Compose validation host-neutral even when a developer .env
+# contains a persisted VAAPI device from a previous runtime deployment.
+export VAAPI_DEVICE=""
 
 docker compose -f compose.yaml config --quiet
 server_json="$(docker compose -f compose.yaml config --format json)"
