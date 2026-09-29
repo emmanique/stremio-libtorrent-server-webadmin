@@ -236,8 +236,10 @@ def test_subtitle_media_playlist_points_to_global_track_vtt():
     out = _subtitle_media_playlist(media, 31, 6621.455)
 
     assert out.startswith("#EXTM3U")
-    assert "#EXT-X-TARGETDURATION:6622" in out
-    assert "#EXTINF:6621.455," in out
+    assert "#EXT-X-PLAYLIST-TYPE:VOD" in out
+    assert "#EXT-X-MEDIA-SEQUENCE:0" in out
+    assert "#EXT-X-TARGETDURATION" not in out
+    assert "#EXTINF:" not in out
     assert f"/{info_hash}/0/subtitles.vtt?" in out
     assert "track=31" in out
     assert "#EXT-X-ENDLIST" in out
