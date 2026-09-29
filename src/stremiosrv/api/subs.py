@@ -339,6 +339,22 @@ def _trace_webvtt_timeline(payload: bytes, start: float | None, duration: float 
     )
 
 
+def _add_webvtt_timestamp_map(payload: bytes, start: float | None) -> bytes:
+    """Map a window-local WebVTT timeline onto the MPEG-TS playback clock used by HLS.
+
+    FFmpeg rebases output-side subtitle seeks to zero.  HLS WebVTT carries that local cue
+    timeline correctly when X-TIMESTAMP-MAP maps LOCAL 00:00:00.000 to the window start.
+    """
+    if start is None or not payload.startswith(b"WEBVTT"):
+        return payload
+    mpegts = int(round(max(0.0, start) * 90000))
+    mapping = f"X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:{mpegts}\n".encode("ascii")
+    head, sep, tail = payload.partition(b"\n")
+    if not sep:
+        return payload
+    return head + sep + mapping + tail
+
+
 def _webvtt_window_stream(proc: subprocess.Popen, start: float | None, duration: float | None):
     """Buffer a finite WebVTT window so its timing can be diagnosed without logging cue text."""
     try:
@@ -346,6 +362,7 @@ def _webvtt_window_stream(proc: subprocess.Popen, start: float | None, duration:
         payload = proc.stdout.read()
         rc = proc.wait()
         _trace_webvtt_timeline(payload, start, duration)
+        payload = _add_webvtt_timestamp_map(payload, start)
         if rc:
             logger.warning("embedded subtitle ffmpeg exited with code %s", rc)
         if payload:
