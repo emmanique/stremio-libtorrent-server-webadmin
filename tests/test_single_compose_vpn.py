@@ -71,6 +71,7 @@ def test_blank_libva_driver_is_not_seeded_or_reinjected():
     assert "\nLIBVA_DRIVER_NAME=\n" not in f"\n{env_example}"
     assert "# LIBVA_DRIVER_NAME=iHD" in env_example
     assert "LIBVA_DRIVER_NAME=[[:space:]]*$" in start
+    assert "sed -i" in start
     assert "unset LIBVA_DRIVER_NAME" in start
     assert "- LIBVA_DRIVER_NAME" in vaapi
 
