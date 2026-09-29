@@ -11,7 +11,7 @@ Current versions:
 | --- | --- |
 | Fork / Platform | 3.0.0 |
 | WebAdmin | 3.0.0 |
-| VPN Gateway | 3.0.0 |
+| VPN Gateway image | `3.0.0` release tag (runtime validation used `:latest`) |
 | Upstream Server/Core | 1.6.20 |
 
 ## 3.0.0 — features added by this fork
@@ -24,6 +24,7 @@ Version 3.0.0 marks the platform-level fork as a distinct distribution rather th
 - Browser dashboard for runtime health, component versions, configuration, restart operations, logs, cache/stream visibility and transcoding diagnostics.
 - Persistent WebAdmin/server configuration outside the application containers so normal image replacement does not discard local settings.
 - Configuration save/read-back and server restart flows designed to survive DIRECT/VPN deployment changes.
+- Release validation confirmed configuration persistence in `/config/admin-settings.json`, a real server restart (`StartedAt` changed), persistence after restart, and restoration of the original value.
 
 ### Integrated network stack
 
@@ -31,6 +32,7 @@ Version 3.0.0 marks the platform-level fork as a distinct distribution rather th
 - VPN can remain unconfigured/disabled without preventing normal DIRECT operation; enabling it switches the streaming stack to VPN egress.
 - Pi-hole is integrated as the platform DNS layer, with optional LAN DNS exposure rather than requiring host port 53 in the base deployment.
 - Stable Gluetun network namespace and fail-closed behaviour while VPN operation is explicitly requested.
+- Release validation confirmed VPN -> DIRECT -> VPN switching with the Stremio server remaining healthy, Pi-hole/DNS resolution working in both modes, and the final VPN state restoring tunnel routing, kill-switch and fail-closed protection.
 - Host-neutral deployment variables, automatic host-IP discovery and explicit overrides for multi-homed/special installations.
 
 ### Automatic GPU transcoding
@@ -99,6 +101,7 @@ Version 3.0.0 marks the platform-level fork as a distinct distribution rather th
 - A pre-upgrade backup script preserves configuration/state volumes and records the resolved Compose/image state.
 - CI is separated into Fast CI, Dependencies, Full regression, Prepare release, Release and Upstream sync.
 - Full regression builds and validates the deployment package and simulates a clean installation from it before a production release.
+- The 3.0.0 release-candidate baseline completed 1,356 deterministic tests passed (9 skipped, 10 deselected) plus 8 integration tests passed (2 skipped, 1,365 deselected), followed by successful server/WebAdmin/VPN image builds, deployment archive validation and SHA-256 verification.
 - Only main and development are long-lived branches. feature/*, fix/*, release/* and hotfix/* are temporary.
 
 ## Hardware compatibility notes
@@ -184,7 +187,7 @@ Review these parameters before first start:
 | IPADDRESS | Leave empty with auto. Set the exact host IPv4 when IPADDRESS_SOURCE=manual. |
 | VPN_LAN_CIDRS | Change when the LAN is not covered by 192.168.0.0/16; include only trusted LAN subnets plus the platform internal subnet. |
 | STREMIO_DIRECT_DNS_UPSTREAM | Change only if another resolver is required in DIRECT mode. |
-| STREMIO_IMAGE / WEBADMIN_IMAGE / VPN_IMAGE | latest is convenient; pin all three to the same release for reproducible production installs. |
+| STREMIO_IMAGE / WEBADMIN_IMAGE / VPN_IMAGE | `latest` is convenient for development. For production, pin the published release tags. The VPN image used during final 3.0.0 runtime validation was `:latest`; do not assume a versioned VPN tag exists until the release workflow has published it. |
 | SERVER_URL | Optional. Set when an explicit trusted Stremio HTTPS endpoint is required. |
 | STREMIOSRV_LIBRARY_OWNER | Optional. Use only when ownership restriction is intentionally required. |
 | STREMIOSRV_LIBRARY_ADDON_ALLOW | Leave empty for the built-in private-network allowlist unless a deliberate custom allowlist is required. |
