@@ -5,6 +5,7 @@ server byte-for-byte — the player follows whatever URIs we publish.
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from stremiosrv.transcode.fingerprint import decide
 from stremiosrv.transcode.probe import ProbeTimeoutError, probe_media
 
 router = APIRouter(prefix="/hlsv2")
+logger = logging.getLogger("stremiosrv.hls")
 
 _M3U8 = "application/vnd.apple.mpegurl"
 
@@ -158,6 +160,24 @@ def master(
     if "hls" in (pr.get("format", {}).get("name") or ""):
         raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
+    source_video = next(
+        (s for s in (pr.get("streams") or []) if s.get("track") == "video"),
+        {},
+    )
+    logger.info(
+        "hls decision: codec=%s profile=%s width=%s bitDepth=%s hdr=%s dovi=%s "
+        "transfer=%s clientVideoCodecs=%s maxWidth=%s action=%s",
+        source_video.get("codec"),
+        source_video.get("profile"),
+        source_video.get("width"),
+        source_video.get("bitDepth"),
+        bool(source_video.get("isHdr")),
+        bool(source_video.get("isDoVi")),
+        source_video.get("colorTransfer"),
+        ",".join(videoCodecs or ["h264"]),
+        maxWidth,
+        (dec.get("video") or {}).get("action"),
+    )
     # The fingerprint decision historically carried only the selected primary audio action. Preserve
     # the full probed stream inventory as private converter metadata so HLS can expose alternate
     # audio and text-subtitle renditions without changing the public fingerprint contract.
