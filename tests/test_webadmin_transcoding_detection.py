@@ -213,12 +213,12 @@ def test_backend_matrix_keeps_detected_nvidia_separate_from_nvenc_capability(mon
     )
 
     assert matrix["vaapi"]["detected"] is True
-    assert matrix["vaapi"]["selectable"] is True
+    assert matrix["vaapi"]["availableForAuto"] is True
 
     assert matrix["nvidia"]["detected"] is True
     assert matrix["nvidia"]["runtime"] is True
     assert matrix["nvidia"]["h264"] is False
-    assert matrix["nvidia"]["selectable"] is False
+    assert matrix["nvidia"]["availableForAuto"] is False
 
     assert matrix["cpu"]["selectable"] is True
 
@@ -259,7 +259,7 @@ def test_backend_matrix_marks_verified_nvenc_selectable(monkeypatch):
     assert matrix["nvidia"]["detected"] is True
     assert matrix["nvidia"]["runtime"] is True
     assert matrix["nvidia"]["h264"] is True
-    assert matrix["nvidia"]["selectable"] is True
+    assert matrix["nvidia"]["availableForAuto"] is True
 
 
 def test_profiles_uses_container_vaapi_device_when_not_persisted(monkeypatch):
