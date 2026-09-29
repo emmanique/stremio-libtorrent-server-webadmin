@@ -462,7 +462,7 @@ def _backend_matrix(
             "device": device if vaapi_device else None,
             "h264": vaapi_h264,
             "hevc": vaapi_hevc,
-            "selectable": vaapi_h264 or vaapi_hevc,
+            "availableForAuto": vaapi_h264 or vaapi_hevc,
             "reason": (
                 reason("vaapi-h264")
                 if not vaapi_h264
@@ -477,7 +477,7 @@ def _backend_matrix(
             "driver": nvidia.get("driver"),
             "h264": nvenc_h264,
             "hevc": nvenc_hevc,
-            "selectable": nvenc_h264 or nvenc_hevc,
+            "availableForAuto": nvenc_h264 or nvenc_hevc,
             "nvencApiCompatible": nvenc_api_compatible,
             "nvencApiRequired": nvenc_api_required,
             "nvencApiAvailable": nvenc_api_available,
@@ -494,7 +494,7 @@ def _backend_matrix(
             "runtime": True,
             "h264": cpu_h264,
             "hevc": cpu_hevc,
-            "selectable": cpu_h264 or cpu_hevc,
+            "availableForAuto": cpu_h264 or cpu_hevc,
             "reason": (
                 reason("cpu-h264")
                 if not cpu_h264
