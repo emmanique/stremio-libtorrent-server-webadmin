@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 2.0.22-dev
+# Stremio Server WebAdmin 3.0.0
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,12 +9,12 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 2.0.22-dev |
-| WebAdmin | 2.0.22-dev |
-| VPN Gateway | 2.0.22-dev |
+| Fork / Platform | 3.0.0 |
+| WebAdmin | 3.0.0 |
+| VPN Gateway | 3.0.0 |
 | Upstream Server/Core | 1.6.20 |
 
-## What changed in 2.0.22-dev
+## What changed in 3.0.0
 
 ### Automatic transcoding architecture
 
@@ -91,7 +91,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=2.0.22-dev
+VERSION=3.0.0
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -364,7 +364,7 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v2.0.22-dev.md
+Release notes: docs/releases/v3.0.0.md
 
 License: MIT. See LICENSE.
 
