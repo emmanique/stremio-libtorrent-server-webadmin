@@ -497,7 +497,7 @@ def test_trace_webvtt_timeline_logs_only_timing_metadata(caplog):
         b"00:01:02.300 --> 00:01:04.500\nSECRET SUBTITLE TEXT\n\n"
         b"00:01:08.000 --> 00:01:09.250\nANOTHER SECRET\n"
     )
-    with caplog.at_level("WARNING", logger=subs_api.__name__):
+    with caplog.at_level("DEBUG", logger=subs_api.__name__):
         subs_api._trace_webvtt_timeline(payload, 60.0, 30.0)
 
     msg = caplog.messages[-1]
