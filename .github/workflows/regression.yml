@@ -30,6 +30,7 @@ jobs:
           python3 -m pip install --upgrade pip uv
           uv lock --check
           uv sync --frozen --dev
+          uv pip install -r webadmin/requirements.txt
           uv pip check
 
       - name: Full regression suite
