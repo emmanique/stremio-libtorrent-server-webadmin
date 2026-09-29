@@ -335,3 +335,81 @@ def test_auto_converter_detects_backend_once_and_uses_it_for_workload(tmp_path, 
     argv = FakeProc.created[0].argv
     assert argv[argv.index("-c:v") + 1] == "h264_vaapi"
     assert argv[argv.index("-vaapi_device") + 1] == "/dev/dri/renderD129"
+
+
+
+def test_auto_vaapi_hdr_transcode_uses_full_gpu_tonemap(tmp_path):
+    decision = {
+        "video": {"action": "transcode", "scale_width": 3840},
+        "audio": {"action": "copy", "codec": "aac"},
+        "_streams": [{
+            "track": "video",
+            "codec": "hevc",
+            "width": 3840,
+            "isHdr": True,
+            "bitDepth": 10,
+            "colorTransfer": "smpte2084",
+        }],
+    }
+    backend = {"backend": "vaapi", "device": "/dev/dri/renderD128"}
+
+    argv = mod.build_hls_cmd(
+        "http://example/hdr.mkv", decision, "auto", tmp_path, backend
+    )
+
+    assert argv[argv.index("-c:v") + 1] == "h264_vaapi"
+    assert argv[argv.index("-hwaccel") + 1] == "vaapi"
+    assert argv[argv.index("-hwaccel_output_format") + 1] == "vaapi"
+    vf = argv[argv.index("-vf") + 1]
+    assert "tonemap_vaapi=" in vf
+    assert "transfer=bt709" in vf
+    assert "scale_vaapi" not in vf
+    assert "hwupload" not in vf
+
+
+def test_auto_vaapi_hdr_transcode_scales_on_gpu_when_width_is_reduced(tmp_path):
+    decision = {
+        "video": {"action": "transcode", "scale_width": 1920},
+        "audio": {"action": "copy", "codec": "aac"},
+        "_streams": [{
+            "track": "video",
+            "codec": "hevc",
+            "width": 3840,
+            "isHdr": True,
+            "bitDepth": 10,
+            "colorTransfer": "smpte2084",
+        }],
+    }
+    backend = {"backend": "vaapi", "device": "/dev/dri/renderD128"}
+
+    argv = mod.build_hls_cmd(
+        "http://example/hdr.mkv", decision, "auto", tmp_path, backend
+    )
+
+    vf = argv[argv.index("-vf") + 1]
+    assert "tonemap_vaapi=" in vf
+    assert "scale_vaapi=w=1920:h=-2:format=nv12" in vf
+
+
+def test_auto_vaapi_hdr_copy_is_never_promoted_to_transcode(tmp_path):
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "transcode", "codec": "ac3"},
+        "_streams": [{
+            "track": "video",
+            "codec": "hevc",
+            "width": 3840,
+            "isHdr": True,
+            "bitDepth": 10,
+            "colorTransfer": "smpte2084",
+        }],
+    }
+    backend = {"backend": "vaapi", "device": "/dev/dri/renderD128"}
+
+    argv = mod.build_hls_cmd(
+        "http://example/hdr.mkv", decision, "auto", tmp_path, backend
+    )
+
+    assert argv[argv.index("-c:v") + 1] == "copy"
+    assert "-hwaccel" not in argv
+    assert "tonemap_vaapi" not in " ".join(argv)
