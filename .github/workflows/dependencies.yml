@@ -56,7 +56,7 @@ jobs:
           uv pip check
           python3 -m pip check
           pip-audit -r webadmin/requirements.txt || true
-          uv export --no-dev --format requirements-txt -o /tmp/core-requirements.txt
+          uv export --no-dev --no-emit-project --format requirements-txt -o /tmp/core-requirements.txt
           pip-audit -r /tmp/core-requirements.txt || true
 
       - name: Dependency-sensitive tests

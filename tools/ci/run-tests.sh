@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 mode="${1:-deterministic}"
 
 case "$mode" in
   deterministic)
-    PYTHONPATH=. timeout 600s uv run --with-requirements webadmin/requirements.txt pytest -q -m "not integration" tests
+    timeout 600s uv run --frozen --with-requirements webadmin/requirements.txt pytest -q -m "not integration" tests
     ;;
   integration)
     ok=0
     for attempt in 1 2 3; do
       echo "Integration attempt $attempt/3"
-      if PYTHONPATH=. timeout 300s uv run --with-requirements webadmin/requirements.txt pytest -q -m integration tests; then
+      if timeout 300s uv run --frozen --with-requirements webadmin/requirements.txt pytest -q -m integration tests; then
         ok=1
         break
       fi

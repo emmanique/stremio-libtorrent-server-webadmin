@@ -80,13 +80,37 @@ def hwaccel_profiler(request: Request) -> dict:
 
 @router.get("/transcode.json")
 def transcode_stats(request: Request) -> dict:
-    """Transcoding / GPU status for the admin card: whether HW accel is active, the detected
-    profile (e.g. nvenc-linux / vaapi*; None = CPU/direct-play only), and how many transcodes are
-    running right now. Most playback is direct-play and uses no transcoder at all."""
-    p = request.app.state.settings.transcode_profile
-    conv = getattr(request.app.state, "converter", None)
+    """Report AUTO hardware capability and current transcode activity.
+
+    AUTO is the only execution mode. Hardware detection reports a backend
+    capability; it does not select H.264/HEVC and does not override the
+    Stremio copy/transcode decision.
+    """
+    from stremiosrv.transcode.profiler import detect_backend
+
+    detected = detect_backend()
+
+    backend = detected.get("backend") or "none"
+    device = detected.get("device")
+
+    hwaccel = backend in {"vaapi", "nvenc"}
+
+    converter = getattr(request.app.state, "converter", None)
+
+    active = 0
+
+    if converter is not None:
+        try:
+            active = int(converter.active_count())
+        except Exception:
+            active = 0
+
     return {
-        "hwAccel": p is not None,
-        "profile": p,
-        "activeTranscodes": conv.active_count() if conv is not None else 0,
+        "hwAccel": hwaccel,
+        "profile": "auto",
+        "backend": backend,
+        "device": device,
+        "videoCodec": None,
+        "hwDecode": False,
+        "activeTranscodes": active,
     }

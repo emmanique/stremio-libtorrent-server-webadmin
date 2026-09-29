@@ -5,6 +5,7 @@ server byte-for-byte — the player follows whatever URIs we publish.
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 from pathlib import Path
@@ -13,11 +14,13 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
+from stremiosrv.api.media_fetch import resolve_media_input
 from stremiosrv.api.subs import parse_stream_url
 from stremiosrv.transcode.fingerprint import decide
 from stremiosrv.transcode.probe import ProbeTimeoutError, probe_media
 
 router = APIRouter(prefix="/hlsv2")
+logger = logging.getLogger("stremiosrv.hls")
 
 _M3U8 = "application/vnd.apple.mpegurl"
 
@@ -91,23 +94,36 @@ def _master_with_subtitles(master_text: str, probe: dict, media_url: str) -> str
 
 
 def _subtitle_media_playlist(media_url: str, track: int, duration: float) -> str:
+    """Build a VOD WebVTT media playlist with finite extraction windows."""
     parsed = parse_stream_url(media_url)
     if parsed is None:
         raise HTTPException(status_code=400, detail="subtitle mediaURL is not a server stream URL")
     info_hash, idx = parsed
-    duration = max(float(duration or 0.0), 0.001)
-    target = max(1, math.ceil(duration))
-    query = urlencode({"mediaURL": media_url, "track": track})
-    vtt_uri = f"/{info_hash}/{idx}/subtitles.vtt?{query}"
-    return (
-        "#EXTM3U\n"
-        "#EXT-X-VERSION:3\n"
-        f"#EXT-X-TARGETDURATION:{target}\n"
-        "#EXT-X-MEDIA-SEQUENCE:0\n"
-        f"#EXTINF:{duration:.3f},\n"
-        f"{vtt_uri}\n"
-        "#EXT-X-ENDLIST\n"
-    )
+    total = max(float(duration or 0.0), 0.001)
+    segment = 30.0
+    count = max(1, math.ceil(total / segment))
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{math.ceil(segment)}",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+    ]
+    for n in range(count):
+        offset = n * segment
+        length = min(segment, total - offset)
+        query = urlencode({
+            "mediaURL": media_url,
+            "track": track,
+            "start": f"{offset:.3f}",
+            "duration": f"{length:.3f}",
+        })
+        lines += [
+            f"#EXTINF:{length:.3f},",
+            f"/{info_hash}/{idx}/subtitles.vtt?{query}",
+        ]
+    lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines) + "\n"
 
 
 # HEAD is accepted on the read routes below. FastAPI, unlike bare Starlette, does NOT add HEAD to a
@@ -125,11 +141,15 @@ def _subtitle_media_playlist(media_url: str, track: int, duration: float) -> str
 # gives when a transcode fails to start.
 
 @router.api_route("/probe", methods=["GET", "HEAD"])
-def probe(mediaURL: str) -> dict:
+def probe(mediaURL: str, request: Request) -> dict:
+    media = resolve_media_input(request, mediaURL)
     try:
-        return probe_media(mediaURL)
+        pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
+    if "hls" in (pr.get("format", {}).get("name") or ""):
+        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
+    return pr
 
 
 @router.api_route("/{job_id}/master.m3u8", methods=["GET", "HEAD"])
@@ -145,17 +165,38 @@ def master(
     conv = _converter(request)
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
+    media = resolve_media_input(request, mediaURL)
     try:
-        pr = probe_media(mediaURL)
+        pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
+    if "hls" in (pr.get("format", {}).get("name") or ""):
+        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
+    source_video = next(
+        (s for s in (pr.get("streams") or []) if s.get("track") == "video"),
+        {},
+    )
+    logger.info(
+        "hls decision: codec=%s profile=%s width=%s bitDepth=%s hdr=%s dovi=%s "
+        "transfer=%s clientVideoCodecs=%s maxWidth=%s action=%s",
+        source_video.get("codec"),
+        source_video.get("profile"),
+        source_video.get("width"),
+        source_video.get("bitDepth"),
+        bool(source_video.get("isHdr")),
+        bool(source_video.get("isDoVi")),
+        source_video.get("colorTransfer"),
+        ",".join(videoCodecs or ["h264"]),
+        maxWidth,
+        (dec.get("video") or {}).get("action"),
+    )
     # The fingerprint decision historically carried only the selected primary audio action. Preserve
     # the full probed stream inventory as private converter metadata so HLS can expose alternate
     # audio and text-subtitle renditions without changing the public fingerprint contract.
     dec["_streams"] = list(pr.get("streams") or [])
     try:
-        d = conv.ensure_job(job_id, mediaURL, dec)
+        d = conv.ensure_job(job_id, media, dec)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job id") from e
     master_path = d / "master.m3u8"
@@ -166,6 +207,13 @@ def master(
     except OSError as e:
         raise HTTPException(status_code=500, detail="failed to read master playlist") from e
     body = _master_with_subtitles(master_text, pr, mediaURL)
+    tracks = _subtitle_streams(pr)
+    logger.debug(
+        "subtitle trace: stage=master method=%s tracks=%s advertised=%s",
+        request.method,
+        len(tracks),
+        body.count("#EXT-X-MEDIA:TYPE=SUBTITLES"),
+    )
     return Response(content=body, media_type=_M3U8)
 
 
@@ -178,6 +226,11 @@ def subtitle_playlist(job_id: str, track: int, request: Request, mediaURL: str, 
     # browser is actively consuming the subtitle rendition.
     conv.touch(job_id)
     body = _subtitle_media_playlist(mediaURL, track, duration)
+    logger.debug(
+        "subtitle trace: stage=playlist method=%s track=%s",
+        request.method,
+        track,
+    )
     return Response(content=body, media_type=_M3U8)
 
 

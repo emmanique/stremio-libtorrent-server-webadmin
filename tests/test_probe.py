@@ -8,7 +8,8 @@ from stremiosrv.transcode.probe import map_probe
 FFPROBE = {
     "format": {"format_name": "matroska,webm", "duration": "120.5"},
     "streams": [
-        {"index": 0, "codec_type": "video", "codec_name": "hevc", "width": 3840, "height": 2160,
+        {"index": 0, "codec_type": "video", "codec_name": "hevc", "profile": "Main 10",
+         "pix_fmt": "yuv420p10le", "width": 3840, "height": 2160,
          "r_frame_rate": "24000/1001", "has_b_frames": 2,
          "color_transfer": "smpte2084", "color_primaries": "bt2020"},
         {"index": 1, "codec_type": "audio", "codec_name": "eac3", "channels": 6},
@@ -20,8 +21,20 @@ def test_map_video():
     v = map_probe(FFPROBE)["streams"][0]
     assert v["track"] == "video" and v["codec"] == "hevc"
     assert v["width"] == 3840 and v["isHdr"] is True
+    assert v["profile"] == "Main 10"
+    assert v["pixFmt"] == "yuv420p10le"
+    assert v["bitDepth"] == 10
+    assert v["colorTransfer"] == "smpte2084"
+    assert v["colorPrimaries"] == "bt2020"
     assert v["hasBFrames"] is True
     assert abs(v["frameRate"] - 23.976) < 0.01
+
+
+def test_bit_depth_prefers_ffprobe_bits_per_raw_sample():
+    j = {"format": {}, "streams": [
+        {"index": 0, "codec_type": "video", "codec_name": "hevc",
+         "pix_fmt": "yuv420p", "bits_per_raw_sample": "10"}]}
+    assert map_probe(j)["streams"][0]["bitDepth"] == 10
 
 
 def test_map_audio_and_format():
@@ -43,6 +56,25 @@ def test_no_hdr_for_sdr():
          "color_transfer": "bt709", "color_primaries": "bt709"}]}
     s = map_probe(j)["streams"][0]
     assert s["isHdr"] is False and s["isDoVi"] is False
+
+
+def test_probe_argv_has_a_protocol_whitelist(monkeypatch):
+    """ffprobe must not be free to follow whatever scheme a redirect throws at it -- only the
+    handful this server actually serves media over (Minor 8's protocol whitelist)."""
+    seen = {}
+
+    class P:
+        stdout = b'{"format":{},"streams":[]}'
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        return P()
+
+    monkeypatch.setattr(probe_mod.subprocess, "run", fake_run)
+    probe_mod.probe_media("http://127.0.0.1:1/x")
+    assert "-protocol_whitelist" in seen["argv"]
+    i = seen["argv"].index("-protocol_whitelist")
+    assert seen["argv"][i + 1] == "file,crypto,data,http,tcp,tls,https"
 
 
 def test_a_hanging_ffprobe_becomes_a_named_error(monkeypatch):

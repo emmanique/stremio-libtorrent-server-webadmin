@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use the project Python when available and remain compatible with
+# distributions that provide python3 but no `python` alias.
+if [ -x ".venv/bin/python" ]; then
+  PYTHON_BIN=".venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "ERROR: Python interpreter not found." >&2
+  exit 127
+fi
+
 bash tools/ci/static-check.sh
-bash tools/ci/compose-check.sh
-python tools/ci/release-docs-check.py
+bash -x tools/ci/compose-check.sh
+"$PYTHON_BIN" tools/ci/release-docs-check.py
 bash tools/ci/run-tests.sh deterministic
 bash tools/ci/run-tests.sh integration
 
@@ -42,7 +55,7 @@ curl -fsS http://127.0.0.1:18090/ | grep -q 'vpn-admin.js'
 docker run --rm --entrypoint /bin/sh stremio-ci-vpn:test -c 'test -x /stremio-vpn-entrypoint && test -x /gluetun-entrypoint'
 
 rm -rf dist
-python tools/release/build_deployment_package.py
+"$PYTHON_BIN" tools/release/build_deployment_package.py
 test -f dist/SHA256SUMS
 (cd dist && sha256sum -c SHA256SUMS)
 zipfile="$(find dist -maxdepth 1 -name '*-deployment.zip' -print -quit)"

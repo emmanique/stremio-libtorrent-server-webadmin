@@ -22,3 +22,39 @@ def test_video_transcode_when_over_maxwidth():
     d = decide(PROBE, ["hevc"], ["aac"], max_audio_channels=2, max_width=1920)
     assert d["video"]["action"] == "transcode"
     assert d["video"]["scale_width"] == 1920
+
+
+def test_hdr10_transcodes_when_client_has_no_hdr_capability_signal():
+    probe = {"streams": [{
+        "track": "video",
+        "codec": "hevc",
+        "profile": "Main 10",
+        "width": 3840,
+        "height": 1606,
+        "pixFmt": "yuv420p10le",
+        "bitDepth": 10,
+        "isHdr": True,
+        "isDoVi": False,
+        "colorTransfer": "smpte2084",
+        "colorPrimaries": "bt2020",
+    }]}
+    d = decide(probe, ["h264", "hevc"], ["aac"], max_audio_channels=2, max_width=3840)
+    assert d["video"] == {"action": "transcode", "scale_width": 3840}
+
+
+def test_hevc_sdr_stays_copy_when_supported():
+    probe = {"streams": [{
+        "track": "video", "codec": "hevc", "width": 3840, "height": 2160,
+        "isHdr": False, "isDoVi": False,
+    }]}
+    d = decide(probe, ["h264", "hevc"], ["aac"], max_audio_channels=2, max_width=3840)
+    assert d["video"]["action"] == "copy"
+
+
+def test_dolby_vision_is_not_silently_treated_as_hdr10():
+    probe = {"streams": [{
+        "track": "video", "codec": "hevc", "width": 3840, "height": 2160,
+        "isHdr": True, "isDoVi": True,
+    }]}
+    d = decide(probe, ["h264", "hevc"], ["aac"], max_audio_channels=2, max_width=3840)
+    assert d["video"]["action"] == "copy"

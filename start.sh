@@ -19,6 +19,36 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
+_show_help() {
+    cat <<'EOF'
+Usage: sh start.sh [COMMAND] [ARGS...]
+
+Without arguments, detects the host IPv4 and GPU backend, pulls the published
+images, and starts the unified Stremio stack.
+
+Common commands:
+  sh start.sh                 Pull and start the stack
+  sh start.sh config          Show resolved Compose configuration
+  sh start.sh ps              Show stack status
+  sh start.sh logs -f         Follow stack logs
+  sh start.sh up -d           Pass arguments directly to Docker Compose
+  sh start.sh --help          Show this launcher help
+
+Automatic GPU policy:
+  GPU_BACKEND=auto            Detect VAAPI/NVIDIA; CPU fallback if unavailable
+  VAAPI_DEVICE                Auto-detected from /dev/dri/renderD* when unset
+
+Stremio remains authoritative for COPY vs TRANSCODE and codec selection.
+EOF
+}
+
+case "${1-}" in
+    -h|--help|help)
+        _show_help
+        exit 0
+        ;;
+esac
+
 ENV_FILE="$ROOT/.env"
 [ -f "$ENV_FILE" ] || cp "$ROOT/.env.example" "$ENV_FILE"
 
@@ -108,11 +138,8 @@ LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-$(_env_value LIBVA_DRIVER_NAME "")}
 if [ -n "$LIBVA_DRIVER_NAME" ]; then
     export LIBVA_DRIVER_NAME
 else
-    # Docker Compose reads .env independently from the launcher. A blank active
-    # LIBVA_DRIVER_NAME= line would otherwise be re-injected after the shell
-    # variable is unset. Remove only an empty assignment; preserve non-empty
-    # host-specific overrides such as iHD.
-    if grep -Eq '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$' "$ENV_FILE"; then
+    # Remove a blank legacy override so libva can auto-detect the runtime driver.
+    if grep -q '^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$' "$ENV_FILE" 2>/dev/null; then
         sed -i '/^[[:space:]]*LIBVA_DRIVER_NAME=[[:space:]]*$/d' "$ENV_FILE"
     fi
     unset LIBVA_DRIVER_NAME
@@ -155,6 +182,55 @@ _detect_vaapi_device() {
     return 1
 }
 
+_detect_vaapi_driver() {
+    dev="$1"
+
+    [ -n "$dev" ] || return 1
+    [ -e "$dev" ] || return 1
+
+    vendor=""
+    driver=""
+
+    drm_name=$(basename "$dev")
+    sysdev="/sys/class/drm/$drm_name/device"
+
+    if [ -r "$sysdev/vendor" ]; then
+        vendor=$(cat "$sysdev/vendor" 2>/dev/null || true)
+    fi
+
+    if [ -e "$sysdev/driver" ]; then
+        driver=$(basename "$(readlink -f "$sysdev/driver" 2>/dev/null)" 2>/dev/null || true)
+    fi
+
+    # Intel DRM/i915: use the modern Intel Media Driver.
+    #
+    # Driver availability is validated inside the runtime image, not on the
+    # Docker host. The host is responsible only for identifying the GPU.
+    #
+    # Never automatically fall back to i965. On some Intel generations i965
+    # can initialise partially and then abort FFmpeg during encoding.
+    if [ "$vendor" = "0x8086" ] || [ "$driver" = "i915" ]; then
+        printf '%s\n' "iHD"
+        return 0
+    fi
+
+    # AMD
+    if [ "$vendor" = "0x1002" ] || [ "$driver" = "amdgpu" ]; then
+        for path in \
+            /usr/lib/x86_64-linux-gnu/dri/radeonsi_drv_video.so \
+            /usr/lib64/dri/radeonsi_drv_video.so \
+            /usr/lib/dri/radeonsi_drv_video.so
+        do
+            if [ -e "$path" ]; then
+                printf '%s\n' "radeonsi"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
 _nvidia_available() {
     [ -e /dev/nvidia0 ] || return 1
     command -v nvidia-smi >/dev/null 2>&1 || return 1
@@ -169,6 +245,12 @@ _nvidia_available() {
 }
 
 VAAPI_DETECTED_DEVICE=$(_detect_vaapi_device 2>/dev/null || true)
+VAAPI_DETECTED_DRIVER=""
+
+if [ -n "$VAAPI_DETECTED_DEVICE" ]; then
+    VAAPI_DETECTED_DRIVER=$(_detect_vaapi_driver "$VAAPI_DETECTED_DEVICE" 2>/dev/null || true)
+fi
+
 NVIDIA_DETECTED=false
 
 if _nvidia_available; then
@@ -180,16 +262,17 @@ case "$GPU_BACKEND" in
         if [ -n "$VAAPI_DETECTED_DEVICE" ] && [ "$NVIDIA_DETECTED" = "true" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
+
+            if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+                LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+                export LIBVA_DRIVER_NAME
+            fi
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
 
-            # Dual-GPU host: expose both verified accelerator families to the
-            # server container. Keep VAAPI as the initial/default transcoding
-            # policy, while WebAdmin runtime self-tests can validate and offer
-            # both VAAPI and NVIDIA profiles to the operator.
+            # Dual-GPU host: expose both accelerator families to the server
+            # container. AUTO remains the only execution policy; WebAdmin
+            # self-tests report capability and do not select a media profile.
             GPU_BACKEND_EFFECTIVE=hybrid
-            TRANSCODING_HWACCEL=vaapi
-            TRANSCODING_VIDEO_CODEC=h264_vaapi
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
             echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -198,12 +281,14 @@ case "$GPU_BACKEND" in
         elif [ -n "$VAAPI_DETECTED_DEVICE" ]; then
             VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
             export VAAPI_DEVICE
+
+            if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+                LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+                export LIBVA_DRIVER_NAME
+            fi
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
 
             GPU_BACKEND_EFFECTIVE=vaapi
-            TRANSCODING_HWACCEL=vaapi
-            TRANSCODING_VIDEO_CODEC=h264_vaapi
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
             echo "[start] GPU backend AUTO -> VAAPI"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -211,18 +296,12 @@ case "$GPU_BACKEND" in
         elif [ "$NVIDIA_DETECTED" = "true" ]; then
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
             GPU_BACKEND_EFFECTIVE=nvidia
-            TRANSCODING_HWACCEL=nvenc
-            TRANSCODING_VIDEO_CODEC=h264_nvenc
             unset LIBVA_DRIVER_NAME
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> NVIDIA"
 
         else
             GPU_BACKEND_EFFECTIVE=cpu
-            TRANSCODING_HWACCEL=cpu
-            TRANSCODING_VIDEO_CODEC=libx264
             unset LIBVA_DRIVER_NAME
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> CPU fallback"
         fi
         ;;
@@ -235,11 +314,13 @@ case "$GPU_BACKEND" in
 
         VAAPI_DEVICE=$VAAPI_DETECTED_DEVICE
         export VAAPI_DEVICE
+
+        if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -n "$VAAPI_DETECTED_DRIVER" ]; then
+            LIBVA_DRIVER_NAME=$VAAPI_DETECTED_DRIVER
+            export LIBVA_DRIVER_NAME
+        fi
         COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
         GPU_BACKEND_EFFECTIVE=vaapi
-        TRANSCODING_HWACCEL=vaapi
-        TRANSCODING_VIDEO_CODEC=h264_vaapi
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
         echo "[start] GPU backend forced: VAAPI"
         echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -253,19 +334,13 @@ case "$GPU_BACKEND" in
 
         COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
         GPU_BACKEND_EFFECTIVE=nvidia
-        TRANSCODING_HWACCEL=nvenc
-        TRANSCODING_VIDEO_CODEC=h264_nvenc
         unset LIBVA_DRIVER_NAME
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: NVIDIA"
         ;;
 
     cpu|software|none)
         GPU_BACKEND_EFFECTIVE=cpu
-        TRANSCODING_HWACCEL=cpu
-        TRANSCODING_VIDEO_CODEC=libx264
         unset LIBVA_DRIVER_NAME
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: CPU"
         ;;
 
@@ -276,10 +351,23 @@ case "$GPU_BACKEND" in
         ;;
 esac
 
+TRANSCODING_MODE=auto
+TRANSCODING_HWACCEL=auto
+export TRANSCODING_MODE TRANSCODING_HWACCEL
+unset TRANSCODING_VIDEO_CODEC
+
 export GPU_BACKEND GPU_BACKEND_EFFECTIVE
 
 echo "[start] GPU requested : $GPU_BACKEND"
 echo "[start] GPU effective : $GPU_BACKEND_EFFECTIVE"
+
+if [ -n "${VAAPI_DEVICE:-}" ]; then
+    echo "[start] VAAPI device  : $VAAPI_DEVICE"
+fi
+
+if [ -n "${LIBVA_DRIVER_NAME:-}" ]; then
+    echo "[start] VAAPI driver  : $LIBVA_DRIVER_NAME"
+fi
 
 echo "[start] detected host IPv4: $IPADDRESS"
 echo "[start] Web Player : http://$IPADDRESS:8080"
@@ -331,9 +419,17 @@ _repair_gateway_namespace() {
 }
 
 if [ "$#" -eq 0 ]; then
-    echo "[start] pulling published images..."
-    # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
-    docker compose $COMPOSE_ARGS pull
+    case "${STREMIO_PULL_POLICY:-always}" in
+        never)
+            echo "[start] image pull disabled (STREMIO_PULL_POLICY=never)"
+            ;;
+        *)
+            echo "[start] pulling published images..."
+            # shellcheck disable=SC2086 # COMPOSE_ARGS is an intentional argument list.
+            docker compose $COMPOSE_ARGS pull
+            ;;
+    esac
+
     # Do not exec here: v2.0.6 performs a post-start namespace integrity check.
     # shellcheck disable=SC2086
     docker compose $COMPOSE_ARGS up -d --remove-orphans

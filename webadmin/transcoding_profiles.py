@@ -70,7 +70,7 @@ PROFILE_META = {
         "engine": "nvenc",
         "decode": "software",
         "codec": "H.264",
-        "description": "Software decode, NVIDIA NVENC H.264 encode. Selectable only after the real encoder test passes.",
+        "description": "Software decode, NVIDIA NVENC H.264 encode capability; diagnostic only.",
     },
     "nvenc-hevc": {
         "label": "HEVC NVIDIA NVENC",
@@ -78,7 +78,7 @@ PROFILE_META = {
         "engine": "nvenc",
         "decode": "software",
         "codec": "HEVC",
-        "description": "Software decode, NVIDIA NVENC HEVC encode. Selectable only after the real encoder test passes.",
+        "description": "Software decode, NVIDIA NVENC HEVC encode capability; diagnostic only.",
     },
     "cpu-h264": {
         "label": "H.264 CPU (libx264)",
@@ -112,15 +112,20 @@ def _exec(container, argv: list[str]):
 
 
 def _selected() -> tuple[str, int]:
-    config = legacy.read_config()
-    profile = str(config.get("transcoding_profile") or "").strip().lower()
-    if profile not in PROFILE_META:
-        profile = "legacy"
+    """AUTO is the only supported execution mode."""
+    persisted = legacy.read_config() or {}
+
     try:
-        quality = max(0, min(51, int(config.get("transcoding_video_quality", 22))))
+        quality = int(
+            persisted.get("transcoding_video_quality")
+            or 22
+        )
     except (TypeError, ValueError):
         quality = 22
-    return profile, quality
+
+    quality = max(0, min(51, quality))
+
+    return "auto", quality
 
 
 def _result(
@@ -177,6 +182,21 @@ def _nvenc_diagnostics(result) -> dict[str, object]:
     }
 
 
+def _libva_driver(container) -> str:
+    """Return the VAAPI driver used for runtime hardware self-tests.
+
+    The server container is authoritative.  An explicitly configured
+    LIBVA_DRIVER_NAME wins; Intel/DRM deployments default to iHD.
+    """
+    try:
+        env = base.base._container_env(container)
+    except Exception:
+        env = {}
+
+    driver = str(env.get("LIBVA_DRIVER_NAME") or "").strip()
+    return driver or "iHD"
+
+
 def _last_error(result) -> str:
     if result is None or not result.output:
         return "runtime self-test failed"
@@ -187,23 +207,68 @@ def _last_error(result) -> str:
 def _test_full_vaapi(container, profile_id: str, device: str, binary: str) -> dict[str, object]:
     """Verify both H.264 and HEVC VAAPI decode followed by the selected VAAPI encoder."""
     encoder = str(PROFILE_META[profile_id]["encoder"])
+    driver = _libva_driver(container)
     b = shlex.quote(binary)
     d = shlex.quote(device)
     e = shlex.quote(encoder)
+    drv = shlex.quote(driver)
     script = f"""
 set -eu
+export LIBVA_DRIVER_NAME={drv}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-{b} -hide_banner -loglevel error -f lavfi -i testsrc2=size=128x72:rate=24 -frames:v 3 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "$work/h264.mp4"
-{b} -hide_banner -loglevel error -f lavfi -i testsrc2=size=128x72:rate=24 -frames:v 3 -c:v libx265 -preset ultrafast -pix_fmt yuv420p "$work/hevc.mp4"
-for input in "$work/h264.mp4" "$work/hevc.mp4"; do
-  {b} -hide_banner -loglevel error -hwaccel vaapi -hwaccel_device {d} -hwaccel_output_format vaapi -i "$input" -frames:v 1 -vf scale_vaapi=format=nv12 -c:v {e} -f null -
+
+# H.264 8-bit
+{b} -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=128x72:rate=24 \
+  -frames:v 3 \
+  -c:v libx264 -preset ultrafast \
+  -pix_fmt yuv420p \
+  "$work/h264.mp4"
+
+# HEVC Main 8-bit
+{b} -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=128x72:rate=24 \
+  -frames:v 3 \
+  -c:v libx265 -preset ultrafast \
+  -pix_fmt yuv420p \
+  -x265-params log-level=error \
+  "$work/hevc-main.mkv"
+
+# HEVC Main10 10-bit
+{b} -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=128x72:rate=24 \
+  -frames:v 3 \
+  -vf format=yuv420p10le \
+  -c:v libx265 -preset ultrafast \
+  -profile:v main10 \
+  -x265-params log-level=error \
+  "$work/hevc-main10.mkv"
+
+for input in \
+  "$work/h264.mp4" \
+  "$work/hevc-main.mkv" \
+  "$work/hevc-main10.mkv"
+do
+  {b} -hide_banner -loglevel error \
+    -hwaccel vaapi \
+    -hwaccel_device {d} \
+    -hwaccel_output_format vaapi \
+    -i "$input" \
+    -frames:v 1 \
+    -vf scale_vaapi=format=nv12 \
+    -c:v {e} \
+    -f null -
 done
 """
     result = _exec(container, ["sh", "-lc", script])
     ok = bool(result is not None and result.exit_code == 0)
     if ok:
-        return _result(profile_id, True, "Full GPU test passed: H.264 decode + HEVC decode + VAAPI encode.")
+        return _result(
+            profile_id,
+            True,
+            "Full GPU test passed: H.264 + HEVC Main + HEVC Main10 VAAPI decode and VAAPI encode.",
+        )
     return _result(profile_id, False, _last_error(result))
 
 
@@ -220,7 +285,9 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
             return _result(profile_id, False, f"{device} is not mounted.")
         if meta["decode"] == "vaapi":
             return _test_full_vaapi(container, profile_id, device, binary)
+        driver = _libva_driver(container)
         argv = [
+            "env", f"LIBVA_DRIVER_NAME={driver}",
             binary, "-hide_banner", "-loglevel", "error",
             "-vaapi_device", device,
             "-f", "lavfi", "-i", "color=c=black:s=128x72:d=0.04",
@@ -238,6 +305,7 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
             and (result is None or result.exit_code != 0)
         ):
             argv = [
+                "env", f"LIBVA_DRIVER_NAME={driver}",
                 binary, "-hide_banner", "-loglevel", "error",
                 "-vaapi_device", device,
                 "-f", "lavfi", "-i", "color=c=black:s=128x72:d=0.04",
@@ -288,19 +356,27 @@ def _test_profile(container, profile_id: str, device: str, binary: str | None) -
     return _result(profile_id, ok, reason)
 
 
-def _recommended_profile(items: list[dict[str, object]]) -> str:
-    available = {str(item.get("id")) for item in items if item.get("available")}
-    for profile_id in (
-        "nvenc-h264",
-        "vaapi-full-h264",
-        "vaapi-h264",
-        "cpu-h264",
-        "preserve",
-    ):
-        if profile_id in available:
-            return profile_id
-    return "preserve"
+def _recommended_profile(
+    items: list[dict[str, object]],
+) -> str:
+    """Return verified hardware backend for diagnostics only.
 
+    This value is not an execution-profile selection.
+    """
+    available = {
+        str(item.get("id"))
+        for item in items
+        if item.get("available")
+        and item.get("verified", True)
+    }
+
+    if "nvenc-h264" in available or "nvenc-hevc" in available:
+        return "nvenc"
+
+    if "vaapi-h264" in available or "vaapi-hevc" in available:
+        return "vaapi"
+
+    return "none"
 
 
 def _nvidia_runtime_info(container) -> dict[str, object]:
@@ -386,7 +462,7 @@ def _backend_matrix(
             "device": device if vaapi_device else None,
             "h264": vaapi_h264,
             "hevc": vaapi_hevc,
-            "selectable": vaapi_h264 or vaapi_hevc,
+            "availableForAuto": vaapi_h264 or vaapi_hevc,
             "reason": (
                 reason("vaapi-h264")
                 if not vaapi_h264
@@ -401,7 +477,7 @@ def _backend_matrix(
             "driver": nvidia.get("driver"),
             "h264": nvenc_h264,
             "hevc": nvenc_hevc,
-            "selectable": nvenc_h264 or nvenc_hevc,
+            "availableForAuto": nvenc_h264 or nvenc_hevc,
             "nvencApiCompatible": nvenc_api_compatible,
             "nvencApiRequired": nvenc_api_required,
             "nvencApiAvailable": nvenc_api_available,
@@ -418,7 +494,7 @@ def _backend_matrix(
             "runtime": True,
             "h264": cpu_h264,
             "hevc": cpu_hevc,
-            "selectable": cpu_h264 or cpu_hevc,
+            "availableForAuto": cpu_h264 or cpu_hevc,
             "reason": (
                 reason("cpu-h264")
                 if not cpu_h264
@@ -501,12 +577,12 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "device": device,
         "ffmpeg": binary,
         "profiles": items,
-        "recommendedProfile": recommended,
+        "detectedBackend": recommended,
         "hardwareDetection": hardware,
         "backends": backends,
         "rule": (
             "Direct Stream remains Direct Stream. Hardware is detected from real runtime self-tests. "
-            "The recommended profile is preselected when legacy settings are active, but it is only applied after operator confirmation. "
+            "The recommended backend result is diagnostic only; AUTO remains the only execution policy and Stremio remains authoritative for the media decision. "
             "'GPU encode only' leaves decode on CPU; 'Full GPU' is offered only when both H.264 and HEVC hardware decode plus hardware encode pass the runtime test. No silent fallback."
         ),
     }
@@ -527,47 +603,89 @@ def refresh_profiles():
 
 @app.put("/api/transcoding/profile")
 def set_profile(body: ProfileBody):
-    available = _profiles(force=True)
-    candidates = {str(item["id"]): item for item in available["profiles"]}
-    profile = body.profile.strip().lower()
-    if profile not in candidates:
-        raise HTTPException(400, "unknown transcoding profile")
-    if not candidates[profile].get("available"):
-        raise HTTPException(409, f"profile is not available: {candidates[profile].get('reason')}")
-    legacy.write_config({
-        "transcoding_profile": profile,
-        "transcoding_video_quality": body.quality,
-    })
-    legacy.audit("transcoding.profile", f"profile={profile} quality={body.quality}")
+    """Compatibility endpoint.
+
+    AUTO is the only accepted mode. Old clients may still call this
+    endpoint, but explicit execution profiles are intentionally rejected.
+    """
+    profile = str(
+        body.profile or ""
+    ).strip().lower()
+
+    if profile != "auto":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Manual transcoding profiles are no longer supported. "
+                "The execution mode is Automatic."
+            ),
+        )
+
+    current = legacy.read_config() or {}
+
+    current["transcoding_profile"] = "auto"
+    current["transcoding_resolved_profile"] = ""
+    current["transcoding_mode"] = "auto"
+
+    # These values are no longer codec/profile selectors.
+    current["transcoding_hwaccel"] = "auto"
+    current["transcoding_video_codec"] = "auto"
+
+    if body.quality is not None:
+        try:
+            quality = int(body.quality)
+        except (TypeError, ValueError):
+            quality = 22
+
+        current["transcoding_video_quality"] = max(
+            0,
+            min(51, quality),
+        )
+
+    legacy.write_config(current)
+
+    try:
+        legacy.audit(
+            "transcoding.profile",
+            "mode=auto",
+        )
+    except Exception:
+        pass
+
     PROFILE_CACHE["at"] = 0.0
     PROFILE_CACHE["value"] = None
-    return {"ok": True, "profile": profile, "quality": body.quality, "restartRequired": False}
 
-
-_original_status = base.transcoding_status
+    return {
+        "ok": True,
+        "profile": "auto",
+        "mode": "auto",
+        "resolvedProfile": None,
+    }
 
 
 def _profile_summary(profile: str, quality: int) -> str:
-    if profile == "legacy":
-        return "Legacy transcoding fields are present. Choose one explicit verified profile in All Configuration."
-    meta = PROFILE_META[profile]
-    if profile == "preserve":
-        return "PRESERVE: Stremio controls copy and transcoding; this policy does not replace the video pipeline."
-    decode = "VAAPI hardware" if meta["decode"] == "vaapi" else "software/CPU"
     return (
-        f"{meta['label']}: Direct Stream stays direct. When Stremio requires video transcoding, "
-        f"decode is {decode} and encode is explicitly {meta['encoder']} at quality {quality}. "
-        "No silent fallback to another encoder."
+        "AUTO: hardware acceleration is detected automatically. "
+        "Stremio remains authoritative for Direct Stream, transcoding "
+        "and codec selection."
     )
 
 
 def transcoding_status():
-    data = _original_status()
+    """Expose AUTO-only policy while preserving live runtime telemetry.
+
+    The lower telemetry layers discover processes, capabilities and the actual
+    FFmpeg command.  They must not turn persisted legacy profile fields into an
+    execution decision: Stremio remains authoritative for copy/transcode and
+    codec selection.
+    """
+    data = base.transcoding_status()
     if not isinstance(data, dict):
         return data
-    selected, quality = _selected()
-    data["executionProfile"] = {"id": selected, "quality": quality}
-    data["policySummary"] = _profile_summary(selected, quality)
+
+    _, quality = _selected()
+    data["executionProfile"] = {"id": "auto", "quality": quality}
+    data["policySummary"] = _profile_summary("auto", quality)
 
     cached_profiles = PROFILE_CACHE.get("value")
     if isinstance(cached_profiles, dict):
@@ -578,51 +696,34 @@ def transcoding_status():
         data["profilesCheckedAt"] = None
 
     policy = data.get("policy") if isinstance(data.get("policy"), dict) else {}
-    if selected in PROFILE_META:
-        meta = PROFILE_META[selected]
-        mode = meta["codec"] if selected != "preserve" else "preserve"
-        policy["transcoding_mode"] = mode
-        policy["transcoding_hwaccel"] = meta["engine"]
-        policy["transcoding_video_codec"] = meta["encoder"] or "core"
-        policy["transcoding_decode"] = meta["decode"]
-        data["policy"] = policy
+    policy.update({
+        "transcoding_mode": "auto",
+        "transcoding_hwaccel": "auto",
+        "transcoding_video_codec": None,
+        "transcoding_decode": "core",
+    })
+    data["policy"] = policy
 
-        # The legacy status layer reports the old auto/hwaccel fields under
-        # state.requested/effective. Once an explicit execution profile is
-        # selected those values are no longer authoritative and made the UI
-        # contradict itself. Keep every status surface aligned with the profile.
-        state = data.get("state") if isinstance(data.get("state"), dict) else {}
-        requested = state.get("requested") if isinstance(state.get("requested"), dict) else {}
-        effective = state.get("effective") if isinstance(state.get("effective"), dict) else {}
-        requested.update({
-            "profile": selected,
-            "mode": mode,
-            "hwaccel": meta["engine"],
-            "videoCodec": meta["encoder"] or "core",
-            "decode": meta["decode"],
-        })
-        effective.update({
-            "profile": selected,
-            "mode": mode,
-            "hwaccel": meta["engine"],
-            "videoCodec": meta["encoder"] or "core",
-            "decode": meta["decode"],
-        })
-        state["requested"] = requested
-        state["effective"] = effective
-        data["state"] = state
-
-        if meta["engine"] in {"vaapi", "nvenc"}:
-            active = data.get("active") if isinstance(data.get("active"), dict) else {}
-            sessions = active.get("sessions") if isinstance(active.get("sessions"), list) else []
-            mismatches = [s for s in sessions if s.get("action") == "transcoding" and s.get("engine") != meta["engine"]]
-            if mismatches:
-                warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else []
-                warnings.append(
-                    f"{meta['label']} is selected but an existing transcoding job is using another engine. "
-                    "Stop/restart playback so the new FFmpeg job uses the selected profile."
-                )
-                data["warnings"] = warnings
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    requested = state.get("requested") if isinstance(state.get("requested"), dict) else {}
+    effective = state.get("effective") if isinstance(state.get("effective"), dict) else {}
+    requested.update({
+        "profile": "auto",
+        "mode": "auto",
+        "hwaccel": "auto",
+        "videoCodec": None,
+        "decode": "core",
+    })
+    effective.update({
+        "profile": "auto",
+        "mode": "auto",
+        "hwaccel": "auto",
+        "videoCodec": None,
+        "decode": "core",
+    })
+    state["requested"] = requested
+    state["effective"] = effective
+    data["state"] = state
     return data
 
 

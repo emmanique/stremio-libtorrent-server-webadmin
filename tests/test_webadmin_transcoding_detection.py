@@ -21,7 +21,7 @@ def test_recommends_full_vaapi_h264_before_encode_only_and_cpu():
         _item("vaapi-full-h264", True),
         _item("cpu-h264", True),
     ]
-    assert profiles._recommended_profile(items) == "vaapi-full-h264"
+    assert profiles._recommended_profile(items) == "vaapi"
 
 
 def test_recommends_encode_only_vaapi_when_full_pipeline_is_unavailable():
@@ -31,7 +31,7 @@ def test_recommends_encode_only_vaapi_when_full_pipeline_is_unavailable():
         _item("vaapi-full-h264", False),
         _item("cpu-h264", True),
     ]
-    assert profiles._recommended_profile(items) == "vaapi-h264"
+    assert profiles._recommended_profile(items) == "vaapi"
 
 
 def test_nvenc_has_priority_when_runtime_verified():
@@ -40,7 +40,7 @@ def test_nvenc_has_priority_when_runtime_verified():
         _item("vaapi-full-h264", True),
         _item("cpu-h264", True),
     ]
-    assert profiles._recommended_profile(items) == "nvenc-h264"
+    assert profiles._recommended_profile(items) == "nvenc"
 
 
 def test_vaapi_is_reported_as_gpu_acceleration_for_lxc_render_node():
@@ -213,14 +213,14 @@ def test_backend_matrix_keeps_detected_nvidia_separate_from_nvenc_capability(mon
     )
 
     assert matrix["vaapi"]["detected"] is True
-    assert matrix["vaapi"]["selectable"] is True
+    assert matrix["vaapi"]["availableForAuto"] is True
 
     assert matrix["nvidia"]["detected"] is True
     assert matrix["nvidia"]["runtime"] is True
     assert matrix["nvidia"]["h264"] is False
-    assert matrix["nvidia"]["selectable"] is False
+    assert matrix["nvidia"]["availableForAuto"] is False
 
-    assert matrix["cpu"]["selectable"] is True
+    assert matrix["cpu"]["availableForAuto"] is True
 
 
 def test_backend_matrix_marks_verified_nvenc_selectable(monkeypatch):
@@ -259,7 +259,7 @@ def test_backend_matrix_marks_verified_nvenc_selectable(monkeypatch):
     assert matrix["nvidia"]["detected"] is True
     assert matrix["nvidia"]["runtime"] is True
     assert matrix["nvidia"]["h264"] is True
-    assert matrix["nvidia"]["selectable"] is True
+    assert matrix["nvidia"]["availableForAuto"] is True
 
 
 def test_profiles_uses_container_vaapi_device_when_not_persisted(monkeypatch):
@@ -451,7 +451,229 @@ def test_backend_matrix_exposes_nvenc_api_details(monkeypatch):
 
     assert nvidia["detected"] is True
     assert nvidia["runtime"] is True
-    assert nvidia["selectable"] is False
+    assert nvidia["availableForAuto"] is False
     assert nvidia["nvencApiCompatible"] is False
     assert nvidia["nvencApiRequired"] == "12.0"
     assert nvidia["nvencApiAvailable"] == "11.1"
+
+
+def _auto_profile_item(
+    profile_id,
+    available=True,
+    verified=True,
+    reason="ok",
+):
+    return {
+        "id": profile_id,
+        "available": available,
+        "verified": verified,
+        "reason": reason,
+    }
+
+
+def _auto_capabilities(
+    recommended,
+    *,
+    vaapi_available=True,
+    vaapi_verified=True,
+    nvenc_available=False,
+):
+    return {
+        "profiles": [
+            _auto_profile_item("preserve"),
+            _auto_profile_item("cpu-h264"),
+            _auto_profile_item(
+                "vaapi-full-h264",
+                vaapi_available,
+                vaapi_verified,
+                "VAAPI unavailable"
+                if not vaapi_available
+                else "ok",
+            ),
+            _auto_profile_item(
+                "nvenc-h264",
+                nvenc_available,
+                nvenc_available,
+                "NVENC unavailable"
+                if not nvenc_available
+                else "ok",
+            ),
+        ],
+        "recommendedProfile": recommended,
+    }
+
+
+def test_auto_persists_auto_mode(monkeypatch):
+    writes = []
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "read_config",
+        lambda: {},
+    )
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "write_config",
+        lambda data: writes.append(dict(data)),
+    )
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "audit",
+        lambda *args, **kwargs: None,
+    )
+
+    result = profiles.set_profile(
+        profiles.ProfileBody(
+            profile="auto",
+            quality=22,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["profile"] == "auto"
+    assert result["mode"] == "auto"
+    assert result["resolvedProfile"] is None
+
+    assert writes
+
+    saved = writes[-1]
+
+    assert saved["transcoding_profile"] == "auto"
+    assert saved["transcoding_resolved_profile"] == ""
+    assert saved["transcoding_mode"] == "auto"
+    assert saved["transcoding_hwaccel"] == "auto"
+    assert saved["transcoding_video_codec"] == "auto"
+    assert saved["transcoding_video_quality"] == 22
+
+
+def test_auto_preserves_unrelated_settings(monkeypatch):
+    writes = []
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "read_config",
+        lambda: {
+            "max_streams": 5,
+            "debug_logs": True,
+        },
+    )
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "write_config",
+        lambda data: writes.append(dict(data)),
+    )
+
+    monkeypatch.setattr(
+        profiles.legacy,
+        "audit",
+        lambda *args, **kwargs: None,
+    )
+
+    profiles.set_profile(
+        profiles.ProfileBody(
+            profile="auto",
+            quality=24,
+        )
+    )
+
+    saved = writes[-1]
+
+    assert saved["max_streams"] == 5
+    assert saved["debug_logs"] is True
+    assert saved["transcoding_profile"] == "auto"
+    assert saved["transcoding_video_quality"] == 24
+
+
+def test_manual_profile_is_rejected(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        profiles.set_profile(
+            profiles.ProfileBody(
+                profile="vaapi-full-h264",
+                quality=22,
+            )
+        )
+
+    assert exc.value.status_code == 400
+
+
+def test_selected_is_always_auto(monkeypatch):
+    monkeypatch.setattr(
+        profiles.legacy,
+        "read_config",
+        lambda: {
+            "transcoding_profile": "vaapi-full-h264",
+            "transcoding_video_quality": 27,
+        },
+    )
+
+    selected, quality = profiles._selected()
+
+    assert selected == "auto"
+    assert quality == 27
+
+
+def test_status_normalises_legacy_policy_to_auto(monkeypatch):
+    monkeypatch.setattr(
+        profiles.base,
+        "transcoding_status",
+        lambda: {
+            "available": True,
+            "policy": {
+                "transcoding_mode": "hevc",
+                "transcoding_hwaccel": "vaapi",
+                "transcoding_video_codec": "hevc_vaapi",
+            },
+            "state": {
+                "requested": {
+                    "mode": "hevc",
+                    "hwaccel": "vaapi",
+                    "videoCodec": "hevc_vaapi",
+                },
+                "effective": {
+                    "mode": "hevc",
+                    "hwaccel": "vaapi",
+                    "videoCodec": "hevc_vaapi",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(profiles, "_selected", lambda: ("auto", 22))
+    monkeypatch.setattr(profiles, "PROFILE_CACHE", {"at": 0.0, "value": None})
+
+    data = profiles.transcoding_status()
+
+    assert data["executionProfile"] == {"id": "auto", "quality": 22}
+    assert data["policy"]["transcoding_mode"] == "auto"
+    assert data["policy"]["transcoding_hwaccel"] == "auto"
+    assert data["policy"]["transcoding_video_codec"] is None
+    assert data["state"]["requested"]["mode"] == "auto"
+    assert data["state"]["requested"]["hwaccel"] == "auto"
+    assert data["state"]["requested"]["videoCodec"] is None
+    assert data["state"]["effective"]["mode"] == "auto"
+    assert data["state"]["effective"]["hwaccel"] == "auto"
+    assert data["state"]["effective"]["videoCodec"] is None
+
+
+def test_dashboard_has_no_legacy_execution_selectors():
+    dashboard = (ROOT / "webadmin" / "static" / "transcoding-dashboard.js").read_text()
+
+    forbidden = (
+        "Force H.264",
+        "Force HEVC",
+        "Force software",
+        "Copy / passthrough",
+        "H.264 VAAPI'],",
+        "HEVC VAAPI'],",
+        "NVIDIA NVENC'],",
+    )
+    for value in forbidden:
+        assert value not in dashboard
+
+    assert "AUTO-only transcoding" in dashboard
+    assert "Stremio remains authoritative" in dashboard

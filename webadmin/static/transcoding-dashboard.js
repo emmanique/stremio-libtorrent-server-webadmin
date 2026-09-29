@@ -158,7 +158,9 @@
   async function loadTranscoding() {
     try {
       const response = await fetch('/api/transcoding/status', {cache: 'no-store'});
-      renderTranscoding(await response.json());
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      renderTranscoding(data);
     } catch (error) {
       renderTranscoding({available: false, message: 'Could not read transcoding telemetry.'});
     }
@@ -166,30 +168,36 @@
 
   function installConfigurationControls() {
     if (typeof configGroups === 'undefined' || typeof configInput === 'undefined') return;
+
     const index = configGroups.findIndex(group => group.id === 'transcode');
     if (index >= 0) {
       configGroups.splice(index, 1,
-        {id: 'transcoding-policy', title: 'Transcoding policy & hardware', match: name => name.startsWith('transcoding_')},
+        {id: 'transcoding-policy', title: 'Automatic transcoding & hardware', match: name => name.startsWith('transcoding_')},
         {id: 'transcode-runtime', title: 'Transcoding runtime & lifecycle', match: name => name.startsWith('transcode_')}
       );
     }
 
-    const baseConfigInput = configInput;
-    const choices = {
-      transcoding_mode: [['auto','Auto'],['copy','Copy / passthrough'],['h264','Force H.264'],['hevc','Force HEVC'],['software','Force software']],
-      transcoding_hwaccel: [['auto','Auto detect'],['vaapi','VAAPI'],['nvenc','NVIDIA NVENC'],['cpu','CPU']],
-      transcoding_video_codec: [['h264_vaapi','H.264 VAAPI'],['hevc_vaapi','HEVC VAAPI'],['h264_nvenc','H.264 NVENC'],['hevc_nvenc','HEVC NVENC'],['libx264','H.264 software'],['libx265','HEVC software']],
-      transcoding_audio_codec: [['aac','AAC'],['ac3','AC-3'],['libopus','Opus']],
-      transcoding_fallback_codec: [['libx264','H.264 / libx264'],['libx265','HEVC / libx265']]
-    };
+    const autoManaged = new Set([
+      'transcoding_profile',
+      'transcoding_resolved_profile',
+      'transcoding_mode',
+      'transcoding_hwaccel',
+      'transcoding_vaapi_device',
+      'transcoding_video_codec',
+      'transcoding_hw_decode',
+      'transcoding_fallback_codec'
+    ]);
 
+    const baseConfigInput = configInput;
     configInput = function(item) {
-      if (choices[item.name]) {
-        const disabled = item.editable ? '' : 'disabled';
-        const current = String(item.value ?? '');
-        const list = [...choices[item.name]];
-        if (current && !list.some(([value]) => value === current)) list.unshift([current, `${current} (current)`]);
-        return `<select data-config="${esc(item.name)}" data-scale="1" ${disabled}>${list.map(([value,label]) => `<option value="${esc(value)}" ${value===current?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
+      if (autoManaged.has(item.name)) {
+        let value = item.value;
+        if (item.name === 'transcoding_profile' || item.name === 'transcoding_mode' || item.name === 'transcoding_hwaccel') {
+          value = 'auto';
+        } else if (item.name === 'transcoding_video_codec' || item.name === 'transcoding_resolved_profile') {
+          value = 'Stremio automatic';
+        }
+        return `<input data-config="${esc(item.name)}" data-scale="1" type="text" value="${esc(value ?? 'Automatic')}" disabled>`;
       }
       if (item.name === 'transcoding_video_quality') {
         return `<input data-config="${esc(item.name)}" data-scale="1" type="number" min="0" max="51" step="1" value="${esc(item.displayValue ?? item.value ?? 22)}" ${item.editable?'':'disabled'}>`;
@@ -204,48 +212,21 @@
     };
     const search = document.getElementById('configSearch');
     if (search) search.addEventListener('input', () => queueMicrotask(decorateTranscodingConfig));
-    const configuration = document.getElementById('configuration');
-    if (configuration) configuration.addEventListener('input', refreshPolicyPreview);
-    if (configuration) configuration.addEventListener('change', refreshPolicyPreview);
-  }
-
-  function currentConfigValue(name) {
-    const input = document.querySelector(`[data-config="${name}"]`);
-    if (input) return input.type === 'checkbox' ? input.checked : input.value;
-    if (typeof configItems !== 'undefined') return configItems.find(item => item.name === name)?.value;
-    return undefined;
-  }
-
-  function policyPreviewText() {
-    const mode = currentConfigValue('transcoding_mode') || 'auto';
-    const hw = currentConfigValue('transcoding_hwaccel') || 'auto';
-    const video = currentConfigValue('transcoding_video_codec') || 'h264_vaapi';
-    const quality = currentConfigValue('transcoding_video_quality') || 22;
-    const audio = currentConfigValue('transcoding_audio_codec') || 'aac';
-    const bitrate = currentConfigValue('transcoding_audio_bitrate') || '192k';
-    const fallback = currentConfigValue('transcoding_fallback_codec') || 'libx264';
-    if (mode === 'copy') return 'COPY: the wrapper does not replace Direct Stream codec decisions.';
-    return `${String(mode).toUpperCase()}: compatible codecs remain Direct Stream; incompatible video → ${video} (${hw}, quality ${quality}); audio → ${audio} ${bitrate}; hardware failure → ${fallback}.`;
-  }
-
-  function refreshPolicyPreview() {
-    const preview = document.getElementById('transcodePolicyPreview');
-    if (preview) preview.textContent = policyPreviewText();
   }
 
   function decorateTranscodingConfig() {
     const groups = [...document.querySelectorAll('.configGroup')];
-    const policyGroup = groups.find(group => group.querySelector('summary')?.textContent.includes('Transcoding policy & hardware'));
+    const policyGroup = groups.find(group => group.querySelector('summary')?.textContent.includes('Automatic transcoding & hardware'));
     if (!policyGroup) return;
+
     policyGroup.querySelectorAll('.configItem').forEach(card => card.classList.add('transcodingPolicy'));
     if (!policyGroup.querySelector('.transcodePolicyIntro')) {
       const intro = document.createElement('div');
       intro.className = 'transcodePolicyIntro';
-      intro.innerHTML = `<strong>FFmpeg compatibility policy</strong><p id="transcodePolicyPreview"></p><div class="transcodePolicyFlow"><b>Compatible</b> → Direct Stream <span>·</span> <b>Incompatible video</b> → selected HW/software encoder <span>·</span> <b>Incompatible audio</b> → selected audio codec <span>·</span> <b>HW unavailable</b> → software fallback</div>`;
+      intro.innerHTML = `<strong>AUTO-only transcoding</strong><p>Hardware detection exposes VAAPI/NVENC capabilities to the runtime. Stremio remains authoritative for Direct Stream, transcoding and codec selection.</p><div class="transcodePolicyFlow"><b>Stremio decision</b> → copy or transcode <span>·</span> <b>AUTO backend</b> → available GPU acceleration <span>·</span> <b>No valid GPU</b> → Stremio/CPU default</div>`;
       const grid = policyGroup.querySelector('.configGroupGrid');
       policyGroup.insertBefore(intro, grid || null);
     }
-    refreshPolicyPreview();
   }
 
   installDashboardPanel();

@@ -20,25 +20,28 @@ legacy.DESCRIPTIONS.setdefault(
 
 app = base.app
 
-# The execution profile is persisted by the dedicated transcoding profile API.
-# Register it with the generic configuration model so an already persisted
-# profile is not treated as an unknown setting. Keep it read-only here because
-# profile changes must pass the runtime capability validation.
-legacy.DEFAULTS.setdefault("transcoding_profile", "")
+# Legacy profile state remains registered for upgrade compatibility so older
+# persisted values are not treated as unknown settings. AUTO is the only
+# supported execution policy, therefore these fields remain read-only.
+legacy.DEFAULTS.setdefault("transcoding_profile", "auto")
+legacy.DEFAULTS.setdefault("transcoding_resolved_profile", "")
 legacy.DESCRIPTIONS.setdefault(
     "transcoding_profile",
-    "Perfil de execução FFmpeg selecionado pelo painel Simple transcoding.",
+    "Modo AUTO; o WebAdmin detecta capacidades e o Stremio decide copy/transcode/codec.",
 )
 legacy.READ_ONLY.add("transcoding_profile")
 
-# Transcoding execution parameters are controlled by the verified profile UI.
-# The generic All Configuration page must not overwrite hardware detection or
-# profile-derived execution settings.
+# Legacy execution parameters remain read-only. Hardware/runtime verification
+# is diagnostic; the generic All Configuration page must not turn old values
+# into media-decision controls. Stremio remains authoritative for copy/transcode.
 legacy.READ_ONLY.update({
     "transcoding_profile",
+    "transcoding_resolved_profile",
     "transcoding_mode",
     "transcoding_hwaccel",
     "transcoding_vaapi_device",
     "transcoding_video_codec",
     "transcoding_hw_decode",
+    "transcoding_audio_codec",
+    "transcoding_fallback_codec",
 })

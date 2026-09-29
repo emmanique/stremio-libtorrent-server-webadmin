@@ -22,7 +22,7 @@ app = base.app
 STATIC = Path(__file__).with_name("static")
 REAL_FFMPEG = "/usr/local/libexec/stremio/ffmpeg-real"
 WRAPPER_FFMPEG = "/usr/local/bin/ffmpeg"
-TARGET_SERVER_VERSION = "1.6.15"
+TARGET_SERVER_VERSION = "1.6.20"
 _CAP_CACHE: dict[str, Any] = {"at": 0.0, "value": None, "binary": None}
 
 
@@ -132,7 +132,24 @@ def _process_commands(container) -> list[str]:
                 raw = [" ".join(str(x) for x in row) for row in rows]
             except Exception:
                 return []
-    return [command for command in raw if _normalise_process_command(command)]
+    commands: list[str] = []
+    for command in raw:
+        argv = _normalise_process_command(command)
+        if not argv:
+            continue
+        # Subtitle extraction is an auxiliary WebVTT process, not a playback
+        # transcoding session. Keep it out of video/audio session totals and
+        # engine telemetry while leaving the process itself untouched.
+        try:
+            tokens = shlex.split(argv)
+        except ValueError:
+            tokens = argv.split()
+        subtitle_codec = base._option(tokens, "-c:s", "-codec:s")
+        output_format = base._option(tokens, "-f")
+        if subtitle_codec == "webvtt" and output_format == "webvtt":
+            continue
+        commands.append(command)
+    return commands
 
 
 def _process_metadata(command: str) -> tuple[str, dict[str, object]]:

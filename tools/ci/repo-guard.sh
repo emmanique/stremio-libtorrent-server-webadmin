@@ -13,7 +13,7 @@ CORE="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
 
 test "$FORK" = "$WEBADMIN"
 test "$SERVER" = "$CORE"
-case "$FORK" in 2.*) ;; *) echo "Fork release line requires a 2.x version" >&2; exit 1;; esac
+case "$FORK" in 3.*) ;; *) echo "Fork release line requires a 3.x version" >&2; exit 1;; esac
 case "$SERVER" in 1.*) ;; *) echo "SERVER_VERSION must reflect the integrated upstream 1.x release" >&2; exit 1;; esac
 
 grep -q '^  gluetun:' compose.yaml
