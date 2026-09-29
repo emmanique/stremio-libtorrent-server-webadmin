@@ -363,3 +363,9 @@ The production deployment package intentionally contains only the supported runt
 Release notes: docs/releases/v2.0.22-dev.md
 
 License: MIT. See LICENSE.
+
+## 2.0.22 AUTO runtime validation
+
+The launcher owns host discovery. Run `./start.sh --help` to inspect launcher usage without creating/updating `.env`, probing the host GPU, pulling images, or starting containers. With `GPU_BACKEND=auto`, `start.sh` discovers the available DRM render node (for example `/dev/dri/renderD128`) and exports it to the VAAPI Compose overlay for that invocation; users do not need to persist `VAAPI_DEVICE` in `.env`. Calling `docker compose -f compose.yaml -f compose.vaapi.yaml ...` directly bypasses launcher discovery and therefore requires `VAAPI_DEVICE` in that shell.
+
+AUTO keeps playback policy separate from execution capability. If Stremio decides COPY, video remains `-c:v copy` even when VAAPI/NVENC is available. If Stremio decides video TRANSCODE, AUTO routes the existing H.264 transcode target through detected VAAPI encode, NVENC encode, or `libx264` when no supported GPU backend is available. GPU availability never promotes COPY to TRANSCODE and AUTO does not force hardware decode.
