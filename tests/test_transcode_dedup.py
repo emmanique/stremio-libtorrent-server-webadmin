@@ -275,3 +275,63 @@ def test_two_clients_destroy_in_reverse_order(tmp_path, decision):
 
     assert proc.terminated is True
     assert c.active_count() == 0
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected"),
+    [
+        ({"backend": "vaapi", "device": "/dev/dri/renderD128"}, "h264_vaapi"),
+        ({"backend": "nvenc", "device": None}, "h264_nvenc"),
+        ({"backend": "none", "device": None}, "libx264"),
+    ],
+)
+def test_auto_transcode_uses_detected_backend(tmp_path, decision, backend, expected):
+    argv = mod.build_hls_cmd(
+        "http://example/video.mkv", decision, "auto", tmp_path, backend
+    )
+
+    assert "-c:v" in argv
+    assert argv[argv.index("-c:v") + 1] == expected
+
+    if expected == "h264_vaapi":
+        assert "-vaapi_device" in argv
+        assert argv[argv.index("-vaapi_device") + 1] == "/dev/dri/renderD128"
+        assert "hwupload" in argv[argv.index("-vf") + 1]
+    if expected == "h264_nvenc":
+        assert "-hwaccel" not in argv
+
+
+def test_auto_copy_is_never_promoted_by_available_vaapi(tmp_path):
+    decision = {
+        "video": {"action": "copy", "codec": "hevc"},
+        "audio": {"action": "transcode", "codec": "aac"},
+    }
+    backend = {"backend": "vaapi", "device": "/dev/dri/renderD128"}
+
+    argv = mod.build_hls_cmd(
+        "http://example/video.mkv", decision, "auto", tmp_path, backend
+    )
+
+    assert argv[argv.index("-c:v") + 1] == "copy"
+    assert "h264_vaapi" not in argv
+    assert "-vaapi_device" not in argv
+
+
+def test_auto_converter_detects_backend_once_and_uses_it_for_workload(tmp_path, decision, monkeypatch):
+    detected = {"backend": "vaapi", "device": "/dev/dri/renderD129"}
+    calls = []
+
+    def fake_detect():
+        calls.append(True)
+        return detected
+
+    monkeypatch.setattr(mod, "detect_backend", fake_detect)
+    c = mod.Converter(str(tmp_path), "auto")
+    c.ensure_job("client-auto", "http://example/video.mkv", decision)
+
+    assert len(calls) == 1
+    assert c.backend == detected
+    assert len(FakeProc.created) == 1
+    argv = FakeProc.created[0].argv
+    assert argv[argv.index("-c:v") + 1] == "h264_vaapi"
+    assert argv[argv.index("-vaapi_device") + 1] == "/dev/dri/renderD129"
