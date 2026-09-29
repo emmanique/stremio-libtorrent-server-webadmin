@@ -2,11 +2,12 @@
 
 `map_probe` is pure (dict -> dict) so it's unit-testable without ffprobe; `probe_media` shells out.
 Captured contract: {format:{name,duration}, streams:[{id,index,track,codec,width,height,frameRate,
-isHdr,isDoVi,hasBFrames,channels}], samples:{}}.
+isHdr,isDoVi,profile,pixFmt,bitDepth,colorTransfer,colorPrimaries,hasBFrames,channels}], samples:{}}.
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 _HDR_TRANSFERS = {"smpte2084", "arib-std-b67"}  # PQ (HDR10/HDR10+) and HLG
@@ -49,6 +50,18 @@ def _is_dovi(stream: dict) -> bool:
     return False
 
 
+def _bit_depth(stream: dict) -> int | None:
+    bits = stream.get("bits_per_raw_sample")
+    try:
+        if bits not in (None, "", "0", 0):
+            return int(bits)
+    except (TypeError, ValueError):
+        pass
+    pix_fmt = str(stream.get("pix_fmt") or "")
+    match = re.search(r"p(\d{2})(?:le|be)?$", pix_fmt)
+    return int(match.group(1)) if match else None
+
+
 def map_probe(ffprobe_json: dict) -> dict:
     fmt = ffprobe_json.get("format", {}) or {}
     streams: list[dict] = []
@@ -67,6 +80,11 @@ def map_probe(ffprobe_json: dict) -> dict:
                 frameRate=_fps(s.get("r_frame_rate")),
                 isHdr=_is_hdr(s),
                 isDoVi=_is_dovi(s),
+                profile=s.get("profile"),
+                pixFmt=s.get("pix_fmt"),
+                bitDepth=_bit_depth(s),
+                colorTransfer=s.get("color_transfer"),
+                colorPrimaries=s.get("color_primaries"),
                 hasBFrames=bool(s.get("has_b_frames")),
             )
         elif ct == "audio":
