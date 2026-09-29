@@ -68,6 +68,16 @@ jobs:
           fi
           echo "SHOULD_PUBLISH=$SHOULD_PUBLISH" >> "$GITHUB_ENV"
 
+      - name: Stop branch publication when release already exists
+        if: env.SHOULD_PUBLISH == 'true' && github.event_name == 'push' && github.ref_type == 'branch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "[release] $TAG is already published; leaving the immutable release unchanged."
+            echo "SHOULD_PUBLISH=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Install release tooling
         if: env.SHOULD_PUBLISH == 'true'
         shell: bash
