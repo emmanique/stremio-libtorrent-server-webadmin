@@ -283,9 +283,8 @@ def test_subtitles_vtt_window_passes_seek_and_duration_to_ffmpeg(monkeypatch):
     argv = seen["argv"]
     assert ["-ss", "60.000"] == argv[argv.index("-ss"):argv.index("-ss") + 2]
     assert ["-t", "30.000"] == argv[argv.index("-t"):argv.index("-t") + 2]
-    assert "-copyts" in argv
-    assert argv.index("-copyts") < argv.index("-ss") < argv.index("-i")
-    assert argv.index("-t") > argv.index("-i")
+    assert "-copyts" not in argv
+    assert argv.index("-i") < argv.index("-ss") < argv.index("-t")
 
 
 def test_subtitles_vtt_invalid_global_track_returns_controlled_404(monkeypatch):
