@@ -582,7 +582,7 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "backends": backends,
         "rule": (
             "Direct Stream remains Direct Stream. Hardware is detected from real runtime self-tests. "
-            "The recommended profile is preselected when legacy settings are active, but it is only applied after operator confirmation. "
+            "The recommended backend result is diagnostic only; AUTO remains the only execution policy and Stremio remains authoritative for the media decision. "
             "'GPU encode only' leaves decode on CPU; 'Full GPU' is offered only when both H.264 and HEVC hardware decode plus hardware encode pass the runtime test. No silent fallback."
         ),
     }
