@@ -213,6 +213,8 @@ curl -fsS http://HOST-IP:8090/api/transcoding/status | python3 -m json.tool
 
 A detected backend such as `vaapi` means acceleration is available; it does **not** mean the current playback must use the GPU. A session whose actual FFmpeg command contains `-c:v copy` is correctly copying video even when VAAPI/NVENC is available.
 
+HDR execution follows the same rule: HDR detection alone does not promote COPY to TRANSCODE because the current HLS client contract does not explicitly declare HDR/DoVi display capability. When the core has already requested a video transcode and the probed source is HDR/PQ/HLG, AUTO VAAPI can keep decode, tone mapping and encode on the GPU, converting the HDR source to SDR BT.709 through `tonemap_vaapi` and `h264_vaapi`. Intel Iris Xe runtime validation with a real 3840x1606 HEVC 10-bit BT.2020/PQ source completed a 20-second conversion at about 1.13x realtime. The slower software `zscale + tonemap` path is not selected as the realtime AUTO path.
+
 ## VPN
 
 Configure VPN from WebAdmin -> VPN. A new installation does not require VPN credentials.
