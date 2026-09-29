@@ -255,16 +255,43 @@ docker compose -f compose.yaml -f compose.dns.yaml up -d
 
 Ensure host port 53 is available first.
 
-## 9. VAAPI / NVIDIA transcoding (optional)
+## 9. Automatic VAAPI / NVIDIA transcoding
 
-The platform is **copy first**: compatible streams remain Direct Stream/`copy`. Choosing a hardware profile does not force needless re-encoding. The selected profile is applied only when the Stremio core has already decided that video transcoding is required.
+Transcoding is **AUTO-only** in 2.0.22. There is no manual playback profile for Copy, H.264, HEVC, VAAPI, NVENC or CPU.
 
-WebAdmin exposes explicit profiles only after real FFmpeg runtime self-tests. Available profiles can include VAAPI encode-only, VAAPI Full GPU, NVIDIA NVENC and CPU libx264/libx265 modes.
+The decision flow is:
+
+```text
+Stremio core
+   |
+   +-- compatible media --> Direct Stream / video copy
+   |
+   +-- transcode required --> requested output codec
+                                |
+                                +-- AUTO backend discovery
+                                      +-- VAAPI when valid
+                                      +-- NVENC when valid
+                                      +-- Stremio/CPU default otherwise
+```
+
+GPU detection never forces transcoding. A VAAPI/NVENC-capable host may legitimately show an active playback with `-c:v copy`; that means Stremio decided video transcoding was unnecessary.
+
+Normal installations should keep:
+
+```env
+GPU_BACKEND=auto
+VAAPI_DEVICE=
+LIBVA_DRIVER_NAME=
+TRANSCODING_MODE=auto
+TRANSCODING_HWACCEL=auto
+```
+
+`start.sh` detects and applies the supported GPU overlay. Use the Compose overlays directly only for diagnostics or deliberate manual deployment:
 
 VAAPI:
 
 ```bash
-docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+VAAPI_DEVICE=/dev/dri/renderD129 docker compose -f compose.yaml -f compose.vaapi.yaml up -d
 ```
 
 NVIDIA/NVENC:
@@ -273,9 +300,20 @@ NVIDIA/NVENC:
 docker compose -f compose.yaml -f compose.gpu.yaml up -d
 ```
 
-For VAAPI Full GPU, decoded frames stay on VAAPI surfaces through scaling/format normalization and encoding, using `scale_vaapi` with `NV12` rather than a redundant software-download/hardware-upload cycle.
+Do not copy the example `renderD129` blindly; use the render node detected on the actual host.
 
-After starting playback that genuinely requires transcoding, use **WebAdmin → Transcoding** to confirm the selected execution profile, runtime self-test result and effective `[ffmpeg-policy]` decision.
+WebAdmin shows hardware capabilities and live runtime telemetry. H.264/HEVC hardware tests are diagnostics only and do not select the codec for playback. Legacy manual profile/codec settings from older installations are retained for compatibility but are no longer authoritative execution controls.
+
+Validate discovery and runtime state with:
+
+```bash
+curl -fsS http://HOST-IP:11470/transcode.json | python3 -m json.tool
+curl -fsS http://HOST-IP:8090/api/transcoding/status | python3 -m json.tool
+```
+
+For a real hardware-transcode validation, start media/client playback for which **Stremio itself** decides that video transcoding is required. Then verify the active FFmpeg command and GPU device usage. Do not force H.264/HEVC merely to make the GPU appear active.
+
+Equivalent HLS requests are deduplicated by effective workload and may share one main video FFmpeg/HLS job. Subtitle extraction can run as a separate FFmpeg process and should not be interpreted as a duplicate video transcode.
 
 
 ## 10. VPN in 2.x
