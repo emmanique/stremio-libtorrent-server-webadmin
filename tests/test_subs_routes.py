@@ -488,3 +488,23 @@ def test_subtitles_from_non_http_is_400():
     c = TestClient(create_app())
     r = c.get("/subtitles.vtt", params={"from": "file:///etc/hostname"})
     assert r.status_code == 400
+
+
+def test_trace_webvtt_timeline_logs_only_timing_metadata(caplog):
+    from stremiosrv.api import subs as subs_api
+
+    payload = (
+        b"WEBVTT\n\n"
+        b"00:01:02.300 --> 00:01:04.500\nSECRET SUBTITLE TEXT\n\n"
+        b"00:01:08.000 --> 00:01:09.250\nANOTHER SECRET\n"
+    )
+    with caplog.at_level("WARNING", logger=subs_api.__name__):
+        subs_api._trace_webvtt_timeline(payload, 60.0, 30.0)
+
+    msg = caplog.messages[-1]
+    assert "window_start=60.000" in msg
+    assert "window_duration=30.000" in msg
+    assert "cues=2" in msg
+    assert "first=00:01:02.300" in msg
+    assert "last=00:01:09.250" in msg
+    assert "SECRET" not in msg
