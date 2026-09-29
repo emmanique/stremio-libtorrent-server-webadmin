@@ -27,7 +27,7 @@ Current versions:
 - Live WebAdmin telemetry reports AUTO policy, detected backend/device, active FFmpeg sessions, actual Direct Stream/transcode state and the effective runtime decision.
 - Legacy profile/codec fields are retained only for upgrade compatibility and diagnostics; they are no longer authoritative execution controls and are read-only in the configuration UI.
 - Equivalent HLS requests are deduplicated by effective workload so compatible requests share one main video FFmpeg/HLS job. Subtitle extraction remains an independent process and is not treated as a duplicate video transcode.
-- Embedded WebVTT subtitles are advertised as HLS subtitle renditions backed by the timed WebVTT sidecar itself; the playlist no longer models the whole movie as one giant subtitle segment. This avoids player-side subtitle rendering stalls while preserving cue timestamps and the independent subtitle extractor.
+- Embedded WebVTT subtitles are advertised as HLS subtitle renditions using finite 30-second media windows. Each window is extracted independently from the source track, avoiding both the former movie-length streaming segment and the invalid URI-only rendition while preserving the independent subtitle extractor.
 - Transcode lifecycle/garbage collection was hardened to avoid workload cleanup races.
 - Media probing preserves HDR-relevant video metadata (`profile`, pixel format/bit depth, transfer and primaries) in addition to `isHdr`/`isDoVi`. Because the current HLS client contract has no HDR display-capability signal, normal HDR10/PQ/HLG sources now use the validated conservative HDR-to-SDR transcode fallback; Dolby Vision remains separate and is not silently treated as HDR10.
 
