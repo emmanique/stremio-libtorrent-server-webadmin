@@ -240,9 +240,6 @@ case "$GPU_BACKEND" in
             # policy, while WebAdmin runtime self-tests can validate and offer
             # both VAAPI and NVIDIA profiles to the operator.
             GPU_BACKEND_EFFECTIVE=hybrid
-            TRANSCODING_HWACCEL=vaapi
-            TRANSCODING_VIDEO_CODEC=h264_vaapi
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
             echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -259,9 +256,6 @@ case "$GPU_BACKEND" in
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
 
             GPU_BACKEND_EFFECTIVE=vaapi
-            TRANSCODING_HWACCEL=vaapi
-            TRANSCODING_VIDEO_CODEC=h264_vaapi
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
             echo "[start] GPU backend AUTO -> VAAPI"
             echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -269,18 +263,12 @@ case "$GPU_BACKEND" in
         elif [ "$NVIDIA_DETECTED" = "true" ]; then
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
             GPU_BACKEND_EFFECTIVE=nvidia
-            TRANSCODING_HWACCEL=nvenc
-            TRANSCODING_VIDEO_CODEC=h264_nvenc
             unset LIBVA_DRIVER_NAME
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> NVIDIA"
 
         else
             GPU_BACKEND_EFFECTIVE=cpu
-            TRANSCODING_HWACCEL=cpu
-            TRANSCODING_VIDEO_CODEC=libx264
             unset LIBVA_DRIVER_NAME
-            export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
             echo "[start] GPU backend AUTO -> CPU fallback"
         fi
         ;;
@@ -300,9 +288,6 @@ case "$GPU_BACKEND" in
         fi
         COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml"
         GPU_BACKEND_EFFECTIVE=vaapi
-        TRANSCODING_HWACCEL=vaapi
-        TRANSCODING_VIDEO_CODEC=h264_vaapi
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
 
         echo "[start] GPU backend forced: VAAPI"
         echo "[start] VAAPI render node: $VAAPI_DEVICE"
@@ -316,19 +301,13 @@ case "$GPU_BACKEND" in
 
         COMPOSE_ARGS="$COMPOSE_ARGS -f compose.gpu.yaml"
         GPU_BACKEND_EFFECTIVE=nvidia
-        TRANSCODING_HWACCEL=nvenc
-        TRANSCODING_VIDEO_CODEC=h264_nvenc
         unset LIBVA_DRIVER_NAME
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: NVIDIA"
         ;;
 
     cpu|software|none)
         GPU_BACKEND_EFFECTIVE=cpu
-        TRANSCODING_HWACCEL=cpu
-        TRANSCODING_VIDEO_CODEC=libx264
         unset LIBVA_DRIVER_NAME
-        export TRANSCODING_HWACCEL TRANSCODING_VIDEO_CODEC
         echo "[start] GPU backend forced: CPU"
         ;;
 
@@ -338,6 +317,11 @@ case "$GPU_BACKEND" in
         exit 1
         ;;
 esac
+
+TRANSCODING_MODE=auto
+TRANSCODING_HWACCEL=auto
+export TRANSCODING_MODE TRANSCODING_HWACCEL
+unset TRANSCODING_VIDEO_CODEC
 
 export GPU_BACKEND GPU_BACKEND_EFFECTIVE
 
