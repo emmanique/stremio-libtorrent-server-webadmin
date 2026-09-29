@@ -220,7 +220,7 @@ def test_backend_matrix_keeps_detected_nvidia_separate_from_nvenc_capability(mon
     assert matrix["nvidia"]["h264"] is False
     assert matrix["nvidia"]["availableForAuto"] is False
 
-    assert matrix["cpu"]["selectable"] is True
+    assert matrix["cpu"]["availableForAuto"] is True
 
 
 def test_backend_matrix_marks_verified_nvenc_selectable(monkeypatch):
@@ -451,7 +451,7 @@ def test_backend_matrix_exposes_nvenc_api_details(monkeypatch):
 
     assert nvidia["detected"] is True
     assert nvidia["runtime"] is True
-    assert nvidia["selectable"] is False
+    assert nvidia["availableForAuto"] is False
     assert nvidia["nvencApiCompatible"] is False
     assert nvidia["nvencApiRequired"] == "12.0"
     assert nvidia["nvencApiAvailable"] == "11.1"
