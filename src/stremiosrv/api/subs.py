@@ -318,8 +318,8 @@ def _webvtt_stream(proc: subprocess.Popen):
 
 
 _VTT_CUE_RE = re.compile(
-    rb"(?m)^(?P<start>(?:\\d{2}:)?\\d{2}:\\d{2}\\.\\d{3})[ \t]+-->[ \t]+"
-    rb"(?P<end>(?:\\d{2}:)?\\d{2}:\\d{2}\\.\\d{3})"
+    rb"(?m)^(?P<start>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})[ \t]+-->[ \t]+"
+    rb"(?P<end>(?:\d{2}:)?\d{2}:\d{2}\.\d{3})"
 )
 
 
