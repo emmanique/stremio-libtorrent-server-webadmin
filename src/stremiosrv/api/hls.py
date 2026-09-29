@@ -6,7 +6,6 @@ server byte-for-byte — the player follows whatever URIs we publish.
 from __future__ import annotations
 
 import logging
-import math
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -94,20 +93,25 @@ def _master_with_subtitles(master_text: str, probe: dict, media_url: str) -> str
 
 
 def _subtitle_media_playlist(media_url: str, track: int, duration: float) -> str:
+    """Return a VOD WebVTT rendition playlist for an embedded subtitle track.
+
+    The WebVTT endpoint already emits the complete timed-text resource.  Do not model that resource
+    as one media segment whose EXTINF/TARGETDURATION equals the movie duration: some HLS consumers
+    wait for/seek subtitle media as if it were a huge timed segment and never render its cues.
+    WebVTT renditions may instead reference the complete sidecar resource directly from a minimal
+    VOD playlist.  The cue timestamps remain authoritative inside the VTT body.
+    """
     parsed = parse_stream_url(media_url)
     if parsed is None:
         raise HTTPException(status_code=400, detail="subtitle mediaURL is not a server stream URL")
     info_hash, idx = parsed
-    duration = max(float(duration or 0.0), 0.001)
-    target = max(1, math.ceil(duration))
     query = urlencode({"mediaURL": media_url, "track": track})
     vtt_uri = f"/{info_hash}/{idx}/subtitles.vtt?{query}"
     return (
         "#EXTM3U\n"
         "#EXT-X-VERSION:3\n"
-        f"#EXT-X-TARGETDURATION:{target}\n"
+        "#EXT-X-PLAYLIST-TYPE:VOD\n"
         "#EXT-X-MEDIA-SEQUENCE:0\n"
-        f"#EXTINF:{duration:.3f},\n"
         f"{vtt_uri}\n"
         "#EXT-X-ENDLIST\n"
     )
