@@ -5,8 +5,8 @@
 The project tracks two independent version lines:
 
 ```text
-FORK_VERSION                 fork/platform release (2.x)
-webadmin/WEBADMIN_VERSION    WebAdmin release (2.x)
+FORK_VERSION                 fork/platform release (3.x)
+webadmin/WEBADMIN_VERSION    WebAdmin release (3.x)
 SERVER_VERSION               integrated upstream server baseline
 pyproject.toml               upstream stremiosrv package version
 ```
@@ -24,7 +24,7 @@ The fork release tag is `vX.Y.Z`. Container images are tagged with the fork rele
 
 ## Release contract
 
-- `FORK_VERSION` equals `webadmin/WEBADMIN_VERSION` and the requested 2.x release tag.
+- `FORK_VERSION` equals `webadmin/WEBADMIN_VERSION` and the requested 3.x release tag.
 - `SERVER_VERSION` equals the version in `pyproject.toml`.
 - Updating the fork/WebAdmin version does not implicitly rewrite the upstream/core version.
 - `.github/UPSTREAM_BASE` records the exact integrated upstream commit.
