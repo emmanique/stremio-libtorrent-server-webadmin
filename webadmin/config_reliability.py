@@ -28,7 +28,7 @@ legacy.DEFAULTS.setdefault("transcoding_profile", "auto")
 legacy.DEFAULTS.setdefault("transcoding_resolved_profile", "")
 legacy.DESCRIPTIONS.setdefault(
     "transcoding_profile",
-    "Perfil de execução FFmpeg selecionado pelo painel Simple transcoding.",
+    "Modo AUTO; o WebAdmin detecta capacidades e o Stremio decide copy/transcode/codec.",
 )
 legacy.READ_ONLY.add("transcoding_profile")
 
@@ -43,4 +43,6 @@ legacy.READ_ONLY.update({
     "transcoding_vaapi_device",
     "transcoding_video_codec",
     "transcoding_hw_decode",
+    "transcoding_audio_codec",
+    "transcoding_fallback_codec",
 })
