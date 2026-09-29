@@ -390,12 +390,12 @@ def subtitles_vtt(
         "-protocol_whitelist",
         "file,crypto,data,http,tcp,tls,https",
     ]
-    if start is not None:
-        # HLS WebVTT segments must retain the source media timeline.  Without -copyts every
-        # independently extracted window restarts its cues near 00:00, so later subtitle
-        # segments drift out of sync and eventually disappear from playback.
-        argv += ["-copyts", "-ss", f"{max(0.0, start):.3f}"]
+    # Subtitle streams are sparse. Input-side seeking can skip the packets needed by a
+    # requested window; real torrent playback then returns only the WEBVTT header. Decode
+    # from the input timeline first and apply the finite subtitle window on the output side.
     argv += ["-i", media]
+    if start is not None:
+        argv += ["-ss", f"{max(0.0, start):.3f}"]
     if duration is not None:
         argv += ["-t", f"{max(0.001, duration):.3f}"]
     argv += [
