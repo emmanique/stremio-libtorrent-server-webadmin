@@ -24,7 +24,8 @@ app = base.app
 # Register it with the generic configuration model so an already persisted
 # profile is not treated as an unknown setting. Keep it read-only here because
 # profile changes must pass the runtime capability validation.
-legacy.DEFAULTS.setdefault("transcoding_profile", "")
+legacy.DEFAULTS.setdefault("transcoding_profile", "auto")
+legacy.DEFAULTS.setdefault("transcoding_resolved_profile", "")
 legacy.DESCRIPTIONS.setdefault(
     "transcoding_profile",
     "Perfil de execução FFmpeg selecionado pelo painel Simple transcoding.",
@@ -36,6 +37,7 @@ legacy.READ_ONLY.add("transcoding_profile")
 # profile-derived execution settings.
 legacy.READ_ONLY.update({
     "transcoding_profile",
+    "transcoding_resolved_profile",
     "transcoding_mode",
     "transcoding_hwaccel",
     "transcoding_vaapi_device",

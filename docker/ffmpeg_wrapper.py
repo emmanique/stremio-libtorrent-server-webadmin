@@ -42,7 +42,22 @@ def _read_config() -> dict[str, object]:
 
 
 def _profile(config: dict[str, object]) -> str | None:
-    value = str(config.get("transcoding_profile") or "").strip().lower()
+    value = str(
+        config.get("transcoding_profile") or ""
+    ).strip().lower()
+
+    if value == "auto":
+        resolved = str(
+            config.get("transcoding_resolved_profile") or ""
+        ).strip().lower()
+
+        if resolved in PROFILES:
+            return resolved
+
+        # AUTO without a verified persisted resolution must not
+        # guess an execution profile.
+        return None
+
     return value if value in PROFILES else None
 
 
@@ -443,24 +458,54 @@ def _legacy_passthrough(args: list[str], config: dict[str, object]) -> tuple[lis
     return args, "no explicit profile; core decision unchanged"
 
 
+
+def _runtime_env(args: list[str]) -> dict[str, str]:
+    """Prepare only the environment required by an existing FFmpeg command.
+
+    The wrapper does not choose codecs or force transcoding. If the command
+    already uses VAAPI, ensure that libva has a driver. An explicit operator
+    value always takes precedence.
+    """
+    env = os.environ.copy()
+
+    uses_vaapi = (
+        "-vaapi_device" in args
+        or "h264_vaapi" in args
+        or "hevc_vaapi" in args
+    )
+
+    if uses_vaapi and not str(
+        env.get("LIBVA_DRIVER_NAME") or ""
+    ).strip():
+        env["LIBVA_DRIVER_NAME"] = "iHD"
+
+    return env
+
 def main() -> int:
     args = sys.argv[1:]
+
     if not os.path.exists(REAL_FFMPEG):
-        print(f"[ffmpeg-policy] real ffmpeg not found: {REAL_FFMPEG}", file=sys.stderr)
+        print(
+            f"[ffmpeg-policy] real ffmpeg not found: {REAL_FFMPEG}",
+            file=sys.stderr,
+        )
         return 127
 
-    if "-i" not in args:
-        os.execv(REAL_FFMPEG, [REAL_FFMPEG, *args])
+    # AUTO-only architecture:
+    # do not rewrite Stremio's codec/copy/transcode decision here.
+    # The wrapper only supplies runtime environment required by the
+    # command Stremio/Converter has already constructed.
+    print(
+        "[ffmpeg-policy] mode=auto; core decision unchanged",
+        file=sys.stderr,
+    )
 
-    config = _read_config()
-    selected = _profile(config)
-    if selected is None:
-        transformed, decision = _legacy_passthrough(args, config)
-    else:
-        transformed, decision = _apply_profile(args, selected, config)
+    os.execve(
+        REAL_FFMPEG,
+        [REAL_FFMPEG, *args],
+        _runtime_env(args),
+    )
 
-    print(f"[ffmpeg-policy] {decision}", file=sys.stderr)
-    os.execv(REAL_FFMPEG, [REAL_FFMPEG, *transformed])
     return 0
 
 

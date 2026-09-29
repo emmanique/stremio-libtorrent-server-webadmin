@@ -50,10 +50,43 @@ def _job(conv: Converter, job_id: str, files: int = 3):
     return d
 
 
+def _tracked_workload(
+    conv: Converter,
+    job_id: str,
+    *,
+    alive: bool = True,
+    touched: bool = True,
+):
+    """Register a workload using the shared-workload ownership model."""
+    import hashlib
+
+    key = hashlib.sha256(
+        ("gc-test:" + job_id).encode("utf-8")
+    ).hexdigest()
+
+    d = conv._workload_dir(key)
+    d.mkdir(parents=True, exist_ok=True)
+
+    for i in range(3):
+        (d / f"seg{i}.m4s").write_bytes(b"x" * 1024)
+
+    (d / "index.m3u8").write_text("#EXTM3U\\n")
+
+    proc = FakeProc(alive=alive)
+
+    conv._jobs[key] = proc
+    conv._job_workload[job_id] = key
+    conv._workload_jobs[key] = {job_id}
+
+    if touched:
+        conv._seen[key] = time.monotonic()
+
+    return key, d, proc
+
+
 def test_stop_removes_the_job_directory(tmp_path):
     conv = Converter(str(tmp_path), None)
-    d = _job(conv, "job1")
-    conv._jobs["job1"] = FakeProc()
+    _, d, _ = _tracked_workload(conv, "job1")
     conv.stop("job1")
     assert not d.exists(), "stop() terminated ffmpeg but left its segments on disk"
 
@@ -70,18 +103,18 @@ def test_stop_removes_the_directory_even_with_no_tracked_process(tmp_path):
 def test_stop_waits_for_the_child_before_deleting(tmp_path):
     """ffmpeg creates a new file per segment; deleting under a live process races it."""
     conv = Converter(str(tmp_path), None)
-    _job(conv, "job1")
-    p = FakeProc()
-    conv._jobs["job1"] = p
+    _, d, p = _tracked_workload(conv, "job1")
     conv.stop("job1")
     assert p.terminated and not p.alive
+    assert not d.exists()
 
 
 def test_stop_all_removes_every_job_directory(tmp_path):
     conv = Converter(str(tmp_path), None)
-    dirs = [_job(conv, f"job{i}") for i in range(3)]
-    for i in range(3):
-        conv._jobs[f"job{i}"] = FakeProc()
+    dirs = [
+        _tracked_workload(conv, f"job{i}")[1]
+        for i in range(3)
+    ]
     conv.stop_all()
     assert not any(d.exists() for d in dirs)
 
@@ -193,11 +226,8 @@ def test_sweep_is_not_fooled_by_an_mtime_from_the_future(tmp_path):
 
 def test_a_transcode_nobody_is_reading_is_terminated(tmp_path):
     conv = Converter(str(tmp_path), None)
-    d = _job(conv, "abandoned")
-    p = FakeProc()
-    conv._jobs["abandoned"] = p
-    conv.touch("abandoned")
-    conv._seen["abandoned"] -= 600  # nothing has asked for a segment in ten minutes
+    key, d, p = _tracked_workload(conv, "abandoned")
+    conv._seen[key] -= 600
 
     assert conv.reap_idle(300) == ["abandoned"]
     assert p.terminated
@@ -206,10 +236,7 @@ def test_a_transcode_nobody_is_reading_is_terminated(tmp_path):
 
 def test_a_transcode_someone_is_still_reading_is_left_alone(tmp_path):
     conv = Converter(str(tmp_path), None)
-    d = _job(conv, "watched")
-    p = FakeProc()
-    conv._jobs["watched"] = p
-    conv.touch("watched")
+    _, d, p = _tracked_workload(conv, "watched")
 
     assert conv.reap_idle(300) == []
     assert not p.terminated
@@ -217,50 +244,46 @@ def test_a_transcode_someone_is_still_reading_is_left_alone(tmp_path):
 
 
 def test_a_segment_request_keeps_a_transcode_alive(tmp_path):
-    """The whole mechanism: a player fetching segments is the only evidence anyone is watching."""
+    """A segment request refreshes activity for the shared workload."""
     conv = Converter(str(tmp_path), None)
-    _job(conv, "job")
-    conv._jobs["job"] = FakeProc()
-    conv.touch("job")
-    conv._seen["job"] -= 600
+    key, _, _ = _tracked_workload(conv, "job")
+    conv._seen[key] -= 600
 
-    conv.touch("job")  # what the route does on every playlist and segment request
+    conv.touch("job")
     assert conv.reap_idle(300) == []
 
 
 def test_reaping_ignores_a_job_whose_process_already_exited(tmp_path):
-    """It exited on its own -- there is nothing to terminate, and the directory sweep owns the
-    cleanup from here."""
+    """An exited encoder is not terminated again by the idle reaper."""
     conv = Converter(str(tmp_path), None)
-    _job(conv, "finished")
-    p = FakeProc(alive=False)
-    conv._jobs["finished"] = p
-    conv.touch("finished")
-    conv._seen["finished"] -= 600
+    key, _, p = _tracked_workload(
+        conv,
+        "finished",
+        alive=False,
+    )
+    conv._seen[key] -= 600
 
     assert conv.reap_idle(300) == []
     assert not p.terminated
 
 
 def test_an_untouched_job_is_reaped_rather_than_living_forever(tmp_path):
-    """A job with no recorded activity at all -- registered before this bookkeeping existed, or by
-    a path that forgot to touch it. Treating "unknown" as "keep" is how the original bug worked."""
+    """A workload with no recorded activity must not become immortal."""
     conv = Converter(str(tmp_path), None)
-    _job(conv, "unknown")
-    p = FakeProc()
-    conv._jobs["unknown"] = p
+    _, _, p = _tracked_workload(
+        conv,
+        "unknown",
+        touched=False,
+    )
 
     assert conv.reap_idle(0) == ["unknown"]
     assert p.terminated
 
 
 def test_starting_a_job_counts_as_activity(tmp_path):
-    """Otherwise a transcode could be reaped in the window between starting and the player's first
-    segment request."""
+    """A newly registered workload counts as recent activity."""
     conv = Converter(str(tmp_path), None)
-    _job(conv, "fresh")
-    conv._jobs["fresh"] = FakeProc()
-    conv.touch("fresh")
+    _tracked_workload(conv, "fresh")
     assert conv.reap_idle(300) == []
 
 

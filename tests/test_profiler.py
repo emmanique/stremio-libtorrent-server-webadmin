@@ -1,205 +1,55 @@
-import json
+import os
 
 import stremiosrv.transcode.profiler as profiler
 
 
-def _config(tmp_path, profile):
-    path = tmp_path / "admin-settings.json"
-    path.write_text(
-        json.dumps(
-            {"transcoding_profile": profile}
+def test_vaapi_explicit_device(monkeypatch):
+    monkeypatch.setenv(
+        "VAAPI_DEVICE",
+        "/dev/dri/renderD129",
+    )
+
+    monkeypatch.setattr(
+        profiler.os.path,
+        "exists",
+        lambda path: (
+            path == "/dev/dri/renderD129"
         ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def test_persisted_full_vaapi_profile_is_authoritative(
-    tmp_path,
-    monkeypatch,
-):
-    path = _config(
-        tmp_path,
-        "vaapi-full-h264",
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(path),
-    )
-
-    monkeypatch.setenv(
-        "TRANSCODING_HWACCEL",
-        "vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_VIDEO_CODEC",
-        "h264_vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_HW_DECODE",
-        "false",
     )
 
     assert (
         profiler.detect_profile()
-        == "vaapi-full-h264"
+        == "vaapi-renderD129"
     )
 
+    assert profiler.detect_backend() == {
+        "mode": "auto",
+        "backend": "vaapi",
+        "device": "/dev/dri/renderD129",
+    }
 
-def test_persisted_full_hevc_profile_is_authoritative(
-    tmp_path,
+
+def test_render_node_discovery_not_fixed_to_128(
     monkeypatch,
 ):
-    path = _config(
-        tmp_path,
-        "vaapi-full-hevc",
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(path),
-    )
-
-    monkeypatch.setenv(
-        "TRANSCODING_HWACCEL",
-        "vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_VIDEO_CODEC",
-        "h264_vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_HW_DECODE",
-        "false",
-    )
-
-    assert (
-        profiler.detect_profile()
-        == "vaapi-full-hevc"
-    )
-
-
-def test_preserve_is_not_a_hardware_backend(
-    tmp_path,
-    monkeypatch,
-):
-    path = _config(
-        tmp_path,
-        "preserve",
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(path),
-    )
-
-    assert profiler.detect_profile() is None
-
-
-def test_environment_is_compatibility_fallback(
-    tmp_path,
-    monkeypatch,
-):
-    missing = (
-        tmp_path
-        / "missing-admin-settings.json"
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(missing),
-    )
-
-    monkeypatch.setenv(
-        "TRANSCODING_HWACCEL",
-        "vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_VIDEO_CODEC",
-        "h264_vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_HW_DECODE",
-        "false",
-    )
-
-    assert (
-        profiler.detect_profile()
-        == "vaapi-h264"
-    )
-
-
-def test_environment_full_vaapi_fallback(
-    tmp_path,
-    monkeypatch,
-):
-    missing = (
-        tmp_path
-        / "missing-admin-settings.json"
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(missing),
-    )
-
-    monkeypatch.setenv(
-        "TRANSCODING_HWACCEL",
-        "vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_VIDEO_CODEC",
-        "h264_vaapi",
-    )
-    monkeypatch.setenv(
-        "TRANSCODING_HW_DECODE",
-        "true",
-    )
-
-    assert (
-        profiler.detect_profile()
-        == "vaapi-full-h264"
-    )
-
-
-def test_render_node_discovery_is_not_fixed_to_128(
-    tmp_path,
-    monkeypatch,
-):
-    missing = (
-        tmp_path
-        / "missing-admin-settings.json"
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(missing),
-    )
-
     monkeypatch.delenv(
-        "TRANSCODING_HWACCEL",
+        "VAAPI_DEVICE",
         raising=False,
     )
 
     monkeypatch.setattr(
-        profiler,
-        "_vaapi_render_nodes",
-        lambda: [
-            "/dev/dri/renderD129"
+        profiler.glob,
+        "glob",
+        lambda pattern: [
+            "/dev/dri/renderD130",
+            "/dev/dri/renderD129",
         ],
     )
 
     monkeypatch.setattr(
-        profiler,
-        "_nvidia_available",
-        lambda: False,
+        profiler.os.path,
+        "exists",
+        lambda path: True,
     )
 
     assert (
@@ -208,30 +58,16 @@ def test_render_node_discovery_is_not_fixed_to_128(
     )
 
 
-def test_nvidia_legacy_fallback(
-    tmp_path,
-    monkeypatch,
-):
-    missing = (
-        tmp_path
-        / "missing-admin-settings.json"
-    )
-
-    monkeypatch.setattr(
-        profiler,
-        "CONFIG_FILE",
-        str(missing),
-    )
-
+def test_nvidia_when_no_vaapi(monkeypatch):
     monkeypatch.delenv(
-        "TRANSCODING_HWACCEL",
+        "VAAPI_DEVICE",
         raising=False,
     )
 
     monkeypatch.setattr(
-        profiler,
-        "_vaapi_render_nodes",
-        lambda: [],
+        profiler.glob,
+        "glob",
+        lambda pattern: [],
     )
 
     monkeypatch.setattr(
@@ -245,44 +81,90 @@ def test_nvidia_legacy_fallback(
         == "nvenc-linux"
     )
 
+    assert profiler.detect_backend() == {
+        "mode": "auto",
+        "backend": "nvenc",
+        "device": None,
+    }
 
-def test_full_profile_semantics_are_unambiguous(
-    tmp_path,
-    monkeypatch,
-):
-    path = _config(
-        tmp_path,
-        "vaapi-full-h264",
+
+def test_no_gpu(monkeypatch):
+    monkeypatch.delenv(
+        "VAAPI_DEVICE",
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        profiler.glob,
+        "glob",
+        lambda pattern: [],
     )
 
     monkeypatch.setattr(
         profiler,
-        "CONFIG_FILE",
-        str(path),
+        "_nvidia_available",
+        lambda: False,
     )
 
-    assert (
-        profiler.detect_profile()
-        == "vaapi-full-h264"
-    )
+    assert profiler.detect_profile() is None
+
+    assert profiler.detect_backend() == {
+        "mode": "auto",
+        "backend": "none",
+        "device": None,
+    }
 
 
-def test_non_full_profile_semantics_are_unambiguous(
-    tmp_path,
+def test_persisted_profile_does_not_control_discovery(
     monkeypatch,
 ):
-    path = _config(
-        tmp_path,
-        "vaapi-h264",
+    """AUTO hardware discovery has no persisted-profile dependency."""
+    monkeypatch.delenv(
+        "VAAPI_DEVICE",
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        profiler.glob,
+        "glob",
+        lambda pattern: [],
     )
 
     monkeypatch.setattr(
         profiler,
+        "_nvidia_available",
+        lambda: False,
+    )
+
+    assert not hasattr(
+        profiler,
         "CONFIG_FILE",
-        str(path),
+    )
+
+    assert profiler.detect_profile() is None
+
+
+def test_vaapi_has_priority_when_exposed(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "VAAPI_DEVICE",
+        "/dev/dri/renderD129",
+    )
+
+    monkeypatch.setattr(
+        profiler.os.path,
+        "exists",
+        lambda path: True,
+    )
+
+    monkeypatch.setattr(
+        profiler,
+        "_nvidia_available",
+        lambda: True,
     )
 
     assert (
         profiler.detect_profile()
-        == "vaapi-h264"
+        == "vaapi-renderD129"
     )

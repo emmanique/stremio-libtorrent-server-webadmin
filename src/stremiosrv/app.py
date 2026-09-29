@@ -207,10 +207,11 @@ def build_app() -> FastAPI:
     from stremiosrv.torrent.tracker_source import TrackerSource
     from stremiosrv.torrent.trackers import parse_tracker_string
     from stremiosrv.transcode.converter import Converter, run_transcode_gc
-    from stremiosrv.transcode.profiler import detect_profile
 
     settings = Settings()
-    settings.transcode_profile = settings.transcode_profile or detect_profile()
+    # AUTO-only architecture: hardware discovery is a capability.
+    # It must not become a codec/transcoding execution profile.
+    settings.transcode_profile = "auto"
     # Optional live tracker list: fetched in a daemon thread (best-effort, never blocks startup or
     # the request path). start() is a no-op when no URL is configured -> fully static/offline-safe.
     tracker_source = TrackerSource(

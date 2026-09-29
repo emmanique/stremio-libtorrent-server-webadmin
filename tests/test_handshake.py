@@ -35,47 +35,173 @@ def test_global_stats_shape():
     assert set(b["playback"]) >= {"stalls", "stallSeconds", "timeouts"}
 
 
-def test_transcode_stats_no_gpu():
-    c = TestClient(create_app())  # no converter, no profile -> CPU/direct-play only
-    assert c.get("/transcode.json").json() == {"hwAccel": False, "profile": None, "activeTranscodes": 0}
-
-
-def test_transcode_stats_with_profile_and_jobs():
+def test_transcode_stats_no_gpu(monkeypatch):
+    """AUTO reports no accelerator when hardware discovery finds none."""
     from stremiosrv.config import Settings
+    import stremiosrv.transcode.profiler as profiler
+
+    monkeypatch.setattr(
+        profiler,
+        "detect_backend",
+        lambda: {
+            "mode": "auto",
+            "backend": "none",
+            "device": None,
+        },
+    )
+
+    class FakeConv:
+        def active_count(self):
+            return 0
+
+    c = TestClient(
+        create_app(
+            settings=Settings(),
+            converter=FakeConv(),
+        )
+    )
+
+    payload = c.get("/transcode.json").json()
+
+    assert payload == {
+        "hwAccel": False,
+        "profile": "auto",
+        "backend": "none",
+        "device": None,
+        "videoCodec": None,
+        "hwDecode": False,
+        "activeTranscodes": 0,
+    }
+
+
+def test_transcode_stats_with_nvidia_and_jobs(monkeypatch):
+    """AUTO exposes NVIDIA capability without selecting a codec."""
+    from stremiosrv.config import Settings
+    import stremiosrv.transcode.profiler as profiler
+
+    monkeypatch.setattr(
+        profiler,
+        "detect_backend",
+        lambda: {
+            "mode": "auto",
+            "backend": "nvenc",
+            "device": None,
+        },
+    )
 
     class FakeConv:
         def active_count(self):
             return 2
 
-    s = Settings()
-    s.transcode_profile = "nvenc-linux"
-    b = TestClient(create_app(settings=s, converter=FakeConv())).get("/transcode.json").json()
-    assert b == {"hwAccel": True, "profile": "nvenc-linux", "activeTranscodes": 2}
+    settings = Settings()
+
+    # Legacy value must not become the execution policy.
+    settings.transcode_profile = "nvenc-linux"
+
+    c = TestClient(
+        create_app(
+            settings=settings,
+            converter=FakeConv(),
+        )
+    )
+
+    payload = c.get("/transcode.json").json()
+
+    assert payload == {
+        "hwAccel": True,
+        "profile": "auto",
+        "backend": "nvenc",
+        "device": None,
+        "videoCodec": None,
+        "hwDecode": False,
+        "activeTranscodes": 2,
+    }
 
 
-def test_transcode_json_prefers_effective_vaapi_runtime(monkeypatch):
-    monkeypatch.setenv("TRANSCODING_HWACCEL", "vaapi")
-    monkeypatch.setenv("TRANSCODING_VIDEO_CODEC", "h264_vaapi")
+def test_transcode_stats_with_vaapi(monkeypatch):
+    """AUTO exposes the detected VAAPI render node."""
+    from stremiosrv.config import Settings
+    import stremiosrv.transcode.profiler as profiler
 
-    c = client()
-    c.app.state.settings.transcode_profile = "nvenc-linux"
+    monkeypatch.setattr(
+        profiler,
+        "detect_backend",
+        lambda: {
+            "mode": "auto",
+            "backend": "vaapi",
+            "device": "/dev/dri/renderD129",
+        },
+    )
 
-    result = c.get("/transcode.json").json()
+    settings = Settings()
 
-    assert result["hwAccel"] is True
-    assert result["profile"] == "vaapi"
+    # Deliberately conflicting legacy profile.
+    settings.transcode_profile = "nvenc-linux"
+
+    c = TestClient(
+        create_app(settings=settings)
+    )
+
+    payload = c.get("/transcode.json").json()
+
+    assert payload["profile"] == "auto"
+    assert payload["hwAccel"] is True
+    assert payload["backend"] == "vaapi"
+    assert payload["device"] == "/dev/dri/renderD129"
+    assert payload["videoCodec"] is None
+    assert payload["hwDecode"] is False
 
 
-def test_transcode_json_preserves_legacy_profile_without_runtime_override(
-    monkeypatch,
-):
-    monkeypatch.delenv("TRANSCODING_HWACCEL", raising=False)
-    monkeypatch.delenv("TRANSCODING_VIDEO_CODEC", raising=False)
+def test_transcode_legacy_profile_does_not_override_auto(monkeypatch):
+    """A persisted legacy profile cannot override AUTO discovery."""
+    from stremiosrv.config import Settings
+    import stremiosrv.transcode.profiler as profiler
 
-    c = client()
-    c.app.state.settings.transcode_profile = "nvenc-linux"
+    monkeypatch.setattr(
+        profiler,
+        "detect_backend",
+        lambda: {
+            "mode": "auto",
+            "backend": "none",
+            "device": None,
+        },
+    )
 
-    result = c.get("/transcode.json").json()
+    settings = Settings()
+    settings.transcode_profile = "vaapi-full-h264"
 
-    assert result["hwAccel"] is True
-    assert result["profile"] == "nvenc-linux"
+    c = TestClient(
+        create_app(settings=settings)
+    )
+
+    payload = c.get("/transcode.json").json()
+
+    assert payload["profile"] == "auto"
+    assert payload["backend"] == "none"
+    assert payload["hwAccel"] is False
+
+
+def test_transcode_auto_never_reports_forced_codec(monkeypatch):
+    """AUTO hardware capability must not become a codec policy."""
+    from stremiosrv.config import Settings
+    import stremiosrv.transcode.profiler as profiler
+
+    monkeypatch.setattr(
+        profiler,
+        "detect_backend",
+        lambda: {
+            "mode": "auto",
+            "backend": "vaapi",
+            "device": "/dev/dri/renderD129",
+        },
+    )
+
+    c = TestClient(
+        create_app(settings=Settings())
+    )
+
+    payload = c.get("/transcode.json").json()
+
+    assert payload["profile"] == "auto"
+    assert payload["backend"] == "vaapi"
+    assert payload["videoCodec"] is None

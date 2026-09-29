@@ -14,20 +14,66 @@ def test_nvenc_hls():
     assert "hls" in cmd and "/tmp/j/index.m3u8" in cmd
 
 
-def test_vaapi_hls():
-    cmd = build_hls_cmd("http://x/0", DEC_TRANSCODE, "vaapi-renderD128", "/tmp/j")
+def test_vaapi_encode_only_hls():
+    """Encode-only VAAPI uses software decode and uploads NV12 frames."""
+    cmd = build_hls_cmd(
+        "http://x/0",
+        DEC_TRANSCODE,
+        "vaapi-h264",
+        "/tmp/j",
+    )
+
     assert "h264_vaapi" in cmd
-    assert "vaapi" in cmd
-    # h264_vaapi is 8-bit only and the decoder hands it whatever the source was, so the filter has
-    # to convert: a 10-bit source otherwise fails at init, with no fallback.
-    assert "scale_vaapi=w=1920:h=-2:format=nv12" in cmd
+    assert "-hwaccel" not in cmd
+    assert "-hwaccel_output_format" not in cmd
+
+    vf = cmd[cmd.index("-vf") + 1]
+
+    assert "scale=1920:-2:flags=lanczos" in vf
+    assert "format=nv12" in vf
+    assert "hwupload" in vf
 
 
-def test_vaapi_hls_converts_the_pixel_format_with_nothing_to_scale():
-    """The other branch. It emitted no -vf at all, so there was nowhere for the conversion to go."""
-    cmd = build_hls_cmd("http://x/0", {"video": {"action": "transcode"}}, "vaapi-x", "/tmp/j")
-    assert "-vf" in cmd
-    assert "scale_vaapi=format=nv12" in cmd
+def test_vaapi_encode_only_without_scale_uploads_nv12():
+    """Software-decoded frames must be uploaded before VAAPI encode."""
+    cmd = build_hls_cmd(
+        "http://x/0",
+        {"video": {"action": "transcode"}},
+        "vaapi-h264",
+        "/tmp/j",
+    )
+
+    assert "-hwaccel" not in cmd
+    assert "-hwaccel_output_format" not in cmd
+
+    vf = cmd[cmd.index("-vf") + 1]
+
+    assert vf == "format=nv12,hwupload"
+    assert cmd[cmd.index("-c:v") + 1] == "h264_vaapi"
+
+
+def test_vaapi_full_h264_uses_hardware_decode():
+    """Full VAAPI keeps decode, filtering and encode on VAAPI."""
+    cmd = build_hls_cmd(
+        "http://x/0",
+        DEC_TRANSCODE,
+        "vaapi-full-h264",
+        "/tmp/j",
+    )
+
+    assert "-hwaccel" in cmd
+    assert cmd[cmd.index("-hwaccel") + 1] == "vaapi"
+
+    assert "-hwaccel_output_format" in cmd
+    assert (
+        cmd[cmd.index("-hwaccel_output_format") + 1]
+        == "vaapi"
+    )
+
+    vf = cmd[cmd.index("-vf") + 1]
+
+    assert vf == "scale_vaapi=w=1920:h=-2:format=nv12"
+    assert cmd[cmd.index("-c:v") + 1] == "h264_vaapi"
 
 
 def test_cpu_hls():
@@ -169,3 +215,143 @@ def test_multitrack_hls_uses_192k_audio():
     assert "-b:a" in cmd
     assert cmd[cmd.index("-b:a") + 1] == "192k"
     assert "384k" not in cmd
+
+
+def test_full_vaapi_preserves_hevc_copy_decision(monkeypatch):
+    """GPU availability must not override Stremio Direct Stream."""
+    monkeypatch.setenv(
+        "TRANSCODING_DIRECT_VIDEO_CODECS",
+        "h264",
+    )
+
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "copy"},
+        "_streams": [
+            {
+                "track": "video",
+                "index": 0,
+                "codec": "hevc",
+            },
+            {
+                "track": "audio",
+                "index": 1,
+                "codec": "aac",
+            },
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        "vaapi-full-h264",
+        "/tmp/j",
+    )
+
+    i = cmd.index("-c:v")
+
+    assert cmd[i + 1] == "copy"
+    assert "-hwaccel" not in cmd
+
+
+
+def test_full_vaapi_preserves_h264_copy_when_h264_direct(monkeypatch):
+    monkeypatch.setenv("TRANSCODING_DIRECT_VIDEO_CODECS", "h264")
+
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "copy"},
+        "_streams": [
+            {"track": "video", "index": 0, "codec": "h264"},
+            {"track": "audio", "index": 1, "codec": "aac"},
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        "vaapi-full-h264",
+        "/tmp/j",
+    )
+
+    i = cmd.index("-c:v")
+    assert cmd[i + 1] == "copy"
+    assert "h264_vaapi" not in cmd
+
+
+def test_full_vaapi_preserves_hevc_when_explicitly_direct(monkeypatch):
+    monkeypatch.setenv(
+        "TRANSCODING_DIRECT_VIDEO_CODECS",
+        "h264,hevc",
+    )
+
+    decision = {
+        "video": {"action": "copy"},
+        "audio": {"action": "copy"},
+        "_streams": [
+            {"track": "video", "index": 0, "codec": "hevc"},
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        "vaapi-full-h264",
+        "/tmp/j",
+    )
+
+    i = cmd.index("-c:v")
+    assert cmd[i + 1] == "copy"
+
+
+def test_encode_only_vaapi_preserves_hevc_copy(monkeypatch):
+    """AUTO backend must not convert copy into transcoding."""
+    monkeypatch.setenv(
+        "TRANSCODING_DIRECT_VIDEO_CODECS",
+        "h264",
+    )
+
+    decision = {
+        "video": {"action": "copy"},
+        "_streams": [
+            {
+                "track": "video",
+                "index": 0,
+                "codec": "hevc",
+            },
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        "vaapi-h264",
+        "/tmp/j",
+    )
+
+    i = cmd.index("-c:v")
+
+    assert cmd[i + 1] == "copy"
+
+
+
+def test_encode_only_vaapi_preserves_direct_h264(monkeypatch):
+    monkeypatch.setenv("TRANSCODING_DIRECT_VIDEO_CODECS", "h264")
+
+    decision = {
+        "video": {"action": "copy"},
+        "_streams": [
+            {"track": "video", "index": 0, "codec": "h264"},
+        ],
+    }
+
+    cmd = build_hls_cmd(
+        "http://x/0",
+        decision,
+        "vaapi-h264",
+        "/tmp/j",
+    )
+
+    i = cmd.index("-c:v")
+    assert cmd[i + 1] == "copy"
+    assert "-hwaccel" not in cmd
