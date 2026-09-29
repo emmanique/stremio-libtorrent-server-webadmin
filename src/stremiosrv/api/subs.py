@@ -317,6 +317,49 @@ def _webvtt_stream(proc: subprocess.Popen):
                 proc.wait()
 
 
+_VTT_CUE_RE = re.compile(
+    rb"(?m)^(?P<start>(?:\\d{2}:)?\\d{2}:\\d{2}\\.\\d{3})[ \\t]+-->[ \\t]+"
+    rb"(?P<end>(?:\\d{2}:)?\\d{2}:\\d{2}\\.\\d{3})"
+)
+
+
+def _trace_webvtt_timeline(payload: bytes, start: float | None, duration: float | None) -> None:
+    """Log timing metadata only: never subtitle text, media URL, hash or trackers."""
+    cues = list(_VTT_CUE_RE.finditer(payload))
+    first = cues[0].group("start").decode("ascii") if cues else "-"
+    last = cues[-1].group("end").decode("ascii") if cues else "-"
+    logger.warning(
+        "subtitle trace: stage=vtt-result window_start=%s window_duration=%s bytes=%s cues=%s first=%s last=%s",
+        f"{start:.3f}" if start is not None else "-",
+        f"{duration:.3f}" if duration is not None else "-",
+        len(payload),
+        len(cues),
+        first,
+        last,
+    )
+
+
+def _webvtt_window_stream(proc: subprocess.Popen, start: float | None, duration: float | None):
+    """Buffer a finite WebVTT window so its timing can be diagnosed without logging cue text."""
+    try:
+        assert proc.stdout is not None
+        payload = proc.stdout.read()
+        rc = proc.wait()
+        _trace_webvtt_timeline(payload, start, duration)
+        if rc:
+            logger.warning("embedded subtitle ffmpeg exited with code %s", rc)
+        if payload:
+            yield payload
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+
 @router.get("/{info_hash}/{idx:int}/subtitles.vtt")
 def subtitles_vtt(
     info_hash: str,
@@ -375,7 +418,12 @@ def subtitles_vtt(
             detail="subtitle extractor unavailable",
         ) from e
 
+    stream = (
+        _webvtt_window_stream(proc, start, duration)
+        if start is not None or duration is not None
+        else _webvtt_stream(proc)
+    )
     return StreamingResponse(
-        _webvtt_stream(proc),
+        stream,
         media_type="text/vtt; charset=utf-8",
     )
