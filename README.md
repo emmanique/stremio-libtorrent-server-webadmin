@@ -377,3 +377,5 @@ AUTO keeps playback policy separate from execution capability. If Stremio decide
 
 The transcoding capability API uses AUTO semantics: backend/encoder self-tests are diagnostic capability data, not selectable execution profiles. It exposes `detectedBackend` and `availableForAuto` rather than the legacy `recommendedProfile` / `selectable` contract.
 
+
+Windowed HLS WebVTT responses include `X-TIMESTAMP-MAP`, mapping FFmpeg's segment-local cue timestamps onto the corresponding 90 kHz HLS playback timeline.
