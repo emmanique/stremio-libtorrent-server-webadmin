@@ -70,7 +70,7 @@ PROFILE_META = {
         "engine": "nvenc",
         "decode": "software",
         "codec": "H.264",
-        "description": "Software decode, NVIDIA NVENC H.264 encode. Selectable only after the real encoder test passes.",
+        "description": "Software decode, NVIDIA NVENC H.264 encode capability; diagnostic only.",
     },
     "nvenc-hevc": {
         "label": "HEVC NVIDIA NVENC",
@@ -78,7 +78,7 @@ PROFILE_META = {
         "engine": "nvenc",
         "decode": "software",
         "codec": "HEVC",
-        "description": "Software decode, NVIDIA NVENC HEVC encode. Selectable only after the real encoder test passes.",
+        "description": "Software decode, NVIDIA NVENC HEVC encode capability; diagnostic only.",
     },
     "cpu-h264": {
         "label": "H.264 CPU (libx264)",
@@ -577,7 +577,7 @@ def _profiles(force: bool = False) -> dict[str, object]:
         "device": device,
         "ffmpeg": binary,
         "profiles": items,
-        "recommendedProfile": recommended,
+        "detectedBackend": recommended,
         "hardwareDetection": hardware,
         "backends": backends,
         "rule": (
