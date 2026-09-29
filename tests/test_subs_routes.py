@@ -507,3 +507,22 @@ def test_trace_webvtt_timeline_logs_only_timing_metadata(caplog):
     assert "first=00:01:02.300" in msg
     assert "last=00:01:09.250" in msg
     assert "SECRET" not in msg
+
+
+def test_windowed_webvtt_adds_hls_timestamp_map():
+    from stremiosrv.api import subs as subs_api
+
+    payload = b"WEBVTT\n\n00:00:02.000 --> 00:00:04.000\ntext\n"
+    out = subs_api._add_webvtt_timestamp_map(payload, 60.0)
+
+    assert out.startswith(
+        b"WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:5400000\n"
+    )
+    assert b"00:00:02.000 --> 00:00:04.000" in out
+
+
+def test_non_windowed_webvtt_is_not_timestamp_mapped():
+    from stremiosrv.api import subs as subs_api
+
+    payload = b"WEBVTT\n\n00:00:02.000 --> 00:00:04.000\ntext\n"
+    assert subs_api._add_webvtt_timestamp_map(payload, None) == payload
