@@ -376,3 +376,5 @@ AUTO keeps playback policy separate from execution capability. If Stremio decide
 
 
 The transcoding capability API uses AUTO semantics: backend/encoder self-tests are diagnostic capability data, not selectable execution profiles. It exposes `detectedBackend` and `availableForAuto` rather than the legacy `recommendedProfile` / `selectable` contract.
+
+WebVTT extraction windows preserve the source media timestamps, so independently fetched subtitle segments remain on the same playback timeline instead of restarting cues at zero.
