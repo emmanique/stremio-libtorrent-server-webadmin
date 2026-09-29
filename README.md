@@ -427,7 +427,7 @@ Release notes: docs/releases/v3.0.0.md
 
 License: MIT. See LICENSE.
 
-## 2.0.22 AUTO runtime validation
+## 3.0.0 AUTO runtime validation
 
 The launcher owns host discovery. Run `./start.sh --help` to inspect launcher usage without creating/updating `.env`, probing the host GPU, pulling images, or starting containers. With `GPU_BACKEND=auto`, `start.sh` discovers the available DRM render node (for example `/dev/dri/renderD128`) and exports it to the VAAPI Compose overlay for that invocation; users do not need to persist `VAAPI_DEVICE` in `.env`. Calling `docker compose -f compose.yaml -f compose.vaapi.yaml ...` directly bypasses launcher discovery and therefore requires `VAAPI_DEVICE` in that shell.
 
