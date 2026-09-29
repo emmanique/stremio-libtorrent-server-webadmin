@@ -28,6 +28,7 @@ Current versions:
 - Legacy profile/codec fields are retained only for upgrade compatibility and diagnostics; they are no longer authoritative execution controls and are read-only in the configuration UI.
 - Equivalent HLS requests are deduplicated by effective workload so compatible requests share one main video FFmpeg/HLS job. Subtitle extraction remains an independent process and is not treated as a duplicate video transcode.
 - Transcode lifecycle/garbage collection was hardened to avoid workload cleanup races.
+- Media probing now preserves HDR-relevant video metadata (`profile`, pixel format/bit depth, transfer and primaries) in addition to `isHdr`/`isDoVi`. This is diagnostic groundwork for capability-aware HDR decisions; 2.0.22-dev does not yet force HDR to transcode merely because HDR was detected.
 
 ### Deployment, upgrade and CI
 
