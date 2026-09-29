@@ -616,3 +616,64 @@ def test_selected_is_always_auto(monkeypatch):
 
     assert selected == "auto"
     assert quality == 27
+
+
+def test_status_normalises_legacy_policy_to_auto(monkeypatch):
+    monkeypatch.setattr(
+        profiles.base,
+        "transcoding_status",
+        lambda: {
+            "available": True,
+            "policy": {
+                "transcoding_mode": "hevc",
+                "transcoding_hwaccel": "vaapi",
+                "transcoding_video_codec": "hevc_vaapi",
+            },
+            "state": {
+                "requested": {
+                    "mode": "hevc",
+                    "hwaccel": "vaapi",
+                    "videoCodec": "hevc_vaapi",
+                },
+                "effective": {
+                    "mode": "hevc",
+                    "hwaccel": "vaapi",
+                    "videoCodec": "hevc_vaapi",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(profiles, "_selected", lambda: ("auto", 22))
+    monkeypatch.setattr(profiles, "PROFILE_CACHE", {"at": 0.0, "value": None})
+
+    data = profiles.transcoding_status()
+
+    assert data["executionProfile"] == {"id": "auto", "quality": 22}
+    assert data["policy"]["transcoding_mode"] == "auto"
+    assert data["policy"]["transcoding_hwaccel"] == "auto"
+    assert data["policy"]["transcoding_video_codec"] is None
+    assert data["state"]["requested"]["mode"] == "auto"
+    assert data["state"]["requested"]["hwaccel"] == "auto"
+    assert data["state"]["requested"]["videoCodec"] is None
+    assert data["state"]["effective"]["mode"] == "auto"
+    assert data["state"]["effective"]["hwaccel"] == "auto"
+    assert data["state"]["effective"]["videoCodec"] is None
+
+
+def test_dashboard_has_no_legacy_execution_selectors():
+    dashboard = (ROOT / "webadmin" / "static" / "transcoding-dashboard.js").read_text()
+
+    forbidden = (
+        "Force H.264",
+        "Force HEVC",
+        "Force software",
+        "Copy / passthrough",
+        "H.264 VAAPI'],",
+        "HEVC VAAPI'],",
+        "NVIDIA NVENC'],",
+    )
+    for value in forbidden:
+        assert value not in dashboard
+
+    assert "AUTO-only transcoding" in dashboard
+    assert "Stremio remains authoritative" in dashboard
