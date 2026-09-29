@@ -28,7 +28,7 @@ Current versions:
 - Legacy profile/codec fields are retained only for upgrade compatibility and diagnostics; they are no longer authoritative execution controls and are read-only in the configuration UI.
 - Equivalent HLS requests are deduplicated by effective workload so compatible requests share one main video FFmpeg/HLS job. Subtitle extraction remains an independent process and is not treated as a duplicate video transcode.
 - Transcode lifecycle/garbage collection was hardened to avoid workload cleanup races.
-- Media probing now preserves HDR-relevant video metadata (`profile`, pixel format/bit depth, transfer and primaries) in addition to `isHdr`/`isDoVi`. This is diagnostic groundwork for capability-aware HDR decisions; 2.0.22-dev does not yet force HDR to transcode merely because HDR was detected.
+- Media probing preserves HDR-relevant video metadata (`profile`, pixel format/bit depth, transfer and primaries) in addition to `isHdr`/`isDoVi`. Because the current HLS client contract has no HDR display-capability signal, normal HDR10/PQ/HLG sources now use the validated conservative HDR-to-SDR transcode fallback; Dolby Vision remains separate and is not silently treated as HDR10.
 
 ### Deployment, upgrade and CI
 
@@ -213,7 +213,7 @@ curl -fsS http://HOST-IP:8090/api/transcoding/status | python3 -m json.tool
 
 A detected backend such as `vaapi` means acceleration is available; it does **not** mean the current playback must use the GPU. A session whose actual FFmpeg command contains `-c:v copy` is correctly copying video even when VAAPI/NVENC is available.
 
-HDR execution follows the same rule: HDR detection alone does not promote COPY to TRANSCODE because the current HLS client contract does not explicitly declare HDR/DoVi display capability. When the core has already requested a video transcode and the probed source is HDR/PQ/HLG, AUTO VAAPI can keep decode, tone mapping and encode on the GPU, converting the HDR source to SDR BT.709 through `tonemap_vaapi` and `h264_vaapi`. Intel Iris Xe runtime validation with a real 3840x1606 HEVC 10-bit BT.2020/PQ source completed a 20-second conversion at about 1.13x realtime. The slower software `zscale + tonemap` path is not selected as the realtime AUTO path.
+Because the current HLS client contract does not explicitly declare HDR display capability, normal HDR10/PQ/HLG is conservatively marked for video transcode even when HEVC itself is declared supported. HEVC SDR remains COPY when otherwise compatible. In AUTO+VAAPI, HDR video transcode keeps decode, tone mapping and encode on the GPU, converting to SDR BT.709 through `tonemap_vaapi` and `h264_vaapi`. Intel Iris Xe runtime validation with a real 3840x1606 HEVC 10-bit BT.2020/PQ source produced HLS/fMP4 at about 1.56x realtime (20 seconds in 13 seconds), with H.264/yuv420p BT.709 output. Dolby Vision is deliberately excluded from this HDR10 fallback until a DoVi-specific path is validated. The slower software `zscale + tonemap` path is not selected as the realtime AUTO path.
 
 ## VPN
 
