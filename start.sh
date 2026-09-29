@@ -269,10 +269,9 @@ case "$GPU_BACKEND" in
             fi
             COMPOSE_ARGS="$COMPOSE_ARGS -f compose.vaapi.yaml -f compose.gpu.yaml"
 
-            # Dual-GPU host: expose both verified accelerator families to the
-            # server container. Keep VAAPI as the initial/default transcoding
-            # policy, while WebAdmin runtime self-tests can validate and offer
-            # both VAAPI and NVIDIA profiles to the operator.
+            # Dual-GPU host: expose both accelerator families to the server
+            # container. AUTO remains the only execution policy; WebAdmin
+            # self-tests report capability and do not select a media profile.
             GPU_BACKEND_EFFECTIVE=hybrid
 
             echo "[start] GPU backend AUTO -> VAAPI + NVIDIA"
