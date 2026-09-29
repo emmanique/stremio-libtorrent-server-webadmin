@@ -42,7 +42,7 @@ TRANSCODING_DESCRIPTIONS = {
 TRANSCODING_DEFAULTS = {
     "transcoding_mode": "auto",
     "transcoding_hwaccel": "vaapi",
-    "transcoding_vaapi_device": "/dev/dri/renderD128",
+    "transcoding_vaapi_device": os.getenv("VAAPI_DEVICE", ""),
     "transcoding_video_codec": "h264_vaapi",
     "transcoding_video_quality": 22,
     "transcoding_audio_codec": "aac",
