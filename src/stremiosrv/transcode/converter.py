@@ -17,11 +17,12 @@ import time
 from pathlib import Path
 
 from stremiosrv import metrics
+from stremiosrv.transcode.profiler import detect_backend
 
 logger = logging.getLogger("stremiosrv.transcode")
 
 
-def workload_key(media_url: str, decision: dict, profile: str | None) -> str:
+def workload_key(media_url: str, decision: dict, profile: str | None, backend: str | None = None) -> str:
     """Stable identity of the actual HLS encoding workload.
 
     job_id identifies a client/session.  It must not be used to decide whether
@@ -31,6 +32,7 @@ def workload_key(media_url: str, decision: dict, profile: str | None) -> str:
         "media_url": media_url,
         "decision": decision,
         "profile": profile,
+        "backend": backend,
     }
     raw = json.dumps(
         payload,
@@ -94,7 +96,13 @@ def _apply_direct_video_policy(
     return decision
 
 
-def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: str | Path) -> list[str]:
+def build_hls_cmd(
+    media_url: str,
+    decision: dict,
+    profile: str | None,
+    out_dir: str | Path,
+    backend: dict[str, str | None] | None = None,
+) -> list[str]:
     out_dir = str(out_dir)
 
     decision = _apply_direct_video_policy(decision, profile)
@@ -104,19 +112,19 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
     argv = ["ffmpeg", "-hide_banner", "-y",
             "-protocol_whitelist", "file,crypto,data,http,tcp,tls,https"]
 
-    if v.get("action") == "transcode":
-        if profile == "nvenc-linux":
-            argv += ["-hwaccel", "cuda"]
-        elif profile and profile.startswith("vaapi-full-"):
-            argv += [
-                "-hwaccel",
-                "vaapi",
-                "-hwaccel_output_format",
-                "vaapi",
-            ]
+    # AUTO separates playback policy from execution capability. Hardware is
+    # consulted only after the Stremio core explicitly requests transcoding.
+    auto_backend = backend or (detect_backend() if profile == "auto" else None)
+    backend_name = str((auto_backend or {}).get("backend") or "none")
+    backend_device = (auto_backend or {}).get("device")
 
     audio_tracks = _hls_audio_tracks(decision)
     multitrack = len(audio_tracks) > 1
+
+    # VAAPI encode-only needs a device for hwupload but deliberately keeps
+    # decode in software; GPU availability must not become a decode policy.
+    if v.get("action") == "transcode" and profile == "auto" and backend_name == "vaapi" and backend_device:
+        argv += ["-vaapi_device", str(backend_device)]
 
     argv += ["-i", media_url, "-map", "0:v:0"]
     if multitrack:
@@ -125,53 +133,27 @@ def build_hls_cmd(media_url: str, decision: dict, profile: str | None, out_dir: 
     elif a is not None:
         argv += ["-map", "0:a:0?"]
 
-    # Video
+    # Video. COPY is never promoted to transcoding by AUTO.
     if v.get("action") == "copy":
         argv += ["-c:v", "copy"]
     else:
         w = v.get("scale_width")
-        if profile == "nvenc-linux":
+        if profile == "auto" and backend_name == "vaapi" and backend_device:
+            vf = f"scale={w}:-2:flags=lanczos,format=nv12,hwupload" if w else "format=nv12,hwupload"
+            argv += ["-vf", vf, "-c:v", "h264_vaapi"]
+        elif profile == "auto" and backend_name == "nvenc":
+            # NVENC encode only: AUTO does not force CUDA/NVDEC decode.
+            vf = f"scale={w}:-2:flags=lanczos,format=yuv420p" if w else "format=yuv420p"
+            argv += ["-vf", vf, "-c:v", "h264_nvenc", "-preset", "p4"]
+        elif profile == "nvenc-linux":
             argv += ["-vf", f"scale={w}:-2:flags=lanczos,format=yuv420p" if w else "format=yuv420p",
                      "-c:v", "h264_nvenc", "-preset", "p4"]
         elif profile and profile.startswith("vaapi-full-"):
-            # Full VAAPI pipeline:
-            # hardware decode -> VAAPI surfaces -> hardware scale/format
-            # -> VAAPI encode.
-            vf = (
-                f"scale_vaapi=w={w}:h=-2:format=nv12"
-                if w
-                else "scale_vaapi=format=nv12"
-            )
-            argv += [
-                "-vf",
-                vf,
-                "-c:v",
-                "h264_vaapi",
-            ]
-
+            vf = f"scale_vaapi=w={w}:h=-2:format=nv12" if w else "scale_vaapi=format=nv12"
+            argv += ["-vf", vf, "-c:v", "h264_vaapi"]
         elif profile and profile.startswith("vaapi"):
-            # Encode-only VAAPI pipeline:
-            #
-            # Software decode is intentional. This allows sources such as
-            # HEVC Main10 to be decoded even when the VAAPI driver exposes
-            # HEVC Main but not HEVC Main10 VLD.
-            #
-            # Convert software frames to NV12 and upload them to the VAAPI
-            # device before h264_vaapi encoding.
-            if w:
-                vf = (
-                    f"scale={w}:-2:flags=lanczos,"
-                    "format=nv12,hwupload"
-                )
-            else:
-                vf = "format=nv12,hwupload"
-
-            argv += [
-                "-vf",
-                vf,
-                "-c:v",
-                "h264_vaapi",
-            ]
+            vf = f"scale={w}:-2:flags=lanczos,format=nv12,hwupload" if w else "format=nv12,hwupload"
+            argv += ["-vf", vf, "-c:v", "h264_vaapi"]
         else:
             if w:
                 argv += ["-vf", f"scale={w}:-2:flags=lanczos"]
@@ -236,6 +218,7 @@ class Converter:
     def __init__(self, cache_root: str, profile: str | None):
         self.base = Path(cache_root) / "transcode"
         self.profile = profile
+        self.backend = detect_backend() if profile == "auto" else None
 
         # Compatibility note:
         # _jobs now means workload-key -> ffmpeg process.
@@ -335,7 +318,12 @@ class Converter:
         # Validate the untrusted URL component before storing it anywhere.
         self.job_dir(job_id)
 
-        key = workload_key(media_url, decision, self.profile)
+        key = workload_key(
+            media_url,
+            decision,
+            self.profile,
+            str((self.backend or {}).get("backend") or "none"),
+        )
 
         logger.info(
             "transcode request: job=%s workload=%s profile=%s",
@@ -412,6 +400,7 @@ class Converter:
                     decision,
                     self.profile,
                     d,
+                    self.backend,
                 )
 
                 log = open(d / "ffmpeg.log", "wb")  # noqa: SIM115
