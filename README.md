@@ -194,7 +194,7 @@ Recommended baseline:
 ~~~env
 GPU_BACKEND=auto
 VAAPI_DEVICE=
-LIBVA_DRIVER_NAME=
+# LIBVA_DRIVER_NAME=iHD  # optional explicit override
 TRANSCODING_HWACCEL=auto
 TRANSCODING_MODE=auto
 ~~~
