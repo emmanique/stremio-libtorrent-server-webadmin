@@ -117,3 +117,25 @@ def test_start_does_not_recreate_server_when_gateway_namespace_is_current():
     assert '"container:$gluetun_id")' in start
     assert 'echo "[start] gateway namespace: current"' in start
     assert "return 0" in start
+
+
+def test_start_has_single_gpu_detection_implementation():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    assert start.count("definitely-not-a-shell-token") == 0
+    assert start.count("_detect_vaapi_device() {") == 1
+    assert start.count("_detect_vaapi_driver() {") == 1
+    assert start.count("_nvidia_available() {") == 1
+    assert start.count("TRANSCODING_MODE=auto") == 1
+    assert start.count("unset TRANSCODING_VIDEO_CODEC") == 1
+
+
+def test_start_help_is_launcher_native_and_precedes_env_creation():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    help_case = start.index('case "${1-}" in')
+    env_file = start.index('ENV_FILE="$ROOT/.env"')
+    gpu_detection = start.index("_detect_vaapi_device() {")
+    assert help_case < env_file < gpu_detection
+    assert "Usage: sh start.sh [COMMAND] [ARGS...]" in start
+    assert "Stremio remains authoritative for COPY vs TRANSCODE" in start
