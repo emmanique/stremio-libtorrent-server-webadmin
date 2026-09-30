@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 3.0.1
+# Stremio Server WebAdmin 3.0.2
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,10 +9,25 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 3.0.1 |
-| WebAdmin | 3.0.1 |
-| VPN Gateway image | `3.0.1` coordinated release tag |
+| Fork / Platform | 3.0.2 |
+| WebAdmin | 3.0.2 |
+| VPN Gateway image | `3.0.2` coordinated release tag |
 | Upstream Server/Core | 1.6.20 |
+
+## 3.0.2 — HDR/Dolby Vision VAAPI fix
+
+3.0.2 fixes the validated HDR/PQ and Dolby Vision Profile 8
+browser/HLS server-transcoding path.
+
+When AUTO has already selected server video transcoding, detected source
+colour metadata is supplied explicitly to FFmpeg and the validated path
+uses VAAPI decode, `tonemap_vaapi`, optional `scale_vaapi`, and H.264
+VAAPI encode.
+
+Direct/COPY playback remains independent and is not promoted to
+transcoding by the VAAPI execution policy.
+
+See `docs/releases/v3.0.2.md` for validation evidence and scope.
 
 ## 3.0.1 — Intel VAAPI hotfix
 
@@ -161,7 +176,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=3.0.1
+VERSION=3.0.2
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -434,7 +449,7 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v3.0.1.md
+Release notes: docs/releases/v3.0.2.md
 
 License: MIT. See LICENSE.
 

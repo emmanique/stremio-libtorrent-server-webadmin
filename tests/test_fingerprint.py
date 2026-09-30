@@ -51,10 +51,10 @@ def test_hevc_sdr_stays_copy_when_supported():
     assert d["video"]["action"] == "copy"
 
 
-def test_dolby_vision_is_not_silently_treated_as_hdr10():
+def test_dolby_vision_transcodes_when_hls_has_no_dovi_display_capability_signal():
     probe = {"streams": [{
         "track": "video", "codec": "hevc", "width": 3840, "height": 2160,
         "isHdr": True, "isDoVi": True,
     }]}
     d = decide(probe, ["h264", "hevc"], ["aac"], max_audio_channels=2, max_width=3840)
-    assert d["video"]["action"] == "copy"
+    assert d["video"]["action"] == "transcode"

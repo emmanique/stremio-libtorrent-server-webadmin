@@ -93,9 +93,11 @@ def _source_video_codec(decision: dict) -> str | None:
 
 
 def _source_is_hdr(decision: dict) -> bool:
-    """Whether the probed source is HDR/PQ/HLG.
+    """Whether the source carries HDR/PQ/HLG video.
 
-    This is execution metadata only. It never promotes COPY to TRANSCODE.
+    This is source classification only. It never promotes COPY to TRANSCODE.
+    Dolby Vision may also carry a PQ base layer and therefore remains HDR for
+    the purpose of the validated software SDR fallback.
     """
     source = _source_video_stream(decision)
     transfer = str(source.get("colorTransfer") or "").strip().lower()
@@ -156,7 +158,6 @@ def build_hls_cmd(
         and bool(backend_device)
         and source_hdr
     )
-
     # Ordinary AUTO VAAPI remains encode-only. HDR is different: once the
     # core has already requested a video transcode, keeping HDR10/PQ frames
     # on the VAAPI surface allows tonemap_vaapi to produce SDR BT.709 in real
@@ -164,11 +165,27 @@ def build_hls_cmd(
     if v.get("action") == "transcode" and profile == "auto" and backend_name == "vaapi" and backend_device:
         argv += ["-vaapi_device", str(backend_device)]
         if auto_vaapi_hdr:
+            source = _source_video_stream(decision)
+            color_primaries = str(source.get("colorPrimaries") or "").strip()
+            color_transfer = str(source.get("colorTransfer") or "").strip()
+            color_space = str(source.get("colorSpace") or "").strip()
+
             argv += [
                 "-hwaccel", "vaapi",
                 "-hwaccel_device", str(backend_device),
                 "-hwaccel_output_format", "vaapi",
             ]
+
+            # Some HDR/Dolby Vision streams expose BT.2020/PQ signalling but
+            # no mastering-display side data.  Jellyfin FFmpeg 4.4.1
+            # tonemap_vaapi can still process those streams in real time when
+            # the known source colour properties are supplied explicitly.
+            if color_primaries:
+                argv += ["-color_primaries", color_primaries]
+            if color_transfer:
+                argv += ["-color_trc", color_transfer]
+            if color_space:
+                argv += ["-colorspace", color_space]
 
     argv += ["-i", media_url, "-map", "0:v:0"]
     if multitrack:
@@ -185,11 +202,13 @@ def build_hls_cmd(
         if profile == "auto" and backend_name == "vaapi" and backend_device:
             if auto_vaapi_hdr:
                 source_width = int(_source_video_stream(decision).get("width") or 0)
+
                 filters = [
                     "tonemap_vaapi=format=nv12:matrix=bt709:primaries=bt709:transfer=bt709"
                 ]
                 if w and (not source_width or int(w) < source_width):
                     filters.append(f"scale_vaapi=w={w}:h=-2:format=nv12")
+
                 vf = ",".join(filters)
             else:
                 vf = f"scale={w}:-2:flags=lanczos,format=nv12,hwupload" if w else "format=nv12,hwupload"
