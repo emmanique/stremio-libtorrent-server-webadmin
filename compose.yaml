@@ -60,7 +60,6 @@ services:
     restart: unless-stopped
     network_mode: "service:gluetun"
     environment:
-      STREMIOSRV_DNS_SERVER: "${STREMIOSRV_DNS_SERVER:-172.30.0.53}"
       STREMIOSRV_BT_LISTEN_PORT: "${STREMIOSRV_BT_LISTEN_PORT:-6881}"
       STREMIOSRV_CACHE_ROOT: /root/.stremio-server
       STREMIOSRV_CACHE_OWNER_ID: stremio-libtorrent-server
@@ -91,6 +90,10 @@ services:
     volumes:
       - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
       - stremio-config:/config:ro
+      # Keep Stremio DNS independent from Gluetun's /etc/resolv.conf.
+      # The containers share a network namespace, not a mount namespace.
+      # Pi-hole then forwards upstream through Gluetun :1053.
+      - ./docker/stremio-resolv.conf:/etc/resolv.conf:ro
     depends_on:
       gluetun:
         condition: service_healthy
