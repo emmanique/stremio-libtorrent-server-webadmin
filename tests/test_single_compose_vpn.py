@@ -149,3 +149,39 @@ def test_start_canonicalizes_intel_media_driver_case():
     assert 'case "$(printf \'%s\' "$LIBVA_DRIVER_NAME" | tr \'[:upper:]\' \'[:lower:]\')" in' in start
     assert "LIBVA_DRIVER_NAME=iHD" in start
     assert 'printf \'%s\\n\' "iHD"' in start
+
+
+def test_stremio_uses_private_pihole_resolver():
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    resolver_path = ROOT / "docker" / "stremio-resolv.conf"
+
+    assert resolver_path.is_file()
+    resolver = resolver_path.read_text(encoding="utf-8")
+    assert "nameserver 172.30.0.53" in resolver
+    assert "options ndots:0" in resolver
+
+    server = compose.split(
+        "  stremio-libtorrent-server:", 1
+    )[1].split(
+        "  webadmin:", 1
+    )[0]
+
+    assert "./docker/stremio-resolv.conf:/etc/resolv.conf:ro" in server
+    assert "STREMIOSRV_DNS_SERVER" not in compose
+
+
+def test_dns_topology_keeps_pihole_upstream_on_private_proxy():
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+    assert 'STREMIO_PIHOLE_DNS: "${STREMIO_PIHOLE_DNS:-172.30.0.53}"' in compose
+    assert 'STREMIO_DNS_PROXY_PORT: "${STREMIO_DNS_PROXY_PORT:-1053}"' in compose
+    assert 'FTLCONF_dns_upstreams: "172.30.0.10#1053"' in compose
+
+
+def test_deployment_package_includes_private_dns_resolver():
+    builder = (
+        ROOT / "tools" / "release" /
+        "build_deployment_package.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"docker/stremio-resolv.conf"' in builder
