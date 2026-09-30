@@ -20,6 +20,7 @@ FILES = [
     "start.bat",
     "scripts/backup-before-upgrade.sh",
     "scripts/check-env-upgrade.sh",
+    "docker/stremio-resolv.conf",
     "README.md",
     "QUICKSTART.md",
     "VPN.md",
