@@ -50,6 +50,15 @@ def _is_dovi(stream: dict) -> bool:
     return False
 
 
+def _has_mastering_display(stream: dict) -> bool:
+    """Whether ffprobe exposed HDR mastering-display metadata."""
+    for sd in stream.get("side_data_list", []) or []:
+        kind = str(sd.get("side_data_type", "")).strip().lower()
+        if "mastering display" in kind:
+            return True
+    return False
+
+
 def _bit_depth(stream: dict) -> int | None:
     bits = stream.get("bits_per_raw_sample")
     try:
@@ -80,11 +89,13 @@ def map_probe(ffprobe_json: dict) -> dict:
                 frameRate=_fps(s.get("r_frame_rate")),
                 isHdr=_is_hdr(s),
                 isDoVi=_is_dovi(s),
+                hasMasteringDisplay=_has_mastering_display(s),
                 profile=s.get("profile"),
                 pixFmt=s.get("pix_fmt"),
                 bitDepth=_bit_depth(s),
                 colorTransfer=s.get("color_transfer"),
                 colorPrimaries=s.get("color_primaries"),
+                colorSpace=s.get("color_space"),
                 hasBFrames=bool(s.get("has_b_frames")),
             )
         elif ct == "audio":

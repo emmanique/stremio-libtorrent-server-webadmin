@@ -18,11 +18,12 @@ def decide(
         over_width = v.get("width", 0) > max_width
         unsupported = v.get("codec") not in video_codecs
         # The HLS client contract currently declares codec/width but no HDR
-        # display capability.  A validated HDR10/PQ/HLG -> SDR BT.709 path is
-        # available for normal HDR, so use that conservative compatibility
-        # fallback.  Dolby Vision remains separate: do not silently treat DoVi
-        # as HDR10 until a DoVi-specific fallback has been validated.
-        hdr_fallback = bool(v.get("isHdr")) and not bool(v.get("isDoVi"))
+        # display capability. Codec support alone does not prove that the HLS
+        # playback surface can present HDR10/HLG or Dolby Vision correctly.
+        #
+        # Keep this decision local to HLS. Native/direct playback uses the
+        # byte-range playback route and is not affected by this fallback.
+        hdr_fallback = bool(v.get("isHdr"))
         if unsupported or over_width or hdr_fallback:
             out["video"] = {
                 "action": "transcode",
