@@ -321,6 +321,123 @@ def _tcp_reachable(host: str, port: int, timeout: float = 2.0) -> tuple[bool, st
         return False, f"{host}:{port} unavailable: {type(exc).__name__}"
 
 
+def _exec_text(container, command: list[str]) -> tuple[int, str]:
+    """Execute a command in a container and return exit code plus decoded output."""
+    if container is None or container.status != "running":
+        return 127, "container is not running"
+    try:
+        result = container.exec_run(command)
+        output = result.output.decode("utf-8", errors="replace").strip()
+        return int(result.exit_code), output
+    except Exception as exc:
+        return 126, f"{type(exc).__name__}: {exc}"
+
+
+def _stremio_dns_path() -> dict[str, object]:
+    """Prove the normal Stremio system resolver traverses Pi-hole.
+
+    Resolution success is deliberately not required: the unique test name may
+    return NXDOMAIN/NODATA. The proof is that Pi-hole observes the query from
+    the shared Stremio/Gluetun namespace and forwards it to Gluetun :1053.
+    """
+    stremio = _container(STREMIO_CONTAINER)
+    pihole = _container(PIHOLE_CONTAINER)
+
+    if stremio is None or stremio.status != "running":
+        return {
+            "resolverOk": False,
+            "resolverDetail": "Stremio container is not running",
+            "queryOk": False,
+            "queryDetail": "query not executed",
+        }
+
+    if pihole is None or pihole.status != "running":
+        return {
+            "resolverOk": False,
+            "resolverDetail": "Pi-hole container is not running",
+            "queryOk": False,
+            "queryDetail": "query not executed",
+        }
+
+    rc, resolv = _exec_text(stremio, ["cat", "/etc/resolv.conf"])
+    resolver_ok = (
+        rc == 0
+        and re.search(r"(?m)^nameserver\s+172\.30\.0\.53\s*$", resolv)
+        is not None
+    )
+
+    token = f"dns303-{int(time.time() * 1000)}-{os.getpid()}"
+    domain = f"{token}.example.org"
+    code = (
+        "import socket;"
+        f"host={domain!r};"
+        "\ntry:\n"
+        " socket.getaddrinfo(host,443,type=socket.SOCK_STREAM)\n"
+        "except socket.gaierror:\n"
+        " pass\n"
+    )
+    query_rc, query_output = _exec_text(
+        stremio,
+        ["python3", "-c", code],
+    )
+
+    evidence = ""
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        _, evidence = _exec_text(
+            pihole,
+            [
+                "sh",
+                "-c",
+                f"grep -F {domain!r} /var/log/pihole/pihole.log 2>/dev/null | tail -20",
+            ],
+        )
+        if (
+            domain in evidence
+            and "from 172.30.0.10" in evidence
+            and "to 172.30.0.10#1053" in evidence
+        ):
+            break
+        time.sleep(0.25)
+
+    query_ok = bool(
+        query_rc == 0
+        and domain in evidence
+        and "from 172.30.0.10" in evidence
+        and "to 172.30.0.10#1053" in evidence
+    )
+
+    if resolver_ok:
+        resolver_detail = "Stremio resolver -> 172.30.0.53"
+    else:
+        compact = " ".join(resolv.split())
+        resolver_detail = (
+            f"expected nameserver 172.30.0.53; "
+            f"actual={compact[:180] or 'unavailable'}"
+        )
+
+    if query_ok:
+        query_detail = f"{domain}: Stremio -> Pi-hole -> Gluetun:1053"
+    else:
+        compact = " ".join(evidence.split())
+        query_detail = (
+            f"{domain}: end-to-end DNS evidence missing"
+            + (f"; {compact[:220]}" if compact else "")
+            + (
+                f"; resolver command={query_output[:120]}"
+                if query_output
+                else ""
+            )
+        )
+
+    return {
+        "resolverOk": resolver_ok,
+        "resolverDetail": resolver_detail,
+        "queryOk": query_ok,
+        "queryDetail": query_detail,
+    }
+
+
 def validate_gluetun():
     status = gluetun_status()
     container = status["container"]
@@ -329,32 +446,145 @@ def validate_gluetun():
     routing = status["routing"]
     pihole = status["pihole"]
     config = status["config"]
+
     proxy_port = int(config.get("dnsProxyPort") or 1053)
-    proxy_ok, proxy_detail = _tcp_reachable(_dns_proxy_host(), proxy_port)
+    proxy_ok, proxy_detail = _tcp_reachable(
+        _dns_proxy_host(),
+        proxy_port,
+    )
     upstream = str(pihole.get("upstream") or "")
-    expected_suffix = f"#{proxy_port}"
+    expected_upstream = f"172.30.0.10#{proxy_port}"
+
+    vpn_requested = vpn_admin._vpn_requested()
+    direct_mode = bool(
+        container.get("running")
+        and not vpn_requested
+    )
+    dns_path = _stremio_dns_path()
 
     checks = [
-        {"id": "container", "label": "Gluetun container running", "ok": bool(container.get("running")), "detail": str(container.get("status"))},
-        {"id": "health", "label": "Docker health", "ok": container.get("health") == "healthy", "detail": str(container.get("health"))},
-        {"id": "control", "label": "Control API", "ok": bool(vpn.get("controlAvailable")), "detail": "available" if vpn.get("controlAvailable") else str(vpn.get("controlError") or "unavailable")},
-        {"id": "vpn", "label": "VPN tunnel", "ok": vpn.get("status") == "running", "detail": str(vpn.get("status"))},
-        {"id": "public-ip", "label": "VPN public IP detected", "ok": bool(vpn.get("publicIp")), "detail": str(vpn.get("publicIp") or "not available")},
-        {"id": "dns", "label": "Gluetun DNS service", "ok": dns.get("status") == "running", "detail": str(dns.get("status"))},
-        {"id": "dns-proxy", "label": "Private DNS proxy", "ok": proxy_ok, "detail": proxy_detail},
-        {"id": "pihole", "label": "Pi-hole upstream to Gluetun", "ok": bool(pihole.get("running") and expected_suffix in upstream), "detail": upstream or "not configured"},
-        {"id": "routing", "label": "Stremio routed through Gluetun", "ok": bool(routing.get("stremioThroughGluetun")), "detail": str(routing.get("networkMode") or "not routed")},
-        {"id": "killswitch", "label": "Kill switch active", "ok": bool(routing.get("killSwitchActive")), "detail": "firewall on" if routing.get("killSwitchActive") else "not verified"},
+        {
+            "id": "container",
+            "label": "Gluetun container running",
+            "ok": bool(container.get("running")),
+            "detail": str(container.get("status")),
+        },
+        {
+            "id": "health",
+            "label": "Docker health",
+            "ok": container.get("health") == "healthy",
+            "detail": str(container.get("health")),
+        },
+        {
+            "id": "dns-proxy",
+            "label": "Private DNS proxy",
+            "ok": proxy_ok,
+            "detail": proxy_detail,
+        },
+        {
+            "id": "pihole",
+            "label": "Pi-hole upstream to Gluetun",
+            "ok": bool(
+                pihole.get("running")
+                and expected_upstream in upstream
+            ),
+            "detail": upstream or "not configured",
+        },
+        {
+            "id": "stremio-resolver",
+            "label": "Stremio resolver uses Pi-hole",
+            "ok": bool(dns_path["resolverOk"]),
+            "detail": str(dns_path["resolverDetail"]),
+        },
+        {
+            "id": "dns-e2e",
+            "label": "Stremio DNS end-to-end",
+            "ok": bool(dns_path["queryOk"]),
+            "detail": str(dns_path["queryDetail"]),
+        },
+        {
+            "id": "routing",
+            "label": "Stremio routed through Gluetun",
+            "ok": bool(routing.get("stremioThroughGluetun")),
+            "detail": str(routing.get("networkMode") or "not routed"),
+        },
     ]
-    vpn_admin._audit("gluetun.validate", f"passed={sum(1 for item in checks if item['ok'])}/{len(checks)}")
+
+    if direct_mode:
+        checks.extend(
+            [
+                {
+                    "id": "mode",
+                    "label": "Gateway mode",
+                    "ok": True,
+                    "detail": "direct",
+                },
+                {
+                    "id": "dns",
+                    "label": "Gateway DNS mode",
+                    "ok": dns.get("status") == "direct",
+                    "detail": str(dns.get("status")),
+                },
+            ]
+        )
+    else:
+        checks.extend(
+            [
+                {
+                    "id": "control",
+                    "label": "Control API",
+                    "ok": bool(vpn.get("controlAvailable")),
+                    "detail": (
+                        "available"
+                        if vpn.get("controlAvailable")
+                        else str(vpn.get("controlError") or "unavailable")
+                    ),
+                },
+                {
+                    "id": "vpn",
+                    "label": "VPN tunnel",
+                    "ok": vpn.get("status") == "running",
+                    "detail": str(vpn.get("status")),
+                },
+                {
+                    "id": "public-ip",
+                    "label": "VPN public IP detected",
+                    "ok": bool(vpn.get("publicIp")),
+                    "detail": str(vpn.get("publicIp") or "not available"),
+                },
+                {
+                    "id": "dns",
+                    "label": "Gluetun DNS service",
+                    "ok": dns.get("status") == "running",
+                    "detail": str(dns.get("status")),
+                },
+                {
+                    "id": "killswitch",
+                    "label": "Kill switch active",
+                    "ok": bool(routing.get("killSwitchActive")),
+                    "detail": (
+                        "firewall on"
+                        if routing.get("killSwitchActive")
+                        else "not verified"
+                    ),
+                },
+            ]
+        )
+
+    passed = sum(1 for item in checks if item["ok"])
+    vpn_admin._audit(
+        "gluetun.validate",
+        f"mode={'direct' if direct_mode else 'vpn'} "
+        f"passed={passed}/{len(checks)}",
+    )
     return {
         "ok": all(bool(item["ok"]) for item in checks),
-        "passed": sum(1 for item in checks if item["ok"]),
+        "mode": "direct" if direct_mode else "vpn",
+        "passed": passed,
         "total": len(checks),
         "checks": checks,
         "capturedAt": datetime.now(UTC).isoformat(),
     }
-
 
 def gluetun_logs(lines: int = 200, level: str = "all", query: str = ""):
     lines = max(20, min(int(lines), 1000))
