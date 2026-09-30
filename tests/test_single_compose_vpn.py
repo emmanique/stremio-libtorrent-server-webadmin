@@ -139,3 +139,13 @@ def test_start_help_is_launcher_native_and_precedes_env_creation():
     assert help_case < env_file < gpu_detection
     assert "Usage: sh start.sh [COMMAND] [ARGS...]" in start
     assert "Stremio remains authoritative for COPY vs TRANSCODE" in start
+
+
+def test_start_canonicalizes_intel_media_driver_case():
+    start = (ROOT / "start.sh").read_text(encoding="utf-8")
+
+    # Linux driver module is iHD_drv_video.so. A legacy/inherited lowercase
+    # LIBVA_DRIVER_NAME=ihd must not make libva look for ihd_drv_video.so.
+    assert 'case "$(printf \'%s\' "$LIBVA_DRIVER_NAME" | tr \'[:upper:]\' \'[:lower:]\')" in' in start
+    assert "LIBVA_DRIVER_NAME=iHD" in start
+    assert 'printf \'%s\\n\' "iHD"' in start

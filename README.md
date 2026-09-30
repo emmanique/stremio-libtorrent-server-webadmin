@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 3.0.0
+# Stremio Server WebAdmin 3.0.1
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,10 +9,18 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 3.0.0 |
-| WebAdmin | 3.0.0 |
-| VPN Gateway image | `3.0.0` release tag (runtime validation used `:latest`) |
+| Fork / Platform | 3.0.1 |
+| WebAdmin | 3.0.1 |
+| VPN Gateway image | `3.0.1` coordinated release tag |
 | Upstream Server/Core | 1.6.20 |
+
+## 3.0.1 — Intel VAAPI hotfix
+
+- Canonicalizes `LIBVA_DRIVER_NAME=ihd` to the case-sensitive Intel Media Driver name `iHD` before Compose is invoked.
+- Prevents inherited or legacy lowercase overrides from making libva search for the non-existent `ihd_drv_video.so` instead of `iHD_drv_video.so`.
+- Keeps `LIBVA_DRIVER_NAME` optional: an empty value still allows libva autodetection.
+- Validated on Intel Iris Xe with `/dev/dri/renderD128`: `vainfo` opens the iHD driver and real FFmpeg H.264/HEVC VAAPI encode tests pass.
+- Upgrade from 3.0.0 preserves `.env` and all named volumes; production images should be pinned to the coordinated `3.0.1` tags after publication.
 
 ## 3.0.0 — features added by this fork
 
@@ -153,7 +161,7 @@ For production, use the deployment ZIP or TAR.GZ attached to the desired GitHub 
 Example using a released TAR.GZ:
 
 ~~~bash
-VERSION=3.0.0
+VERSION=3.0.1
 INSTALL_DIR=/opt/stremio-webadmin
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -426,7 +434,7 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v3.0.0.md
+Release notes: docs/releases/v3.0.1.md
 
 License: MIT. See LICENSE.
 
