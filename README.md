@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 3.0.2
+# Stremio Server WebAdmin 3.0.3
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,10 +9,23 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 3.0.2 |
-| WebAdmin | 3.0.2 |
-| VPN Gateway image | `3.0.2` coordinated release tag |
+| Fork / Platform | 3.0.3 |
+| WebAdmin | 3.0.3 |
+| VPN Gateway image | `3.0.3` coordinated release tag |
 | Upstream Server/Core | 1.6.20 |
+
+## 3.0.3 — Pi-hole DNS path enforcement
+
+3.0.3 makes Pi-hole the normal resolver for Stremio, libtorrent and child
+processes in both DIRECT and VPN modes. Stremio uses a private
+`/etc/resolv.conf` pointing to `172.30.0.53`; Pi-hole forwards through
+Gluetun's private DNS proxy on `172.30.0.10:1053`.
+
+WebAdmin validation now proves the end-to-end path
+Stremio -> Pi-hole -> Gluetun:1053 and applies VPN-only checks only while
+VPN mode is requested. The deployment ZIP/TAR includes the resolver file.
+
+See `docs/releases/v3.0.3.md` for validation and upgrade notes.
 
 ## 3.0.2 — HDR/Dolby Vision VAAPI fix
 
@@ -449,7 +462,7 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v3.0.2.md
+Release notes: docs/releases/v3.0.3.md
 
 License: MIT. See LICENSE.
 
