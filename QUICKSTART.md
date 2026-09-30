@@ -18,9 +18,9 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.20
-Fork/Platform   3.0.0
-WebAdmin        3.0.0
-VPN Gateway     3.0.0
+Fork/Platform   3.0.1
+WebAdmin        3.0.1
+VPN Gateway     3.0.1
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:3.0.0
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:3.0.0
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:3.0.0
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:3.0.1
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:3.0.1
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:3.0.1
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:3.0.0
+edmanique/stremio-libtorrent-server-webadmin:3.0.1
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.0
+edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.1
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.0
+edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.1
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:3.0.0
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.0
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.0
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:3.0.1
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.1
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.1
 ```
 
 Or follow the moving aliases:
@@ -257,7 +257,7 @@ Ensure host port 53 is available first.
 
 ## 9. Automatic VAAPI / NVIDIA transcoding
 
-Transcoding is **AUTO-only** in 2.0.22. There is no manual playback profile for Copy, H.264, HEVC, VAAPI, NVENC or CPU.
+Transcoding is **AUTO-only** in 3.0.1. There is no manual playback profile for Copy, H.264, HEVC, VAAPI, NVENC or CPU.
 
 The decision flow is:
 
@@ -316,9 +316,9 @@ For a real hardware-transcode validation, start media/client playback for which 
 Equivalent HLS requests are deduplicated by effective workload and may share one main video FFmpeg/HLS job. Subtitle extraction can run as a separate FFmpeg process and should not be interpreted as a duplicate video transcode.
 
 
-## 10. VPN in 2.x
+## 10. VPN in 3.x
 
-There is no separate VPN Compose stack in 2.x.
+There is no separate VPN Compose stack in 3.x.
 
 Start the platform normally:
 
@@ -335,7 +335,7 @@ The legacy `start-vpn.*` files are compatibility wrappers only.
 
 Before every upgrade run `sh scripts/backup-before-upgrade.sh`, keep the existing `.env`, extract the new deployment package over the installation directory, run `sh scripts/check-env-upgrade.sh` to identify newly introduced variables, review any reported changes, run `sh start.sh config`, then start the stack with `sh start.sh`. Never use `docker compose down -v` for a routine upgrade.
 
-## 2.0.22 AUTO launcher and transcoding
+## 3.0.1 AUTO launcher and transcoding
 
 Use `./start.sh` for normal installation/startup. It detects the host IP and GPU, exports the detected VAAPI render node to the Compose overlay, and leaves `VAAPI_DEVICE` portable/unset in `.env` unless the administrator explicitly overrides it. `./start.sh --help` is side-effect-free: it does not create/update `.env`, probe hardware, pull images, or start the stack. Direct use of `compose.vaapi.yaml` bypasses discovery and requires `VAAPI_DEVICE` in the invoking shell.
 
