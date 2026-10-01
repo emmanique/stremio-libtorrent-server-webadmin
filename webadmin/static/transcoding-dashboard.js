@@ -29,7 +29,7 @@
     .transcodeLatest>div{padding:10px;border:1px solid rgba(232,207,105,.18);border-radius:8px;background:rgba(7,18,11,.72)}
     .transcodeLatest small{display:block;color:var(--muted);margin-bottom:4px}
     .transcodeLatest code{color:#fff7d6;white-space:normal;overflow-wrap:anywhere}
-    .transcodePolicyIntro{margin:0 12px 12px;padding:14px;border:1px solid rgba(242,201,76,.28);border-radius:10px;background:linear-gradient(110deg,rgba(17,72,39,.82),rgba(67,21,25,.75))}
+    .transcodePanel.idle .transcodeSummary,.transcodePanel.idle .transcodeLatest,.transcodePanel.idle .transcodeSessions{display:none}\n    .transcodePanel.idle .inner{gap:9px}\n    .transcodePanel.idle .transcodeCard{padding:9px 10px}\n    .transcodePanel.idle .transcodeHw{margin-top:1px}\n    .transcodePolicyIntro{margin:0 12px 12px;padding:14px;border:1px solid rgba(242,201,76,.28);border-radius:10px;background:linear-gradient(110deg,rgba(17,72,39,.82),rgba(67,21,25,.75))}
     .transcodePolicyIntro strong{display:block;color:#f4d35e;margin-bottom:5px}
     .transcodePolicyIntro p{margin:0 0 10px;color:#e6dfbd;font-size:12px}
     .transcodePolicyFlow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px}
@@ -113,6 +113,8 @@
     const hw = data.hardware || {};
     const sessions = active.sessions || [];
     const engines = active.engines || [];
+    const panel = document.getElementById('transcodingPanel');
+    if (panel) panel.classList.toggle('idle', sessions.length === 0 && Number(active.total || 0) === 0);
     document.getElementById('tdPolicyState').textContent = `● ${(policy.transcoding_mode || 'auto').toUpperCase()}`;
     document.getElementById('tdMode').textContent = `${String(policy.transcoding_mode || 'auto').toUpperCase()} · ${String(policy.transcoding_hwaccel || 'auto').toUpperCase()}`;
     document.getElementById('tdActive').textContent = `${active.total || 0} · ${active.transcoding || 0} transcode · ${active.directStream || 0} direct`;
