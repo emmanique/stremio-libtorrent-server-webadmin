@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 3.0.3
+# Stremio Server WebAdmin 3.0.4
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,10 +9,31 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 3.0.3 |
-| WebAdmin | 3.0.3 |
-| VPN Gateway image | `3.0.3` coordinated release tag |
+| Fork / Platform | 3.0.4 |
+| WebAdmin | 3.0.4 |
+| VPN Gateway image | `3.0.4` coordinated release tag |
 | Upstream Server/Core | 1.6.20 |
+
+## 3.0.4 — Playback continuity and runtime observability
+
+3.0.4 consolidates the playback work validated on the DEV platform: authoritative
+playback-session telemetry, improved WebAdmin direct-stream/transcode correlation,
+safer FFmpeg policy handling, and Continue Watching source continuity.
+
+For Continue Watching, the centre Play action now follows Stremio Core's existing
+player deep link when available, preserving the exact prior stream and Core-managed
+resume position. Poster/details navigation remains unchanged so users can still open
+the normal source picker when they want another source.
+
+The Library Addon records the last successfully observed source and prefers it when
+presenting matching local streams. The release does not create a second progress
+database: Stremio Core remains authoritative for playback position.
+
+Upgrade/recreate operations on GPU hosts must be run through `start.sh`; the launcher
+automatically selects the VAAPI/NVIDIA Compose overlay. Plain `docker compose up
+--force-recreate` can omit the GPU device mapping.
+
+See `docs/releases/v3.0.4.md` for validation and upgrade notes.
 
 ## 3.0.3 — Pi-hole DNS path enforcement
 
