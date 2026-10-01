@@ -140,6 +140,8 @@ def test_full_vaapi_falls_back_to_software_decode_for_hevc_main10(monkeypatch):
     assert "-hwaccel" not in transformed
     assert transformed[transformed.index("-vaapi_device") + 1] == "/dev/dri/renderD128"
     assert "format=nv12,hwupload" in transformed[transformed.index("-vf") + 1]
+    assert "profile=vaapi-h264" in decision
+    assert "profile=vaapi-full-h264" not in decision
     assert "decode=software" in decision
     assert "decode fallback=software" in decision
     assert "pix_fmt=yuv420p10le" in decision
@@ -195,6 +197,8 @@ def test_auto_converts_hevc_main10_copy_to_h264_vaapi(monkeypatch):
     assert "-hwaccel" not in transformed
     assert "format=nv12,hwupload" in transformed[transformed.index("-vf") + 1]
     assert "video=copy(hevc)->h264_vaapi" in decision
+    assert "profile=vaapi-h264" in decision
+    assert "profile=vaapi-full-h264" not in decision
     assert "decode fallback=software" in decision
 
 
