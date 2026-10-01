@@ -196,26 +196,9 @@
     }
   }
 
-  async function enforceAuto() {
-    try {
-      await fetch('/api/transcoding/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          profile: 'auto',
-          quality: 22,
-        }),
-      });
-    } catch (_) {
-      // The UI remains read-only. Failure is visible through status telemetry.
-    }
-  }
-
   function boot() {
     ensurePanel();
-    enforceAuto().finally(() => loadAuto());
+    loadAuto();
   }
 
   if (document.readyState === 'loading') {
