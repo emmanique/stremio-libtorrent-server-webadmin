@@ -720,3 +720,20 @@ def test_dashboard_has_no_legacy_execution_selectors():
 
     assert "AUTO-only transcoding" in dashboard
     assert "Stremio remains authoritative" in dashboard
+
+
+def test_dashboard_correlates_playback_by_source_infohash():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "x.sourceInfoHash" in dashboard
+    assert "byHash.get(h)" in dashboard
+    assert "s.playbackActive=true" in dashboard
+    assert "if(!s.playbackActive)return null" in dashboard
+
+
+def test_dashboard_keeps_legacy_playback_fallback():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "sessions.some(x=>x.sourceInfoHash)" in dashboard
+    assert "const active=streams.filter(s=>s.active)" in dashboard
+    assert "active.length===1&&sessions.length===1" in dashboard
