@@ -18,9 +18,9 @@ Current platform release:
 
 ```text
 Upstream Core   1.6.20
-Fork/Platform   3.0.3
-WebAdmin        3.0.3
-VPN Gateway     3.0.3
+Fork/Platform   3.0.4
+WebAdmin        3.0.4
+VPN Gateway     3.0.4
 ```
 
 ## 1. Obtain the deployment files
@@ -60,9 +60,9 @@ pihole/pihole:latest
 You can pin the coordinated release in `.env`:
 
 ```env
-STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:3.0.3
-WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:3.0.3
-VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:3.0.3
+STREMIO_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin:3.0.4
+WEBADMIN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-webadmin:3.0.4
+VPN_IMAGE=ghcr.io/emmanique/stremio-libtorrent-server-webadmin-vpn:3.0.4
 ```
 
 ### Docker Hub — alternative mirror
@@ -71,21 +71,21 @@ The same validated artifacts are mirrored to Docker Hub using tags in a single r
 
 ```text
 edmanique/stremio-libtorrent-server-webadmin:latest
-edmanique/stremio-libtorrent-server-webadmin:3.0.3
+edmanique/stremio-libtorrent-server-webadmin:3.0.4
 
 edmanique/stremio-libtorrent-server-webadmin:webadmin-latest
-edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.3
+edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.4
 
 edmanique/stremio-libtorrent-server-webadmin:vpn-latest
-edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.3
+edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.4
 ```
 
 To use Docker Hub instead of GHCR, set the image overrides in `.env`:
 
 ```env
-STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:3.0.3
-WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.3
-VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.3
+STREMIO_IMAGE=edmanique/stremio-libtorrent-server-webadmin:3.0.4
+WEBADMIN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:webadmin-3.0.4
+VPN_IMAGE=edmanique/stremio-libtorrent-server-webadmin:vpn-3.0.4
 ```
 
 Or follow the moving aliases:
@@ -149,12 +149,14 @@ sh start.sh ps
 sh start.sh up -d --force-recreate
 ```
 
-To update all published services manually:
+To update or recreate the stack, always go through the launcher so the detected GPU overlay is retained:
 
 ```bash
-docker compose pull
-docker compose up -d
+sh start.sh pull
+sh start.sh up -d --force-recreate
 ```
+
+Do not use plain `docker compose up --force-recreate` on GPU hosts. That bypasses the launcher's automatic `compose.vaapi.yaml` / `compose.gpu.yaml` selection and can recreate the server without its GPU device mapping.
 
 The persistent volumes remain untouched during image updates. Do not use `docker compose down -v` during upgrades unless you intentionally want to delete cache/configuration data.
 
