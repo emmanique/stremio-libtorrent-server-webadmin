@@ -95,5 +95,6 @@ async function restartFromConfiguration(){if(!confirm('Restart the Stremio serve
 $('saveAll').addEventListener('click',saveAllConfiguration);
 $('restart').addEventListener('click',restartFromConfiguration);
 load();
+setInterval(load,5000);
 $('configSearch').addEventListener('input',renderConfig);$('piholeAdmin').href=`http://${location.hostname}:8053/admin/`;
 </script></body></html>
