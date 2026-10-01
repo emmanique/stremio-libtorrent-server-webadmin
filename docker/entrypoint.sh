@@ -86,7 +86,11 @@ fi
 # sets SERVER_URL inside this script, and uvicorn sees only what is exported.
 export SERVER_URL
 
-# 2b) Continue Watching: prefer the Core-provided player deep link over reopening the\n# stream picker. The patch is fail-closed and leaves the bundled build untouched if its\n# expected upstream expression is not found.\npython3 /srv/app/docker/patch_continue_watching.py || true\n\n# 3) Run uvicorn (API, internal :11470) + nginx (web player + API proxy on :8080 and :12470).
+# 2b) Continue Watching: prefer the Core-provided player deep link over reopening the
+# stream picker. If Core has no player deep link, normal source selection remains unchanged.
+python3 /srv/app/docker/patch_continue_watching.py || true
+
+# 3) Run uvicorn (API, internal :11470) + nginx (web player + API proxy on :8080 and :12470).
 mkdir -p /tmp/nx-proxy /tmp/nx-body
 # Render the cert path into the nginx config (honors a custom STREMIOSRV_CACHE_ROOT).
 sed "s#/root/.stremio-server/certificates.pem#${CERT}#g" \
