@@ -746,6 +746,8 @@ def test_dashboard_prefers_registry_activity_for_direct_streams():
     assert "playback&&Array.isArray(playback.active)" in dashboard
     assert "if(p.kind==='source')s.playbackMode='direct'" in dashboard
     assert "classifyPlayback(state.streams,transcoding,state.playback)" in dashboard
+    assert "registryAvailable=!!(playback&&Array.isArray(playback.active))" in dashboard
+    assert "if(registryAvailable){activity.forEach" in dashboard
 
 
 def test_dashboard_correlates_hls_registry_job_to_transcoding_session():
