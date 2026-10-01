@@ -119,12 +119,6 @@
           </div>
         </div>
 
-        <div style="margin-top: 12px">
-          <button class="btn" id="simpleTranscodeRefresh">
-            Refresh hardware detection
-          </button>
-        </div>
-
         <div
           id="simpleTranscodeRule"
           style="margin-top: 10px; opacity: .8"
@@ -134,11 +128,6 @@
         </div>
       </div>
     `;
-
-    $('simpleTranscodeRefresh')?.addEventListener(
-      'click',
-      () => loadAuto(true)
-    );
   }
 
   function render(data) {
@@ -178,12 +167,10 @@
     }
   }
 
-  async function loadAuto(force = false) {
+  async function loadAuto() {
     ensurePanel();
 
-    const endpoint = force
-      ? '/api/transcoding/profiles/refresh'
-      : '/api/transcoding/profiles';
+    const endpoint = '/api/transcoding/profiles';
 
     try {
       const response = await fetch(endpoint, {
@@ -209,26 +196,9 @@
     }
   }
 
-  async function enforceAuto() {
-    try {
-      await fetch('/api/transcoding/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          profile: 'auto',
-          quality: 22,
-        }),
-      });
-    } catch (_) {
-      // The UI remains read-only. Failure is visible through status/refresh.
-    }
-  }
-
   function boot() {
     ensurePanel();
-    enforceAuto().finally(() => loadAuto(false));
+    loadAuto();
   }
 
   if (document.readyState === 'loading') {

@@ -390,6 +390,10 @@ def status():
             )
         },
         "streams": streams,
+        # None means the server did not expose playback telemetry (older core or
+        # unavailable health response). An empty active list is authoritative and must
+        # not be confused with telemetry being unavailable by the dashboard.
+        "playback": health_data.get("playbackActivity"),
         "cache": {
             "cacheUsed": cache.get("cacheUsed", 0),
             "cacheSize": cache.get("cacheSize", config["cache_size"]),
@@ -688,7 +692,7 @@ def update():
 
 
 LOG_CURSOR_FILE = STATE / "log-cursors.json"
-LOG_SOURCE_IDS = {"application", "container", "updater", "admin"}
+LOG_SOURCE_IDS = {"application", "admin"}
 
 
 def _read_log_cursors() -> dict[str, float]:
@@ -722,15 +726,13 @@ def _write_log_cursors(values: dict[str, float]) -> None:
 def logs(source: str = "application", lines: int = 300):
     available = [
         {"id": "application", "label": "Stremio container"},
-        {"id": "container", "label": "Docker container"},
-        {"id": "updater", "label": "Software updates"},
         {"id": "admin", "label": "Web Admin actions"},
     ]
     if source not in LOG_SOURCE_IDS:
         raise HTTPException(400, "unknown log source")
     cursors = _read_log_cursors()
     try:
-        if source in {"application", "container"}:
+        if source == "application":
             kwargs = {"tail": min(lines, 1000), "timestamps": True}
             since = cursors.get(source)
             if since is not None:
@@ -774,16 +776,13 @@ def clear_logs(body: LogBody):
     cursors = _read_log_cursors()
     now = time.time()
     for target in targets:
-        if target in {"application", "container"}:
+        if target == "application":
             # Docker owns its logging-driver files. A persistent cursor gives the
             # operator true "clear from now" semantics without corrupting them.
             cursors[target] = now
         elif target == "admin":
             STATE.mkdir(parents=True, exist_ok=True)
             (STATE / "admin.log").write_text("", encoding="utf-8")
-        elif target == "updater":
-            STATE.mkdir(parents=True, exist_ok=True)
-            (STATE / "update-result.json").write_text("", encoding="utf-8")
     _write_log_cursors(cursors)
     audit("logs.clear", ",".join(targets))
     return {

@@ -103,6 +103,49 @@ def test_runtime_fix_preserves_pid_telemetry_from_container_ps():
     }
 
 
+def test_runtime_extracts_torrent_source_from_ffmpeg_input():
+    import transcoding_runtime_fix as runtime
+
+    info_hash = "E88A21AD7ACD934976D5C69C168B0568701B3884"
+    argv = (
+        "/usr/local/libexec/stremio/ffmpeg-real -hide_banner "
+        f"-i https://host:12470/{info_hash}/7? "
+        "-c:v h264_vaapi -c:a aac /root/.stremio-server/transcode/job1/index.m3u8"
+    )
+
+    source_hash, source_idx = runtime._source_stream_from_argv(argv)
+
+    assert source_hash == info_hash.lower()
+    assert source_idx == 7
+
+
+def test_runtime_source_parser_ignores_non_torrent_inputs():
+    import transcoding_runtime_fix as runtime
+
+    assert runtime._source_stream_from_argv(
+        "/usr/local/libexec/stremio/ffmpeg-real -i input.mkv -c:v copy out.m3u8"
+    ) == (None, None)
+
+
+def test_runtime_session_exposes_source_identity(monkeypatch):
+    import transcoding_runtime_fix as runtime
+
+    info_hash = "a" * 40
+    command = (
+        "741 94.0 0.2 00:10 /usr/local/libexec/stremio/ffmpeg-real "
+        f"-i https://host:12470/{info_hash}/2? "
+        "-c:v h264_vaapi -c:a aac "
+        "/root/.stremio-server/transcode/job123/index.m3u8"
+    )
+    monkeypatch.setattr(runtime.base, "_read_job_log", lambda *args: "")
+
+    session = runtime._session_from_command(object(), "/cache", command)
+
+    assert session["jobId"] == "job123"
+    assert session["sourceInfoHash"] == info_hash
+    assert session["sourceFileIdx"] == 2
+
+
 def test_latest_job_log_preserves_policy_outside_last_80_lines():
     from webadmin import transcoding_config as tc
 
@@ -677,3 +720,45 @@ def test_dashboard_has_no_legacy_execution_selectors():
 
     assert "AUTO-only transcoding" in dashboard
     assert "Stremio remains authoritative" in dashboard
+
+
+def test_dashboard_correlates_playback_by_source_infohash():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "x.sourceInfoHash" in dashboard
+    assert "byHash.get(h)" in dashboard
+    assert "s.playbackActive=true" in dashboard
+    assert "if(!s.playbackActive)return null" in dashboard
+
+
+def test_dashboard_keeps_legacy_playback_fallback():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "sessions.some(x=>x.sourceInfoHash)" in dashboard
+    assert "const active=streams.filter(s=>s.active)" in dashboard
+    assert "active.length===1&&sessions.length===1" in dashboard
+
+
+def test_dashboard_prefers_registry_activity_for_direct_streams():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "classifyPlayback(streams,transcoding,playback)" in dashboard
+    assert "playback&&Array.isArray(playback.active)" in dashboard
+    assert "let mode='direct'" in dashboard
+    assert "s.playbackCount++" in dashboard
+    assert "s.playbackModes.push(mode)" in dashboard
+    assert "sourceLatest=new Map()" in dashboard
+    assert "p.kind!=='source'" in dashboard
+    assert "p.userAgent||''" in dashboard
+    assert "sourceLatest.set(key,p)" in dashboard
+    assert "classifyPlayback(state.streams,transcoding,state.playback)" in dashboard
+    assert "registryAvailable=!!(playback&&Array.isArray(playback.active))" in dashboard
+    assert "if(registryAvailable){activity.forEach" in dashboard
+
+
+def test_dashboard_correlates_hls_registry_job_to_transcoding_session():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "p.kind==='hls'" in dashboard
+    assert "p.workloadId||p.jobId" in dashboard
+    assert "sessions.find(x=>x.jobId===workload)" in dashboard

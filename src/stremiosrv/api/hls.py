@@ -29,6 +29,10 @@ def _converter(request: Request):
     return getattr(request.app.state, "converter", None)
 
 
+def _playback_registry(request: Request):
+    return getattr(request.app.state, "playback_registry", None)
+
+
 def _wait_file(path: Path, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -199,6 +203,16 @@ def master(
         d = conv.ensure_job(job_id, media, dec)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job id") from e
+    registry = _playback_registry(request)
+    parsed_source = parse_stream_url(mediaURL)
+    if registry is not None and parsed_source is not None:
+        registry.register_hls_job(
+            job_id,
+            parsed_source[0],
+            parsed_source[1],
+            request.headers.get("User-Agent"),
+            conv.workload_for_job(job_id),
+        )
     master_path = d / "master.m3u8"
     if not _wait_file(master_path, 25):
         raise HTTPException(status_code=504, detail="transcode did not start")
@@ -243,6 +257,9 @@ def destroy(job_id: str, request: Request) -> dict:
         except ValueError as e:
             # This route deletes a directory, so a malformed id is refused rather than ignored.
             raise HTTPException(status_code=400, detail="invalid job id") from e
+    registry = _playback_registry(request)
+    if registry is not None:
+        registry.end_hls(job_id)
     return {"ok": True}
 
 
@@ -260,6 +277,9 @@ def serve_file(job_id: str, filename: str, request: Request):
     # before the wait below, so a client blocked on a segment that has not been written yet still
     # counts as present.
     conv.touch(job_id)
+    registry = _playback_registry(request)
+    if registry is not None:
+        registry.touch_hls(job_id, request.headers.get("User-Agent"))
     is_playlist = filename.endswith(".m3u8")
     if not _wait_file(path, 25 if is_playlist else 35):
         raise HTTPException(status_code=404, detail="segment not found")

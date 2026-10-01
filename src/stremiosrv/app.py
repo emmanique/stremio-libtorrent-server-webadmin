@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from stremiosrv import health, unmatched
+from stremiosrv.playback_sessions import PlaybackRegistry
 from stremiosrv.api import cache as cache_api
 from stremiosrv.api import (
     casting,
@@ -158,6 +159,7 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
     app.state.settings = settings
     app.state.engine = engine
     app.state.converter = converter
+    app.state.playback_registry = PlaybackRegistry()
     app.include_router(health.router)
     app.include_router(handshake.router)
     app.include_router(pins.router)

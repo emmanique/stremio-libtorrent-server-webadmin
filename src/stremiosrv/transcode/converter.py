@@ -502,6 +502,11 @@ class Converter:
 
         return result
 
+    def workload_for_job(self, job_id: str) -> str | None:
+        """Return the encoder workload identity currently backing a client job."""
+        with self._lock:
+            return self._job_workload.get(job_id)
+
     def touch(self, job_id: str) -> None:
         """Record activity for the shared workload referenced by job_id."""
         with self._lock:

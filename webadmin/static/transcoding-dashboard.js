@@ -29,7 +29,7 @@
     .transcodeLatest>div{padding:10px;border:1px solid rgba(232,207,105,.18);border-radius:8px;background:rgba(7,18,11,.72)}
     .transcodeLatest small{display:block;color:var(--muted);margin-bottom:4px}
     .transcodeLatest code{color:#fff7d6;white-space:normal;overflow-wrap:anywhere}
-    .transcodePolicyIntro{margin:0 12px 12px;padding:14px;border:1px solid rgba(242,201,76,.28);border-radius:10px;background:linear-gradient(110deg,rgba(17,72,39,.82),rgba(67,21,25,.75))}
+    .transcodePanel.idle .transcodeSummary,.transcodePanel.idle .transcodeLatest,.transcodePanel.idle .transcodeSessions{display:none}\n    .transcodePanel.idle .inner{gap:9px}\n    .transcodePanel.idle .transcodeCard{padding:9px 10px}\n    .transcodePanel.idle .transcodeHw{margin-top:1px}\n    .transcodePolicyIntro{margin:0 12px 12px;padding:14px;border:1px solid rgba(242,201,76,.28);border-radius:10px;background:linear-gradient(110deg,rgba(17,72,39,.82),rgba(67,21,25,.75))}
     .transcodePolicyIntro strong{display:block;color:#f4d35e;margin-bottom:5px}
     .transcodePolicyIntro p{margin:0 0 10px;color:#e6dfbd;font-size:12px}
     .transcodePolicyFlow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px}
@@ -101,7 +101,7 @@
     </div>`;
   }
 
-  function renderTranscoding(data) {
+  function renderTranscoding(data, playback) {
     if (!document.getElementById('transcodingPanel')) installDashboardPanel();
     if (!data || !data.available) {
       document.getElementById('tdPolicyState').textContent = 'Unavailable';
@@ -112,17 +112,28 @@
     const active = data.active || {};
     const hw = data.hardware || {};
     const sessions = active.sessions || [];
-    const engines = active.engines || [];
+    const registryAvailable = !!(playback && Array.isArray(playback.active));
+    const playbackRows = registryAvailable ? playback.active : [];
+    const activeWorkloads = new Set(playbackRows.map(p => p.workloadId || p.jobId).filter(Boolean));
+    const liveSessions = registryAvailable
+      ? sessions.filter(session => activeWorkloads.has(session.jobId))
+      : sessions;
+    const waitingForGc = registryAvailable && playbackRows.length === 0 && sessions.length > 0;
+    const liveEngines = [...new Set(liveSessions.map(session => session.engine).filter(Boolean))];
+    const liveTranscoding = liveSessions.filter(session => session.action === 'transcoding').length;
+    const liveDirect = liveSessions.filter(session => session.action === 'direct-stream').length;
+    const panel = document.getElementById('transcodingPanel');
+    if (panel) panel.classList.toggle('idle', liveSessions.length === 0);
     document.getElementById('tdPolicyState').textContent = `● ${(policy.transcoding_mode || 'auto').toUpperCase()}`;
     document.getElementById('tdMode').textContent = `${String(policy.transcoding_mode || 'auto').toUpperCase()} · ${String(policy.transcoding_hwaccel || 'auto').toUpperCase()}`;
-    document.getElementById('tdActive').textContent = `${active.total || 0} · ${active.transcoding || 0} transcode · ${active.directStream || 0} direct`;
-    document.getElementById('tdEngine').textContent = engines.length ? engines.map(x => x.toUpperCase()).join(' + ') : 'Idle';
+    document.getElementById('tdActive').textContent = `${liveSessions.length} · ${liveTranscoding} transcode · ${liveDirect} direct`;
+    document.getElementById('tdEngine').textContent = liveEngines.length ? liveEngines.map(x => x.toUpperCase()).join(' + ') : 'Idle';
     const utilisation = hw.encoderUtilizationPercent;
     if (utilisation != null) {
       document.getElementById('tdEncoderLoad').textContent = `${Number(utilisation).toFixed(1)}% · NVENC`;
-    } else if ((active.transcoding || 0) > 0 && engines.includes('vaapi')) {
+    } else if (liveTranscoding > 0 && liveEngines.includes('vaapi')) {
       document.getElementById('tdEncoderLoad').textContent = 'Active · VAAPI';
-    } else if ((active.transcoding || 0) > 0) {
+    } else if (liveTranscoding > 0) {
       document.getElementById('tdEncoderLoad').textContent = 'Active · no HW metric';
     } else {
       document.getElementById('tdEncoderLoad').textContent = 'Idle';
@@ -136,9 +147,11 @@
     const actualRuntime = document.getElementById('tdActualRuntime');
     if (requestedEffective) requestedEffective.textContent =
       `${String(requested.mode || 'auto').toUpperCase()} / ${String(requested.hwaccel || 'auto').toUpperCase()} / ${requested.videoCodec || '—'} → ${effective.runtimeReady ? 'READY' : 'NOT READY'}`;
-    if (actualRuntime) actualRuntime.textContent = actual.state === 'active'
-      ? `${(actual.engines || []).map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${(actual.sessions || []).length} session(s)`
-      : 'IDLE · no FFmpeg process';
+    if (actualRuntime) actualRuntime.textContent = waitingForGc
+      ? `WAITING FOR GC · ${sessions.length} FFmpeg process(es)`
+      : liveSessions.length
+        ? `${liveEngines.map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${liveSessions.length} active session(s)`
+        : 'IDLE · no active playback';
     document.getElementById('tdHardware').innerHTML = [
       chip(`VAAPI ${hw.vaapiDevice || ''}`, Boolean(hw.vaapiDevicePresent && (hw.h264Vaapi || hw.hevcVaapi)), !hw.vaapiDevicePresent),
       chip('H.264 VAAPI', Boolean(hw.h264Vaapi)),
@@ -147,7 +160,7 @@
       chip('HEVC NVENC', Boolean(hw.hevcNvenc)),
       chip('libx264 fallback', Boolean(hw.libx264))
     ].join('');
-    document.getElementById('tdSessions').innerHTML = sessions.length ? sessions.map(sessionHtml).join('') : '<div class="empty">No active FFmpeg sessions</div>';
+    document.getElementById('tdSessions').innerHTML = liveSessions.length ? liveSessions.map(sessionHtml).join('') : '<div class="empty">No active playback transcoding sessions</div>';
     document.getElementById('tdDecision').textContent = data.latestDecision?.decision || 'No policy decision recorded yet';
     const progress = data.latestProgress;
     document.getElementById('tdProgress').textContent = progress
@@ -157,10 +170,20 @@
 
   async function loadTranscoding() {
     try {
-      const response = await fetch('/api/transcoding/status', {cache: 'no-store'});
+      const [response, statusResponse] = await Promise.all([
+        fetch('/api/transcoding/status', {cache: 'no-store'}),
+        fetch('/api/status', {cache: 'no-store'}).catch(() => null)
+      ]);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      renderTranscoding(data);
+      let playback = null;
+      if (statusResponse && statusResponse.ok) {
+        try {
+          const status = await statusResponse.json();
+          playback = status.playback;
+        } catch (error) {}
+      }
+      renderTranscoding(data, playback);
     } catch (error) {
       renderTranscoding({available: false, message: 'Could not read transcoding telemetry.'});
     }

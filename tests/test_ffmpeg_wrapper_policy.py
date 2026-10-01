@@ -140,6 +140,89 @@ def test_full_vaapi_falls_back_to_software_decode_for_hevc_main10(monkeypatch):
     assert "-hwaccel" not in transformed
     assert transformed[transformed.index("-vaapi_device") + 1] == "/dev/dri/renderD128"
     assert "format=nv12,hwupload" in transformed[transformed.index("-vf") + 1]
+    assert "profile=vaapi-h264" in decision
+    assert "profile=vaapi-full-h264" not in decision
     assert "decode=software" in decision
     assert "decode fallback=software" in decision
     assert "pix_fmt=yuv420p10le" in decision
+
+
+
+def test_auto_preserves_h264_copy_when_direct(monkeypatch):
+    args = ["-i", "https://example.invalid/video", "-c:v", "copy", "-c:a", "copy", "-f", "hls", "index.m3u8"]
+    monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: "h264")
+    transformed, decision = wrapper._auto_apply(
+        args,
+        {"transcoding_direct_video_codecs": "h264"},
+    )
+    assert transformed == args
+    assert "source=h264" in decision
+    assert "direct=yes" in decision
+
+
+def test_auto_converts_hevc_main10_copy_to_h264_vaapi(monkeypatch):
+    args = [
+        "-hide_banner", "-i", "https://example.invalid/video",
+        "-map", "0:v:0", "-c:v", "copy", "-c:a", "aac",
+        "-f", "hls", "index.m3u8",
+    ]
+    monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: "hevc")
+    monkeypatch.setattr(
+        wrapper,
+        "_probe_video_format",
+        lambda args: {
+            "codec_name": "hevc",
+            "profile": "Main 10",
+            "pix_fmt": "yuv420p10le",
+        },
+    )
+    monkeypatch.setattr(
+        wrapper,
+        "_available_encoders",
+        lambda: {"h264_vaapi", "libx264"},
+    )
+    monkeypatch.setattr(wrapper.os.path, "exists", lambda path: True)
+
+    transformed, decision = wrapper._auto_apply(
+        args,
+        {
+            "transcoding_direct_video_codecs": "h264",
+            "transcoding_vaapi_device": "/dev/dri/renderD128",
+            "transcoding_video_quality": 22,
+        },
+    )
+
+    assert transformed[transformed.index("-c:v") + 1] == "h264_vaapi"
+    assert transformed[transformed.index("-vaapi_device") + 1] == "/dev/dri/renderD128"
+    assert "-hwaccel" not in transformed
+    assert "format=nv12,hwupload" in transformed[transformed.index("-vf") + 1]
+    assert "video=copy(hevc)->h264_vaapi" in decision
+    assert "profile=vaapi-h264" in decision
+    assert "profile=vaapi-full-h264" not in decision
+    assert "decode fallback=software" in decision
+
+
+def test_auto_uses_cpu_h264_when_vaapi_is_unavailable(monkeypatch):
+    args = ["-i", "https://example.invalid/video", "-c:v", "copy", "-f", "hls", "index.m3u8"]
+    monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: "hevc")
+    monkeypatch.setattr(wrapper, "_available_encoders", lambda: {"libx264"})
+    monkeypatch.setattr(wrapper.os.path, "exists", lambda path: False)
+
+    transformed, decision = wrapper._auto_apply(
+        args,
+        {"transcoding_direct_video_codecs": "h264"},
+    )
+
+    assert transformed[transformed.index("-c:v") + 1] == "libx264"
+    assert "fallback=cpu" in decision
+
+
+def test_auto_preserves_copy_when_probe_is_unavailable(monkeypatch):
+    args = ["-i", "https://example.invalid/video", "-c:v", "copy", "-f", "hls", "index.m3u8"]
+    monkeypatch.setattr(wrapper, "_probe_video_codec", lambda args: None)
+    transformed, decision = wrapper._auto_apply(
+        args,
+        {"transcoding_direct_video_codecs": "h264"},
+    )
+    assert transformed == args
+    assert "source codec probe unavailable" in decision

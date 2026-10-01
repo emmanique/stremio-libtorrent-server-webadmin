@@ -783,3 +783,22 @@ def test_a_card_whose_largest_file_is_no_video_lists_its_video():
                       {"index": 1, "name": "Film.mkv", "size": 4 * GB, "downloaded": 4 * GB,
                        "progress": 1.0}])
     assert [v["id"] for v in am.meta_for(e)["videos"]] == [am.format_id(IH, 1)]
+
+
+def test_last_played_source_is_returned_first_without_changing_stream_shape():
+    older = _entry(infoHash=IH, label={"type": "movie", "metaId": "tt0000090", "name": "Film",
+                                         "lastSourceAt": 100})
+    newer = _entry(infoHash="ab" * 20,
+                   label={"type": "movie", "metaId": "tt0000090", "name": "Film",
+                          "lastSourceAt": 200})
+    streams = am.streams_for_meta_id({"entries": [older, newer]}, "tt0000090", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{('ab' * 20)}/0", f"{ORIGIN}/{IH}/0"]
+    assert all("_lastSourceAt" not in s for s in streams)
+
+
+def test_stream_order_is_stable_when_no_last_source_was_recorded():
+    one = _entry(infoHash=IH, label={"type": "movie", "metaId": "tt0000091", "name": "Film"})
+    two = _entry(infoHash="ab" * 20,
+                 label={"type": "movie", "metaId": "tt0000091", "name": "Film"})
+    streams = am.streams_for_meta_id({"entries": [one, two]}, "tt0000091", ORIGIN)
+    assert [s["url"] for s in streams] == [f"{ORIGIN}/{IH}/0", f"{ORIGIN}/{('ab' * 20)}/0"]

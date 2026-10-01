@@ -444,8 +444,21 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
             result = _insert_before_output_codec_options(result, ["-vf", f"scale={scale_width}:-2:flags=lanczos"])
         result = _insert_before_output_codec_options(result, ["-preset", "veryfast", "-crf", str(quality)])
 
+    effective_profile_name = profile_name
+    if (
+        profile["engine"] == "vaapi"
+        and str(profile["decode"]) == "vaapi"
+        and effective_decode == "software"
+    ):
+        # The requested full-GPU profile has deliberately fallen back to
+        # software decode + VAAPI encode. Report the execution profile that
+        # actually ran instead of advertising a full-GPU pipeline.
+        effective_profile_name = (
+            "vaapi-h264" if str(target) == "h264_vaapi" else "vaapi-hevc"
+        )
+
     return result, (
-        f"profile={profile_name}; video={current}->{target}; "
+        f"profile={effective_profile_name}; video={current}->{target}; "
         f"decode={effective_decode}; engine={profile['engine']}{fallback_reason}"
     )
 
@@ -457,6 +470,56 @@ def _legacy_passthrough(args: list[str], config: dict[str, object]) -> tuple[lis
         return args, f"legacy settings detected ({legacy_mode}); select an explicit profile in WebAdmin"
     return args, "no explicit profile; core decision unchanged"
 
+
+
+
+def _auto_apply(args: list[str], config: dict[str, object]) -> tuple[list[str], str]:
+    """Apply a conservative Web-compatible AUTO decision.
+
+    Stremio remains authoritative for Direct Stream.  The only decision AUTO
+    corrects is an unsafe video stream-copy: when the source codec is known and
+    is not in the configured Direct Stream allow-list, select the best verified
+    H.264 execution path available at runtime.  Unknown inputs are preserved
+    rather than guessed.
+    """
+    _, current = _video_codec(args)
+    if current != "copy":
+        return args, "mode=auto; core decision unchanged"
+
+    source_codec = _probe_video_codec(args)
+    if source_codec is None:
+        return args, "mode=auto; video=copy preserved; source codec probe unavailable"
+
+    direct_codecs = _direct_video_codecs(config)
+    if source_codec in direct_codecs:
+        return args, (
+            "mode=auto; video=copy preserved; "
+            f"source={source_codec}; direct=yes"
+        )
+
+    device = _vaapi_device(config)
+    encoders = _available_encoders()
+
+    if "h264_vaapi" in encoders and os.path.exists(device):
+        transformed, decision = _apply_profile(
+            args,
+            "vaapi-full-h264",
+            config,
+        )
+        return transformed, f"mode=auto; {decision}"
+
+    if "libx264" in encoders:
+        transformed, decision = _apply_profile(
+            args,
+            "cpu-h264",
+            config,
+        )
+        return transformed, f"mode=auto; {decision}; fallback=cpu"
+
+    return args, (
+        "mode=auto; video=copy preserved; "
+        f"source={source_codec}; no compatible H.264 encoder available"
+    )
 
 
 def _runtime_env(args: list[str]) -> dict[str, str]:
@@ -491,19 +554,21 @@ def main() -> int:
         )
         return 127
 
-    # AUTO-only architecture:
-    # do not rewrite Stremio's codec/copy/transcode decision here.
-    # The wrapper only supplies runtime environment required by the
-    # command Stremio/Converter has already constructed.
-    print(
-        "[ffmpeg-policy] mode=auto; core decision unchanged",
-        file=sys.stderr,
-    )
+    config = _read_config()
+    mode = str(config.get("transcoding_mode") or "auto").strip().lower()
+
+    effective_args = args
+    if mode == "auto":
+        effective_args, decision = _auto_apply(args, config)
+    else:
+        decision = f"mode={mode or 'unknown'}; core decision unchanged"
+
+    print(f"[ffmpeg-policy] {decision}", file=sys.stderr)
 
     os.execve(
         REAL_FFMPEG,
-        [REAL_FFMPEG, *args],
-        _runtime_env(args),
+        [REAL_FFMPEG, *effective_args],
+        _runtime_env(effective_args),
     )
 
     return 0

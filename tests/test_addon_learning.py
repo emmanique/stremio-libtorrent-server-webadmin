@@ -360,7 +360,9 @@ def test_replaying_its_own_video_gives_an_older_label_its_file(tmp_path):
     c = _client(tmp_path)
     t = sessionmod.ensure_addon_token(str(tmp_path))
     _subs(c, t, "tt0000030:3:6", f"videoSize={size}&filename={fname}")
-    assert labelsmod.load(str(tmp_path))[IH] == {**before, "file": {"name": fname, "size": size}}
+    saved = labelsmod.load(str(tmp_path))[IH]
+    assert {k: v for k, v in saved.items() if k != "lastSourceAt"} == {**before, "file": {"name": fname, "size": size}}
+    assert isinstance(saved.get("lastSourceAt"), int)
 
 
 def test_a_recorded_file_is_counted_in_the_log_by_number_only(tmp_path, caplog):
@@ -375,3 +377,25 @@ def test_a_recorded_file_is_counted_in_the_log_by_number_only(tmp_path, caplog):
         _subs(c, t, "tt0000030:3:6", f"videoSize={size}&filename={fname}")
     assert "the file of 1 labelled torrent(s)" in caplog.text
     assert fname not in caplog.text
+
+
+def test_replaying_a_labelled_video_marks_that_torrent_as_last_source(tmp_path):
+    fname, size = _on_disk(tmp_path)
+    labelsmod.put(str(tmp_path), IH, {"metaId": "tt0000030", "type": "series", "season": 3,
+                                      "episode": 6, "videoId": "tt0000030:3:6", "name": "Chosen"})
+    c = _client(tmp_path)
+    t = sessionmod.ensure_addon_token(str(tmp_path))
+    _subs(c, t, "tt0000030:3:6", f"videoSize={size}&filename={fname}")
+    saved = labelsmod.load(str(tmp_path))[IH]
+    assert isinstance(saved.get("lastSourceAt"), int)
+    assert saved["lastSourceAt"] > 0
+
+
+def test_another_videos_report_does_not_mark_a_label_as_last_source(tmp_path):
+    fname, size = _on_disk(tmp_path)
+    labelsmod.put(str(tmp_path), IH, {"metaId": "tt0000030", "type": "series", "season": 3,
+                                      "episode": 5, "videoId": "tt0000030:3:5"})
+    c = _client(tmp_path)
+    t = sessionmod.ensure_addon_token(str(tmp_path))
+    _subs(c, t, "tt0000030:3:6", f"videoSize={size}&filename={fname}")
+    assert "lastSourceAt" not in labelsmod.load(str(tmp_path))[IH]

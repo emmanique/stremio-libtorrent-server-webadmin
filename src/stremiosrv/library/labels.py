@@ -134,6 +134,27 @@ def add_file(cache_root: str, info_hash: str, label: dict) -> bool:
     return True
 
 
+def touch_last_source(cache_root: str, info_hash: str, label: dict) -> bool:
+    """Mark this labelled torrent/file as the most recently observed source for its video.
+
+    Playback reports are factual observations of the logical video and matched cached file.
+    lastSourceAt is only an ordering hint for streams that already pass the normal identity and
+    completeness checks; it never makes an otherwise invalid stream playable.
+    """
+    found = file_record(label.get("file"))
+    if found is None:
+        return False
+    with _lock:
+        data = load(cache_root)
+        stored = data.get(info_hash.lower())
+        if (not isinstance(stored, dict)
+                or any(stored.get(k) != label.get(k) for k in ("metaId", "season", "episode"))):
+            return False
+        stored["lastSourceAt"] = int(time.time())
+        _save(cache_root, data)
+    return True
+
+
 def drop(cache_root: str, info_hash: str) -> None:
     with _lock:
         data = load(cache_root)
