@@ -185,8 +185,28 @@ def subtitles(token: str, type_: str, video_id: str, request: Request, extra: st
     # state read and the write, and a label it wrote is the owner's choice.
     learned = sum(labelsmod.learn(cache_root, ih, label)
                   for ih, label in model.learn_labels(state, type_, video_id, report))
-    filed = sum(labelsmod.add_file(cache_root, ih, label)
-                for ih, label in model.learn_files(state, type_, video_id, report))
+    file_hits = model.learn_files(state, type_, video_id, report)
+    filed = sum(labelsmod.add_file(cache_root, ih, label) for ih, label in file_hits)
+    # The same factual playback report also identifies the source most recently used for this
+    # logical video.  Existing labels learned on this request are included after their write;
+    # labels that already had a file are reconstructed from the current state below.
+    source_hits = list(model.learn_labels(state, type_, video_id, report)) + file_hits
+    played = model._played(type_, video_id, report)
+    if played is not None:
+        played_label, size, name = played
+        for e in state.get("entries", []):
+            own = e.get("label") or {}
+            if (own and model._label_matches(own, played_label["metaId"],
+                                             played_label.get("season"), played_label.get("episode"))):
+                found = model._file_of(model._matching_files(e, size, name), size)
+                if found is not None:
+                    source_hits.append((e["infoHash"].lower(), {**played_label, "file": found}))
+    seen = set()
+    for ih, label in source_hits:
+        key = (ih, label.get("metaId"), label.get("season"), label.get("episode"))
+        if key not in seen:
+            labelsmod.touch_last_source(cache_root, ih, label)
+            seen.add(key)
     metrics.record_library_subtitles(reported=True, learned=learned)
     if learned or filed:
         _announce(learned, filed)
