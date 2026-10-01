@@ -15,6 +15,28 @@ section "Prerequisites"
 for x in docker curl python3; do command -v "$x" >/dev/null && pass "$x available" || { fail "$x missing"; }; done
 [ "$FAIL" -eq 0 ] || exit 2
 
+section "Deployed image and code identity"
+git_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+git_branch="$(git branch --show-current 2>/dev/null || true)"
+[ -n "$git_sha" ] && pass "checkout $git_branch @ $git_sha" || skip "repository identity unavailable"
+for c in "$SERVER_CONTAINER" "$WEBADMIN_CONTAINER"; do
+  image_ref="$(docker inspect -f '{{.Config.Image}}' "$c" 2>/dev/null || true)"
+  image_id="$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null || true)"
+  [ -n "$image_ref" ] && { echo "$c image=$image_ref"; echo "$c imageId=$image_id"; pass "$c image identity readable"; } || fail "$c image identity unavailable"
+done
+wrapper_sig="$(docker exec "$SERVER_CONTAINER" sh -c "grep -E '_auto_apply|probe unsafe|ffmpeg-policy' /usr/local/bin/ffmpeg 2>/dev/null | head -5" 2>/dev/null || true)"
+if echo "$wrapper_sig" | grep -q '_auto_apply'; then
+  pass "deployed FFmpeg wrapper contains AUTO compatibility policy"
+else
+  fail "deployed FFmpeg wrapper is older than development AUTO policy"
+fi
+web_sig="$(docker exec "$WEBADMIN_CONTAINER" sh -c "grep -E 'classifyPlayback|FULL TRANSCODE|completed torrent' /app/static/index.html /srv/app/static/index.html /webadmin/static/index.html 2>/dev/null | head -5" 2>/dev/null || true)"
+if echo "$web_sig" | grep -q 'classifyPlayback'; then
+  pass "deployed WebAdmin contains playback correlation UI"
+else
+  fail "deployed WebAdmin is older than development playback UI"
+fi
+
 section "Containers"
 for c in "$GLUETUN_CONTAINER" "$SERVER_CONTAINER" "$WEBADMIN_CONTAINER" "$PIHOLE_CONTAINER"; do
   running "$c" && pass "$c running" || { fail "$c not running"; continue; }
