@@ -65,6 +65,53 @@ PY
  pass "active playback signal readable"
 else fail "active.json unavailable"; fi
 
+section "Playback classification invariants"
+python3 - <<'PY'
+def classify(active, sessions):
+    modes = ["direct" for _ in active]
+    if len(active) != 1 or len(sessions) != 1:
+        return modes
+    x=sessions[0]
+    v=str(x.get("targetVideo") or "").lower()
+    a=str(x.get("targetAudio") or "").lower()
+    vt=bool(v) and v!="copy"
+    at=bool(a) and a!="copy"
+    modes[0]="full-transcode" if vt and at else "video-transcode" if vt else "audio-transcode" if at else "remux"
+    return modes
+cases=[
+    ("direct",[{}],[],["direct"]),
+    ("remux",[{}],[{"targetVideo":"copy","targetAudio":"copy"}],["remux"]),
+    ("audio",[{}],[{"targetVideo":"copy","targetAudio":"aac"}],["audio-transcode"]),
+    ("video",[{}],[{"targetVideo":"h264_vaapi","targetAudio":"copy"}],["video-transcode"]),
+    ("full",[{}],[{"targetVideo":"h264_vaapi","targetAudio":"aac"}],["full-transcode"]),
+    ("ambiguous",[{},{}],[{"targetVideo":"h264_vaapi","targetAudio":"aac"}],["direct","direct"]),
+]
+bad=[]
+for name,a,s,want in cases:
+    got=classify(a,s)
+    if got!=want: bad.append((name,got,want))
+if bad:
+    print("classification failures:",bad)
+    raise SystemExit(1)
+print("DIRECT/REMUX/AUDIO/VIDEO/FULL classification invariants OK")
+PY
+[ $? -eq 0 ] && pass "playback classification invariants" || fail "playback classification invariants"
+
+section "Completed torrent state invariant"
+python3 - <<'PY'
+def state(active,paused,progress,down,up,cached):
+    if active: return "PLAYING"
+    if paused: return "PAUSED"
+    if round(progress*100)>=100: return "SEEDING" if up>0 else "CACHED"
+    if down>0: return "DOWNLOADING"
+    return "CACHED" if cached else "IDLE"
+assert state(False,False,1.0,1024,0,True)=="CACHED"
+assert state(False,False,1.0,0,1024,True)=="SEEDING"
+assert state(False,False,.5,1024,0,False)=="DOWNLOADING"
+print("100% torrent cannot be classified as DOWNLOADING")
+PY
+[ $? -eq 0 ] && pass "completed torrent state precedence" || fail "completed torrent state precedence"
+
 section "Synthetic legal playback"
 if [ "$RUN_SYNTHETIC" = 1 ]; then SERVER="$SERVER" python3 scripts/synthetic_playback.py && pass "synthetic playback" || fail "synthetic playback"; else skip "set RUN_SYNTHETIC=1 to exercise legal torrent playback"; fi
 
