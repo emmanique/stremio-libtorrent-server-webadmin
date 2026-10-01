@@ -747,6 +747,10 @@ def test_dashboard_prefers_registry_activity_for_direct_streams():
     assert "let mode='direct'" in dashboard
     assert "s.playbackCount++" in dashboard
     assert "s.playbackModes.push(mode)" in dashboard
+    assert "sourceLatest=new Map()" in dashboard
+    assert "p.kind!=='source'" in dashboard
+    assert "p.userAgent||''" in dashboard
+    assert "sourceLatest.set(key,p)" in dashboard
     assert "classifyPlayback(state.streams,transcoding,state.playback)" in dashboard
     assert "registryAvailable=!!(playback&&Array.isArray(playback.active))" in dashboard
     assert "if(registryAvailable){activity.forEach" in dashboard
