@@ -88,11 +88,6 @@ def serialize_active(handle) -> dict:
         # Which torrent is actually being played (open stream) vs merely downloading — so the card can
         # LABEL it instead of guessing from throughput. paused = seeding stopped by the seed policy.
         "active": bool(handle.is_active()),
-        # An open torrent byte-range response is playback even when FFmpeg is not involved.
-        # WebAdmin uses this explicit server-side signal to identify DIRECT STREAM sessions instead
-        # of incorrectly treating "no ffmpeg process" as "no playback".
-        "playbackMode": "direct" if handle.is_active() else None,
-        "focusedFileIdx": handle.focused_index(),
         "paused": bool(handle.is_paused()),
     }
 
