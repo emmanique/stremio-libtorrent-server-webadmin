@@ -50,7 +50,7 @@ for ep in /api/status /api/config /api/transcoding/status; do json_ok "$WEBADMIN
 
 section "Persistent configuration"
 docker exec "$SERVER_CONTAINER" test -r /config/admin-settings.json 2>/dev/null && pass "server reads admin-settings.json" || fail "server cannot read admin-settings.json"
-docker exec "$WEBADMIN_CONTAINER" test -rw /config/admin-settings.json 2>/dev/null && pass "WebAdmin reads/writes admin-settings.json" || fail "WebAdmin cannot read/write admin-settings.json"
+docker exec "$WEBADMIN_CONTAINER" sh -c 'test -r /config/admin-settings.json && test -w /config/admin-settings.json' 2>/dev/null && pass "WebAdmin reads/writes admin-settings.json" || fail "WebAdmin cannot read/write admin-settings.json"
 
 section "DNS"
 docker exec "$SERVER_CONTAINER" getent hosts github.com >/dev/null 2>&1 && pass "server DNS resolution" || fail "server DNS resolution"
@@ -59,12 +59,13 @@ docker exec "$PIHOLE_CONTAINER" sh -c 'command -v nslookup >/dev/null && nslooku
 section "FFmpeg"
 docker exec "$SERVER_CONTAINER" test -x /usr/local/libexec/stremio/ffmpeg-real 2>/dev/null && pass "ffmpeg-real present" || fail "ffmpeg-real missing"
 docker exec "$SERVER_CONTAINER" sh -c "grep -q 'ffmpeg-policy' /usr/local/bin/ffmpeg" 2>/dev/null && pass "policy wrapper installed" || fail "policy wrapper missing"
-docker exec "$SERVER_CONTAINER" /usr/local/libexec/stremio/ffmpeg-real -hide_banner -encoders 2>/dev/null | grep -q libx264 && pass "libx264 encoder" || fail "libx264 missing"
+encoders="$(docker exec "$SERVER_CONTAINER" /usr/local/libexec/stremio/ffmpeg-real -hide_banner -encoders 2>/dev/null || true)"
+grep -F 'libx264' <<<"$encoders" >/dev/null && pass "libx264 encoder" || fail "libx264 missing"
 
 section "VAAPI"
 if docker exec "$SERVER_CONTAINER" test -e "$VAAPI_DEVICE" 2>/dev/null; then
   pass "$VAAPI_DEVICE mounted"
-  for enc in h264_vaapi hevc_vaapi; do docker exec "$SERVER_CONTAINER" /usr/local/libexec/stremio/ffmpeg-real -hide_banner -encoders 2>/dev/null | grep -q "$enc" && pass "$enc encoder" || fail "$enc missing"; done
+  for enc in h264_vaapi hevc_vaapi; do grep -F "$enc" <<<"$encoders" >/dev/null && pass "$enc encoder" || fail "$enc missing"; done
   docker exec "$SERVER_CONTAINER" /usr/local/libexec/stremio/ffmpeg-real -hide_banner -loglevel error -vaapi_device "$VAAPI_DEVICE" -f lavfi -i testsrc2=size=1280x720:rate=30 -frames:v 30 -vf 'format=nv12,hwupload' -c:v h264_vaapi -f null - >/dev/null 2>&1 && pass "VAAPI H264 encode" || fail "VAAPI H264 encode"
 else skip "$VAAPI_DEVICE not mounted"; fi
 
