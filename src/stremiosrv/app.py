@@ -18,7 +18,6 @@ from stremiosrv.api import (
     netcheck,
     pins,
     playback,
-    playback_sessions,
     proxy,
     subs,
 )
@@ -167,8 +166,6 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
     app.include_router(netcheck.router)
     # Before playback: its /{info_hash}/... templates would otherwise also match /proxy/<n>.
     app.include_router(proxy.router)
-    # Register before playback: playback has broad /{info_hash}/... catch-all routes.
-    app.include_router(playback_sessions.router)
     app.include_router(playback.router)
     app.include_router(cache_api.router)
     app.include_router(hls.router)
