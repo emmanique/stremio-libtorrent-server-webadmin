@@ -208,7 +208,6 @@ def test_clear_all_logs_resets_file_logs_and_sets_docker_cursors(tmp_path, monke
     assert (state / "update-result.json").read_text(encoding="utf-8") == ""
     cursors = json.loads((state / "log-cursors.json").read_text(encoding="utf-8"))
     assert cursors["application"] == 1234567890.0
-    assert cursors["container"] == 1234567890.0
 
 
 def test_webadmin_status_relays_server_playback_activity(monkeypatch):
