@@ -203,7 +203,7 @@ def test_clear_all_logs_resets_file_logs_and_sets_docker_cursors(tmp_path, monke
 
     result = app.clear_logs(app.LogBody(source=None))
 
-    assert set(result["cleared"]) == {"application", "container", "admin", "updater"}
+    assert set(result["cleared"]) == {"application", "admin", "updater"}
     assert (state / "admin.log").read_text(encoding="utf-8") == ""
     assert (state / "update-result.json").read_text(encoding="utf-8") == ""
     cursors = json.loads((state / "log-cursors.json").read_text(encoding="utf-8"))
