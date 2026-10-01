@@ -209,13 +209,13 @@
         }),
       });
     } catch (_) {
-      // The UI remains read-only. Failure is visible through status/refresh.
+      // The UI remains read-only. Failure is visible through status telemetry.
     }
   }
 
   function boot() {
     ensurePanel();
-    enforceAuto().finally(() => loadAuto(false));
+    enforceAuto().finally(() => loadAuto());
   }
 
   if (document.readyState === 'loading') {
