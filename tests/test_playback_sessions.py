@@ -41,7 +41,7 @@ def test_ffmpeg_source_read_is_internal_not_user_playback():
 def test_hls_job_correlates_client_to_source_and_expires():
     now = [100.0]
     registry = PlaybackRegistry(clock=lambda: now[0], active_window=15, retention=120)
-    sid = registry.register_hls_job("job-1", "c" * 40, 2, "Mozilla/5.0")
+    sid = registry.register_hls_job("job-1", "c" * 40, 2, "Mozilla/5.0", "workload-1")
     registry.touch_hls("job-1", "Mozilla/5.0")
 
     row = registry.snapshot()["active"][0]
