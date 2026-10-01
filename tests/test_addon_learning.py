@@ -360,7 +360,9 @@ def test_replaying_its_own_video_gives_an_older_label_its_file(tmp_path):
     c = _client(tmp_path)
     t = sessionmod.ensure_addon_token(str(tmp_path))
     _subs(c, t, "tt0000030:3:6", f"videoSize={size}&filename={fname}")
-    assert labelsmod.load(str(tmp_path))[IH] == {**before, "file": {"name": fname, "size": size}}
+    saved = labelsmod.load(str(tmp_path))[IH]
+    assert {k: v for k, v in saved.items() if k != "lastSourceAt"} == {**before, "file": {"name": fname, "size": size}}
+    assert isinstance(saved.get("lastSourceAt"), int)
 
 
 def test_a_recorded_file_is_counted_in_the_log_by_number_only(tmp_path, caplog):
