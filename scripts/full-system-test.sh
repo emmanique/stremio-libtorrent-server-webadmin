@@ -2,7 +2,16 @@
 # Full non-destructive runtime validation for Stremio WebAdmin.
 # Run from the repository root on the Docker host after deployment.
 set -uo pipefail
-HOST="${HOST:-127.0.0.1}"; SERVER="${SERVER:-http://${HOST}:11470}"; WEBADMIN="${WEBADMIN:-http://${HOST}:8090}"; PIHOLE="${PIHOLE:-http://${HOST}:8053}"
+# Prefer an explicit HOST. Otherwise use the installation IP when available; this
+# matters when Compose publishes services on a specific LAN address rather than 127.0.0.1.
+if [ -z "${HOST:-}" ]; then
+  HOST="${IPADDRESS:-}"
+  if [ -z "$HOST" ] && [ -r /opt/stremio-webadmin/.env ]; then
+    HOST="$(sed -n 's/^IPADDRESS=//p' /opt/stremio-webadmin/.env | tail -1 | tr -d '"\r')"
+  fi
+  HOST="${HOST:-127.0.0.1}"
+fi
+SERVER="${SERVER:-http://${HOST}:11470}"; WEBADMIN="${WEBADMIN:-http://${HOST}:8090}"; PIHOLE="${PIHOLE:-http://${HOST}:8053}"
 SERVER_CONTAINER="${SERVER_CONTAINER:-stremio-libtorrent-server}"; WEBADMIN_CONTAINER="${WEBADMIN_CONTAINER:-stremio-webadmin}"; GLUETUN_CONTAINER="${GLUETUN_CONTAINER:-stremio-gluetun}"; PIHOLE_CONTAINER="${PIHOLE_CONTAINER:-stremio-pihole}"
 VAAPI_DEVICE="${VAAPI_DEVICE:-/dev/dri/renderD128}"; TIMEOUT="${TIMEOUT:-10}"; RUN_SYNTHETIC="${RUN_SYNTHETIC:-0}"
 FAIL=0; PASS=0; SKIP=0
