@@ -390,10 +390,10 @@ def status():
             )
         },
         "streams": streams,
-        "playback": health_data.get(
-            "playbackActivity",
-            {"activeWindowSeconds": 0, "sessions": [], "active": []},
-        ),
+        # None means the server did not expose playback telemetry (older core or
+        # unavailable health response). An empty active list is authoritative and must
+        # not be confused with telemetry being unavailable by the dashboard.
+        "playback": health_data.get("playbackActivity"),
         "cache": {
             "cacheUsed": cache.get("cacheUsed", 0),
             "cacheSize": cache.get("cacheSize", config["cache_size"]),
