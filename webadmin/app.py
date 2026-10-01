@@ -390,6 +390,10 @@ def status():
             )
         },
         "streams": streams,
+        "playback": health_data.get(
+            "playbackActivity",
+            {"activeWindowSeconds": 0, "sessions": [], "active": []},
+        ),
         "cache": {
             "cacheUsed": cache.get("cacheUsed", 0),
             "cacheSize": cache.get("cacheSize", config["cache_size"]),
