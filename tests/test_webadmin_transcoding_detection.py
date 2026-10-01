@@ -737,3 +737,19 @@ def test_dashboard_keeps_legacy_playback_fallback():
     assert "sessions.some(x=>x.sourceInfoHash)" in dashboard
     assert "const active=streams.filter(s=>s.active)" in dashboard
     assert "active.length===1&&sessions.length===1" in dashboard
+
+
+def test_dashboard_prefers_registry_activity_for_direct_streams():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "classifyPlayback(streams,transcoding,playback)" in dashboard
+    assert "playback&&Array.isArray(playback.active)" in dashboard
+    assert "if(p.kind==='source')s.playbackMode='direct'" in dashboard
+    assert "classifyPlayback(state.streams,transcoding,state.playback)" in dashboard
+
+
+def test_dashboard_correlates_hls_registry_job_to_transcoding_session():
+    dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
+
+    assert "p.kind==='hls'&&p.jobId" in dashboard
+    assert "sessions.find(x=>x.jobId===p.jobId)" in dashboard
