@@ -751,5 +751,6 @@ def test_dashboard_prefers_registry_activity_for_direct_streams():
 def test_dashboard_correlates_hls_registry_job_to_transcoding_session():
     dashboard = (ROOT / "webadmin" / "static" / "index.html").read_text()
 
-    assert "p.kind==='hls'&&p.jobId" in dashboard
-    assert "sessions.find(x=>x.jobId===p.jobId)" in dashboard
+    assert "p.kind==='hls'" in dashboard
+    assert "p.workloadId||p.jobId" in dashboard
+    assert "sessions.find(x=>x.jobId===workload)" in dashboard
