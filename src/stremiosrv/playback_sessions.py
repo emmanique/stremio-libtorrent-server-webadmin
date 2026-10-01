@@ -89,7 +89,7 @@ class PlaybackRegistry:
             session.endedAt = now
             session.state = "IDLE"
 
-    def register_hls_job(self, job_id: str, info_hash: str, file_idx: int, user_agent: str | None) -> str:
+    def register_hls_job(self, job_id: str, info_hash: str, file_idx: int, user_agent: str | None,\n                         workload_id: str | None = None) -> str:
         now = self._clock()
         with self._lock:
             sid = self._jobs.get(job_id)
