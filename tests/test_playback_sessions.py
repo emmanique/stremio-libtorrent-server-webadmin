@@ -78,3 +78,21 @@ def test_closed_ffmpeg_range_never_becomes_user_activity():
     assert snap["sessions"][0]["state"] == "IDLE"
     assert snap["sessions"][0]["client"] == "ffmpeg"
     assert snap["active"] == []
+
+
+def test_health_exposes_playback_activity_without_new_route():
+    from fastapi.testclient import TestClient
+
+    from stremiosrv.app import create_app
+
+    app = create_app()
+    registry = app.state.playback_registry
+    sid = registry.open_source("f" * 40, 4, "Mozilla/5.0")
+    registry.note_bytes(sid, 1024)
+
+    response = TestClient(app).get("/health")
+
+    assert response.status_code == 200
+    activity = response.json()["playbackActivity"]
+    assert activity["active"][0]["infoHash"] == "f" * 40
+    assert activity["active"][0]["fileIdx"] == 4
