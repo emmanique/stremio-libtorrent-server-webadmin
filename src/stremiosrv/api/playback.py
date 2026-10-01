@@ -96,6 +96,10 @@ def _engine(request: Request):
     return getattr(request.app.state, "engine", None)
 
 
+def _playback_registry(request: Request):
+    return getattr(request.app.state, "playback_registry", None)
+
+
 # How long a request waits for a torrent's metadata before answering 504. Read at call time, so a
 # test can shorten it.
 METADATA_TIMEOUT = 30
@@ -123,6 +127,13 @@ def _await_metadata(h) -> bool:
 def _guess(h, want: dict | None) -> int:
     """pins.guess_file_idx over this torrent's files. Needs the metadata."""
     return guess_file_idx([(p, h.file_size(i)) for i, p in enumerate(h.file_paths())], want)
+
+
+@router.get("/playback-sessions.json")
+def playback_sessions(request: Request) -> dict:
+    """Independent HTTP playback activity; does not alter the /active.json contract."""
+    registry = _playback_registry(request)
+    return registry.snapshot() if registry is not None else {"activeWindowSeconds": 0, "sessions": [], "active": []}
 
 
 @router.get("/active.json")
@@ -272,6 +283,11 @@ def serve(info_hash: str, idx: int, request: Request):
         # `.close()` on an already-exhausted generator is a documented no-op, so this costs nothing
         # on the normal-completion path.
         eng.note_stream_open(h)
+        registry = _playback_registry(request)
+        session_id = (
+            registry.open_source(info_hash, idx, request.headers.get("User-Agent"))
+            if registry is not None else None
+        )
         try:
             pos = start
             stream = wait_and_read(
@@ -286,10 +302,14 @@ def serve(info_hash: str, idx: int, request: Request):
                 for chunk in stream:
                     pos += len(chunk)
                     h.note_read_position(pos, total)
+                    if registry is not None and session_id is not None:
+                        registry.note_bytes(session_id, len(chunk))
                     yield chunk
             finally:
                 stream.close()
         finally:
+            if registry is not None and session_id is not None:
+                registry.close_source(session_id)
             eng.note_stream_close(h)
 
     return StreamingResponse(tracked_stream(), status_code=206, headers=headers)
