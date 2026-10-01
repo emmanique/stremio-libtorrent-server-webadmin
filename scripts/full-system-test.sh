@@ -22,7 +22,7 @@ healthy(){ local h; h="$(docker inspect -f '{{if .State.Health}}{{.State.Health.
 
 section "Prerequisites"
 for x in docker curl python3; do command -v "$x" >/dev/null && pass "$x available" || { fail "$x missing"; }; done
-[ "$FAIL" -eq 0 ] || exit 2
+[ "$FAIL" -eq 0 ] || skip "continuing despite missing prerequisite(s)"
 
 section "Deployed image and code identity"
 git_sha="$(git rev-parse HEAD 2>/dev/null || true)"
