@@ -82,8 +82,12 @@ class PlaybackRegistry:
                 return
             session.openRequests = 0
             session.lastActivity = now
+            # A completed HTTP range is not proof that playback stopped: browsers
+            # and native clients commonly consume media as consecutive range requests.
+            # Keep a real client recently active for the activity window; FFmpeg reads
+            # remain excluded independently by client classification.
             session.endedAt = now
-            session.state = "ENDED"
+            session.state = "IDLE"
 
     def register_hls_job(self, job_id: str, info_hash: str, file_idx: int, user_agent: str | None) -> str:
         now = self._clock()
