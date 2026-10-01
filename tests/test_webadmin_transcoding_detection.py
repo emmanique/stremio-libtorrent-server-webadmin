@@ -744,7 +744,9 @@ def test_dashboard_prefers_registry_activity_for_direct_streams():
 
     assert "classifyPlayback(streams,transcoding,playback)" in dashboard
     assert "playback&&Array.isArray(playback.active)" in dashboard
-    assert "if(p.kind==='source')s.playbackMode='direct'" in dashboard
+    assert "let mode='direct'" in dashboard
+    assert "s.playbackCount++" in dashboard
+    assert "s.playbackModes.push(mode)" in dashboard
     assert "classifyPlayback(state.streams,transcoding,state.playback)" in dashboard
     assert "registryAvailable=!!(playback&&Array.isArray(playback.active))" in dashboard
     assert "if(registryAvailable){activity.forEach" in dashboard
