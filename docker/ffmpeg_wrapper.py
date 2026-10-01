@@ -444,8 +444,21 @@ def _apply_profile(args: list[str], profile_name: str, config: dict[str, object]
             result = _insert_before_output_codec_options(result, ["-vf", f"scale={scale_width}:-2:flags=lanczos"])
         result = _insert_before_output_codec_options(result, ["-preset", "veryfast", "-crf", str(quality)])
 
+    effective_profile_name = profile_name
+    if (
+        profile["engine"] == "vaapi"
+        and str(profile["decode"]) == "vaapi"
+        and effective_decode == "software"
+    ):
+        # The requested full-GPU profile has deliberately fallen back to
+        # software decode + VAAPI encode. Report the execution profile that
+        # actually ran instead of advertising a full-GPU pipeline.
+        effective_profile_name = (
+            "vaapi-h264" if str(target) == "h264_vaapi" else "vaapi-hevc"
+        )
+
     return result, (
-        f"profile={profile_name}; video={current}->{target}; "
+        f"profile={effective_profile_name}; video={current}->{target}; "
         f"decode={effective_decode}; engine={profile['engine']}{fallback_reason}"
     )
 
