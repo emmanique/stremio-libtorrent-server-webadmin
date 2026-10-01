@@ -234,3 +234,24 @@ def test_webadmin_status_relays_server_playback_activity(monkeypatch):
     result = app.status()
 
     assert result["playback"] == playback
+
+
+
+def test_webadmin_status_preserves_unavailable_playback_telemetry(monkeypatch):
+    app = _load_module("webadmin_app_playback_unavailable_test", WEBADMIN_APP)
+
+    def fake_get_json(path, fallback):
+        if path == "/health":
+            return {"status": "healthy"}
+        if path in {"/active.json", "/cache.json", "/pins.json"}:
+            return []
+        if path == "/stats.json":
+            return {}
+        return fallback
+
+    monkeypatch.setattr(app, "get_json", fake_get_json)
+    monkeypatch.setattr(app, "docker_stats", lambda: (None, 0, 0, 0, 0, 0))
+
+    result = app.status()
+
+    assert result["playback"] is None
