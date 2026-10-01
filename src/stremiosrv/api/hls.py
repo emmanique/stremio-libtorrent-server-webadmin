@@ -170,12 +170,6 @@ def master(
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
     media = resolve_media_input(request, mediaURL)
-    registry = _playback_registry(request)
-    parsed_source = parse_stream_url(mediaURL)
-    if registry is not None and parsed_source is not None:
-        registry.register_hls_job(
-            job_id, parsed_source[0], parsed_source[1], request.headers.get("User-Agent")
-        )
     try:
         pr = probe_media(media)
     except ProbeTimeoutError as e:
@@ -209,6 +203,12 @@ def master(
         d = conv.ensure_job(job_id, media, dec)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job id") from e
+    registry = _playback_registry(request)
+    parsed_source = parse_stream_url(mediaURL)
+    if registry is not None and parsed_source is not None:
+        registry.register_hls_job(
+            job_id, parsed_source[0], parsed_source[1], request.headers.get("User-Agent")
+        )
     master_path = d / "master.m3u8"
     if not _wait_file(master_path, 25):
         raise HTTPException(status_code=504, detail="transcode did not start")
