@@ -36,6 +36,12 @@ def health(request: Request, response: Response) -> dict:
             components["cert"] = "ok" if (days is not None and days >= CERT_WARN_DAYS) else "degraded"
             if days is not None:
                 extra["certDaysLeft"] = days
+    registry = getattr(request.app.state, "playback_registry", None)
+    if registry is not None:
+        # Reuse the established health route rather than registering another
+        # top-level route beside playback's broad /{info_hash}/... templates.
+        # This is additive telemetry and does not alter /active.json.
+        extra["playbackActivity"] = registry.snapshot()
     status = "healthy" if all(v == "ok" for v in components.values()) else "degraded"
     response.status_code = 200 if status == "healthy" else 503
     return {"status": status, "components": components, "version": _VERSION, **extra}
