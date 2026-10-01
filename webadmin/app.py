@@ -692,7 +692,7 @@ def update():
 
 
 LOG_CURSOR_FILE = STATE / "log-cursors.json"
-LOG_SOURCE_IDS = {"application", "updater", "admin"}
+LOG_SOURCE_IDS = {"application", "admin"}
 
 
 def _read_log_cursors() -> dict[str, float]:
@@ -726,7 +726,6 @@ def _write_log_cursors(values: dict[str, float]) -> None:
 def logs(source: str = "application", lines: int = 300):
     available = [
         {"id": "application", "label": "Stremio container"},
-        {"id": "updater", "label": "Software updates"},
         {"id": "admin", "label": "Web Admin actions"},
     ]
     if source not in LOG_SOURCE_IDS:
@@ -784,9 +783,6 @@ def clear_logs(body: LogBody):
         elif target == "admin":
             STATE.mkdir(parents=True, exist_ok=True)
             (STATE / "admin.log").write_text("", encoding="utf-8")
-        elif target == "updater":
-            STATE.mkdir(parents=True, exist_ok=True)
-            (STATE / "update-result.json").write_text("", encoding="utf-8")
     _write_log_cursors(cursors)
     audit("logs.clear", ",".join(targets))
     return {
