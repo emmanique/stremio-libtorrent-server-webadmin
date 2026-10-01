@@ -20,18 +20,10 @@ import sys
 BUILD = pathlib.Path("/srv/stremio-server/build")
 MARKER = "stremio-webadmin: continue-watching-player-first"
 
-# Terser keeps these property names.  Match one compact ternary expression where
-# the same object tests/reads streams -> videos -> player.  Variable names are
-# intentionally unconstrained except that the expression may not cross a statement.
+# Terser keeps these property names. Find compact ternaries and then validate the
+# property order instead of pinning minified variable/operator spelling.
 PATTERN = re.compile(
-    r"(?P<obj>[A-Za-z_$][\w$]*)\?"
-    r"(?P=obj)\.metaDetailsStreams"
-    r"(?P<body1>[^;{}]{0,350}?)"
-    r"(?P=obj)\.metaDetailsVideos"
-    r"(?P<body2>[^;{}]{0,350}?)"
-    r"(?P=obj)\.player"
-    r"(?P<body3>[^;{}]{0,180}?)"
-    r":null"
+    r"(?P<obj>[A-Za-z_$][\\w$]*)\\?(?P<body>[^;{}]{1,900}?):null"
 )
 
 
@@ -39,18 +31,25 @@ def patch_text(text: str) -> tuple[str, int]:
     if MARKER in text:
         return text, 0
 
-    matches = list(PATTERN.finditer(text))
+    matches = []
+    for candidate in PATTERN.finditer(text):
+        body = candidate.group("body")
+        a = body.find(".metaDetailsStreams")
+        b = body.find(".metaDetailsVideos")
+        c = body.find(".player")
+        if a >= 0 and b > a and c > b:
+            matches.append(candidate)
     if len(matches) != 1:
         return text, -len(matches)
 
     m = matches[0]
     old = m.group(0)
-    # Preserve the minifier's operators/spacing and only exchange the property
-    # identities at the first and third precedence positions.
+    # Swap every streams/player property inside this one precedence expression:
+    # typeof checks and returned values both need to move together.
     token = "__CW_PLAYER_TOKEN__"
-    new = old.replace(".metaDetailsStreams", "." + token, 1)
-    new = new.replace(".player", ".metaDetailsStreams", 1)
-    new = new.replace("." + token, ".player", 1)
+    new = old.replace(".metaDetailsStreams", "." + token)
+    new = new.replace(".player", ".metaDetailsStreams")
+    new = new.replace("." + token, ".player")
     # A JS comment is safe between statements and makes the patch idempotent.
     replacement = new
     return text[:m.start()] + replacement + text[m.end():] + "\n/* " + MARKER + " */\n", 1
