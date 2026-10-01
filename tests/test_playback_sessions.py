@@ -19,8 +19,12 @@ def test_source_client_lifecycle_and_bytes():
     assert row["state"] == "PLAYING"
 
     registry.close_source(sid)
+    closed = registry.snapshot()
+    assert len(closed["active"]) == 1
+    assert closed["sessions"][0]["state"] == "IDLE"
+
+    now[0] += 16
     assert registry.snapshot()["active"] == []
-    assert registry.snapshot()["sessions"][0]["state"] == "ENDED"
 
 
 def test_ffmpeg_source_read_is_internal_not_user_playback():
@@ -60,4 +64,17 @@ def test_registry_prunes_old_sessions():
     now[0] += 11
     snap = registry.snapshot()
     assert snap["sessions"] == []
+    assert snap["active"] == []
+
+
+def test_closed_ffmpeg_range_never_becomes_user_activity():
+    now = [100.0]
+    registry = PlaybackRegistry(clock=lambda: now[0], active_window=15, retention=120)
+    sid = registry.open_source("e" * 40, 1, "Lavf/61.1.100")
+    registry.note_bytes(sid, 2048)
+    registry.close_source(sid)
+
+    snap = registry.snapshot()
+    assert snap["sessions"][0]["state"] == "IDLE"
+    assert snap["sessions"][0]["client"] == "ffmpeg"
     assert snap["active"] == []
