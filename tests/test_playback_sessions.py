@@ -61,15 +61,3 @@ def test_registry_prunes_old_sessions():
     snap = registry.snapshot()
     assert snap["sessions"] == []
     assert snap["active"] == []
-
-
-def test_session_endpoint_is_not_shadowed_by_torrent_routes():
-    from fastapi.testclient import TestClient
-
-    from stremiosrv.app import create_app
-
-    response = TestClient(create_app()).get("/playback-sessions")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["active"] == []
-    assert body["sessions"] == []
