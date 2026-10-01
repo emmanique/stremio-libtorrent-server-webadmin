@@ -199,6 +199,30 @@ def _engine(video_target: str | None, audio_target: str | None = None) -> str:
     return "none"
 
 
+_SOURCE_STREAM_RE = re.compile(
+    r"https?://[^\s'\"]+/([0-9a-fA-F]{40})/(\d+)(?:\?|(?:/|$))"
+)
+
+
+def _source_stream_from_argv(argv: str) -> tuple[str | None, int | None]:
+    """Extract the torrent source identity from an FFmpeg input URL.
+
+    The transcoder reads the server's /<infoHash>/<fileIdx> byte-range endpoint.
+    Keeping this parser in telemetry only avoids changing the stable server API.
+    """
+    try:
+        tokens = shlex.split(argv)
+    except ValueError:
+        tokens = argv.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token != "-i":
+            continue
+        match = _SOURCE_STREAM_RE.search(tokens[index + 1])
+        if match:
+            return match.group(1).lower(), int(match.group(2))
+    return None, None
+
+
 def _source_codecs_from_log(text: str) -> tuple[str | None, str | None]:
     video = None
     audio = None
@@ -228,8 +252,11 @@ def _session_from_command(container, cache_root: str, command: str) -> dict[str,
     log_video, log_audio = _source_codecs_from_log(log_text)
     source_video = decision.get("sourceVideo") if decision else log_video
     source_audio = decision.get("sourceAudio") if decision else log_audio
+    source_info_hash, source_file_idx = _source_stream_from_argv(argv)
     return {
         "jobId": job_id,
+        "sourceInfoHash": source_info_hash,
+        "sourceFileIdx": source_file_idx,
         **process,
         "action": base._action(video_target, audio_target),
         "engine": _engine(video_target, audio_target),
