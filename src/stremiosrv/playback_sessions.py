@@ -28,6 +28,7 @@ class PlaybackSession:
     openRequests: int = 0
     state: str = "STARTING"
     jobId: str | None = None
+    workloadId: str | None = None
     endedAt: float | None = None
 
 
@@ -89,19 +90,23 @@ class PlaybackRegistry:
             session.endedAt = now
             session.state = "IDLE"
 
-    def register_hls_job(self, job_id: str, info_hash: str, file_idx: int, user_agent: str | None,\n                         workload_id: str | None = None) -> str:
+    def register_hls_job(self, job_id: str, info_hash: str, file_idx: int, user_agent: str | None,
+                         workload_id: str | None = None) -> str:
         now = self._clock()
         with self._lock:
             sid = self._jobs.get(job_id)
             if sid and sid in self._sessions:
                 session = self._sessions[sid]
                 session.lastActivity = now
+                if workload_id:
+                    session.workloadId = workload_id
                 return sid
             sid = uuid.uuid4().hex
             self._sessions[sid] = PlaybackSession(
                 sessionId=sid, kind="hls", infoHash=info_hash.lower(), fileIdx=file_idx,
                 client=self.classify_client(user_agent), userAgent=user_agent or "",
                 startedAt=now, lastActivity=now, state="BUFFERING", jobId=job_id,
+                workloadId=workload_id,
             )
             self._jobs[job_id] = sid
             self._prune(now)
