@@ -60,6 +60,12 @@ def test_active_json_marks_open_stream_as_direct_without_ffmpeg() -> None:
         def active(self):
             return [ActiveH()]
 
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
     app = create_app(settings=Settings(), engine=ActiveEng())
     resp = TestClient(app).get("/active.json")
     assert resp.status_code == 200
