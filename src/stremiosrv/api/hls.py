@@ -207,7 +207,11 @@ def master(
     parsed_source = parse_stream_url(mediaURL)
     if registry is not None and parsed_source is not None:
         registry.register_hls_job(
-            job_id, parsed_source[0], parsed_source[1], request.headers.get("User-Agent")
+            job_id,
+            parsed_source[0],
+            parsed_source[1],
+            request.headers.get("User-Agent"),
+            conv.workload_for_job(job_id),
         )
     master_path = d / "master.m3u8"
     if not _wait_file(master_path, 25):
