@@ -1,58 +1,45 @@
 #!/usr/bin/env python3
-"""Patch the bundled Stremio Web Continue Watching poster click.
+"""Patch bundled Stremio Web so Continue Watching poster clicks resume safely.
 
-The upstream ContinueWatchingItem renders LibItem/MetaItem.  MetaItem prefers
-metaDetailsStreams over deepLinks.player for the poster href, while its explicit
-Play action already uses deepLinks.player.  For Continue Watching we want the
-poster to use the Core-provided player deep link so Core can restore both the
-selected stream and libraryItem.state.timeOffset.
+Upstream ContinueWatchingItem -> LibItem already creates an onPlayClick handler only
+when Core provides deepLinks.player. That handler carries the exact StreamBucket
+source and Core resume position. MetaItem's normal poster click instead prefers the
+details/streams deep link.
 
-This operates on the bundled, minified web build at image start.  It is deliberately
-fail-closed: exactly one known MetaItem precedence expression must be found, otherwise
-no JavaScript is changed.
+Do not rewrite MetaItem globally. Inject one small capture listener that only acts
+on posters carrying MetaItem's poster-change-cursor marker (set by
+ContinueWatchingItem). If that item has a play overlay, the poster click is routed
+through the existing React play handler. If Core has no player deep link there is no
+play overlay, so normal source selection remains the fallback.
 """
 from __future__ import annotations
 
 import pathlib
-import re
 import sys
 
 BUILD = pathlib.Path("/srv/stremio-server/build")
-MARKER = "stremio-webadmin: continue-watching-player-first"
+MARKER = "stremio-webadmin: continue-watching-player-click"
 
-# Terser keeps these property names. Find compact ternaries and then validate the
-# property order instead of pinning minified variable/operator spelling.
-PATTERN = re.compile(
-    r"(?P<obj>[A-Za-z_$][\\w$]*)\\?(?P<body>[^;{}]{1,900}?):null"
-)
+INJECTION = r"""
+;/* stremio-webadmin: continue-watching-player-click */
+(()=>{if(window.__stremioWebadminContinueWatchingPlayerClick)return;
+window.__stremioWebadminContinueWatchingPlayerClick=true;
+document.addEventListener("click",e=>{
+ const t=e.target instanceof Element?e.target:null;if(!t)return;
+ if(t.closest('[class*="play-icon-layer"]'))return;
+ const p=t.closest('[class*="poster-change-cursor"]');if(!p)return;
+ const b=p.closest("a,button");if(!b)return;
+ const play=b.querySelector('[class*="play-icon-layer"]');if(!play)return;
+ e.preventDefault();e.stopImmediatePropagation();
+ play.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));
+},true);})();
+"""
 
 
 def patch_text(text: str) -> tuple[str, int]:
     if MARKER in text:
         return text, 0
-
-    matches = []
-    for candidate in PATTERN.finditer(text):
-        body = candidate.group("body")
-        a = body.find(".metaDetailsStreams")
-        b = body.find(".metaDetailsVideos")
-        c = body.find(".player")
-        if a >= 0 and b > a and c > b:
-            matches.append(candidate)
-    if len(matches) != 1:
-        return text, -len(matches)
-
-    m = matches[0]
-    old = m.group(0)
-    # Swap every streams/player property inside this one precedence expression:
-    # typeof checks and returned values both need to move together.
-    token = "__CW_PLAYER_TOKEN__"
-    new = old.replace(".metaDetailsStreams", "." + token)
-    new = new.replace(".player", ".metaDetailsStreams")
-    new = new.replace("." + token, ".player")
-    # A JS comment is safe between statements and makes the patch idempotent.
-    replacement = new
-    return text[:m.start()] + replacement + text[m.end():] + "\n/* " + MARKER + " */\n", 1
+    return text + INJECTION, 1
 
 
 def main() -> int:
@@ -66,11 +53,9 @@ def main() -> int:
     patched, status = patch_text(text)
     if status == 1:
         path.write_text(patched, encoding="utf-8")
-        print(f"[web-player] continue-watching poster -> Core player deep link ({path})")
-    elif status == 0:
-        print("[web-player] continue-watching patch already applied")
+        print(f"[web-player] Continue Watching poster uses Core player when available ({path})")
     else:
-        print(f"[web-player] continue-watching patch skipped: candidate count={-status}")
+        print("[web-player] continue-watching patch already applied")
     return 0
 
 
