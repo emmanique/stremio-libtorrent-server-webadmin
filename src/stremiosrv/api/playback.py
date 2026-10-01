@@ -129,13 +129,6 @@ def _guess(h, want: dict | None) -> int:
     return guess_file_idx([(p, h.file_size(i)) for i, p in enumerate(h.file_paths())], want)
 
 
-@router.get("/playback-sessions.json")
-def playback_sessions(request: Request) -> dict:
-    """Independent HTTP playback activity; does not alter the /active.json contract."""
-    registry = _playback_registry(request)
-    return registry.snapshot() if registry is not None else {"activeWindowSeconds": 0, "sessions": [], "active": []}
-
-
 @router.get("/active.json")
 def active_streams(request: Request) -> list:
     """Torrents currently loaded — the owner's own activity on their own box, for the appliance
