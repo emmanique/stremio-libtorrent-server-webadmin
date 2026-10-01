@@ -148,6 +148,19 @@ def _process_commands(container) -> list[str]:
         output_format = base._option(tokens, "-f")
         if subtitle_codec == "webvtt" and output_format == "webvtt":
             continue
+        # Hardware capability probes/self-tests use synthetic lavfi inputs and are not
+        # playback sessions. Excluding them prevents the dashboard from briefly reporting
+        # a false active transcode while profiles are being verified.
+        input_values = [
+            tokens[index + 1]
+            for index, token in enumerate(tokens[:-1])
+            if token == "-i"
+        ]
+        if "lavfi" in tokens and any(
+            value.startswith(("testsrc", "testsrc2", "color=", "smptebars"))
+            for value in input_values
+        ):
+            continue
         commands.append(command)
     return commands
 
