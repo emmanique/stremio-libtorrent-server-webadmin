@@ -209,3 +209,28 @@ def test_clear_all_logs_resets_file_logs_and_sets_docker_cursors(tmp_path, monke
     cursors = json.loads((state / "log-cursors.json").read_text(encoding="utf-8"))
     assert cursors["application"] == 1234567890.0
     assert cursors["container"] == 1234567890.0
+
+
+def test_webadmin_status_relays_server_playback_activity(monkeypatch):
+    app = _load_module("webadmin_app_playback_status_test", WEBADMIN_APP)
+    playback = {
+        "activeWindowSeconds": 15,
+        "sessions": [{"sessionId": "s1", "infoHash": "a" * 40}],
+        "active": [{"sessionId": "s1", "infoHash": "a" * 40, "kind": "source"}],
+    }
+
+    def fake_get_json(path, fallback):
+        if path == "/health":
+            return {"status": "healthy", "playbackActivity": playback}
+        if path in {"/active.json", "/cache.json", "/pins.json"}:
+            return []
+        if path == "/stats.json":
+            return {}
+        return fallback
+
+    monkeypatch.setattr(app, "get_json", fake_get_json)
+    monkeypatch.setattr(app, "docker_stats", lambda: (None, 0, 0, 0, 0, 0))
+
+    result = app.status()
+
+    assert result["playback"] == playback
