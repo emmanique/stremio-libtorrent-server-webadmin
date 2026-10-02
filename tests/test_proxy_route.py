@@ -112,6 +112,16 @@ class _Upstream(BaseHTTPRequestHandler):
                        {"Content-Encoding": "gzip"})
         elif p.startswith("/badurl.m3u8"):
             self._send(200, b"#EXTM3U\nhttp://[::1/x\n", "application/vnd.apple.mpegurl")
+        elif p.startswith("/short.m3u8"):
+            # Declare more bytes than are actually sent, then close the connection.
+            body = b"#EXTM3U\nseg.ts\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.apple.mpegurl")
+            self.send_header("Content-Length", str(len(body) + 100))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+            self.close_connection = True
         elif p.startswith("/hop"):
             n = int(p.removeprefix("/hop"))
             self._send(302, extra={"Location": f"/hop{n + 1}" if n < 9 else "/blob"})
@@ -330,6 +340,12 @@ def test_a_playlist_that_decompresses_past_the_limit_is_refused(upstream, monkey
 
 def test_a_playlist_that_does_not_decompress_is_refused(upstream):
     assert _client().get(f"/proxy/{_opts(upstream, TOKEN)}/bad.m3u8").status_code == 502
+
+
+def test_a_playlist_cut_short_of_declared_content_length_is_refused(upstream):
+    r = _client().get(f"/proxy/{_opts(upstream, TOKEN)}/short.m3u8")
+    assert r.status_code == 502
+    assert r.content == b"truncated playlist"
 
 
 def test_a_playlist_whose_rewrite_passes_the_limit_is_refused(upstream, monkeypatch):
