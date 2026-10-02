@@ -1,4 +1,4 @@
-# Stremio Server WebAdmin 3.0.4
+# Stremio Server WebAdmin 3.0.5
 
 [![Fast CI](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/ci-fast.yml)
 [![Full regression](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml/badge.svg?branch=main)](https://github.com/emmanique/stremio-libtorrent-server-webadmin/actions/workflows/regression.yml)
@@ -9,10 +9,30 @@ Current versions:
 
 | Component | Version |
 | --- | --- |
-| Fork / Platform | 3.0.4 |
-| WebAdmin | 3.0.4 |
-| VPN Gateway image | `3.0.4` coordinated release tag |
-| Upstream Server/Core | 1.6.20 |
+| Fork / Platform | 3.0.5 |
+| WebAdmin | 3.0.5 |
+| VPN Gateway image | `3.0.5` coordinated release tag |
+| Upstream Server/Core | 1.6.22 |
+
+## 3.0.5 — Upstream 1.6.22 integration and proxy hardening
+
+3.0.5 selectively integrates the functional fixes from upstream Server/Core 1.6.22
+without replacing the fork's custom WebAdmin, VPN, Library, proxy or transcoding
+behavior. The existing UPnP configuration now reaches libtorrent; disabling it also
+disables NAT-PMP port mapping while leaving DHT/LSD unchanged.
+
+Playlist handling now rejects responses that terminate before their declared
+Content-Length. The protection applies to both the normal proxy playlist path and
+the guarded external `mediaURL` reader used by HLS/transcoding.
+
+The DEV release candidate passed VPN/DIRECT switching, proxy/HLS, real
+HDR-to-SDR VAAPI playback, My Library Pin/Unpin, external `mediaURL` probe/HLS,
+and configuration SAVE + RESTART/persistence validation.
+
+Upgrade/recreate operations on GPU hosts must continue to use `start.sh` so the
+appropriate VAAPI/NVIDIA Compose overlay is retained.
+
+See `docs/releases/v3.0.5.md` for the complete scope, validation and upgrade notes.
 
 ## 3.0.4 — Playback continuity and runtime observability
 
@@ -483,7 +503,7 @@ The production deployment package intentionally contains only the supported runt
 
 # Release information
 
-Release notes: docs/releases/v3.0.3.md
+Release notes: docs/releases/v3.0.5.md
 
 License: MIT. See LICENSE.
 

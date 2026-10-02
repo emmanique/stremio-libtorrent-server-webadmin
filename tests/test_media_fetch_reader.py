@@ -104,6 +104,47 @@ def test_reader_turns_a_mid_read_failure_into_502(monkeypatch):
     assert closed == {"resp": True, "conn": True}
 
 
+def test_reader_refuses_playlist_cut_short_of_declared_content_length(monkeypatch):
+    from stremiosrv.proxy import upstream
+    media_fetch.reset()
+
+    class FakeResp:
+        status = 200
+
+        def __init__(self):
+            # http.client.HTTPResponse leaves the number of unread bytes here.
+            self.length = 100
+
+        def getheader(self, n, d=None):
+            return "application/vnd.apple.mpegurl" if n.lower() == "content-type" else d
+
+        def read(self, *a):
+            body = b"#EXTM3U\nseg.ts\n"
+            # Simulate http.client after receiving fewer bytes than Content-Length.
+            self.length -= len(body)
+            return body
+
+        def close(self):
+            pass
+
+    class FakeConn:
+        def close(self):
+            pass
+
+    def fake_open(url, method, headers, home, deadline):
+        return FakeResp(), FakeConn()
+
+    monkeypatch.setattr(upstream, "open_url", fake_open)
+
+    t = media_fetch.register("https://cdn.example/hls/index.m3u8", False)
+    r = _client().get(
+        f"{media_fetch.READER_PREFIX}/{media_fetch._SECRET}/{t}"
+    )
+
+    assert r.status_code == 502
+    assert r.content == b"truncated playlist"
+
+
 def test_reader_applies_ticket_headers_to_the_outbound_fetch(monkeypatch):
     # C1: a ticket carrying request headers (a proxied mediaURL's `h=` options) must have them
     # reach the upstream fetch -- otherwise an authenticated CDN/debrid stream would 401/403.
