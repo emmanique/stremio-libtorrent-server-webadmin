@@ -185,6 +185,11 @@ def _origin(u: urllib.parse.SplitResult) -> tuple[str, str, int]:
     return (u.scheme, (u.hostname or "").lower(), u.port or (443 if u.scheme == "https" else 80))
 
 
+def truncated(resp: http.client.HTTPResponse) -> bool:
+    """True when an upstream declared Content-Length but closed before delivering it."""
+    return bool(getattr(resp, "length", None))
+
+
 def open_url(url: str, method: str, headers: dict[str, str], home_client: bool,
              deadline: Deadline) -> tuple[http.client.HTTPResponse, http.client.HTTPConnection]:
     """(response, connection) for `url` after any redirects; the caller closes both, and stops
